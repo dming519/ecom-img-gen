@@ -335,31 +335,6 @@ h1 {
   text-decoration: none;
 }
 
-.access-banner {
-  display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto auto;
-  gap: 16px;
-  align-items: center;
-  margin-top: 14px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: rgba(255, 255, 255, 0.74);
-  box-shadow: var(--shadow-soft);
-}
-
-.access-banner h2 {
-  font-size: 0.96rem;
-  letter-spacing: 0;
-}
-
-.access-banner p {
-  margin-top: 2px;
-  color: var(--text-sub);
-  font-size: 0.86rem;
-}
-
-.login-actions,
 .action-stack {
   display: flex;
   align-items: center;
@@ -1536,7 +1511,6 @@ footer {
   }
 
   .studio-topbar,
-  .access-banner,
   .studio-grid {
     grid-template-columns: 1fr;
   }
@@ -1586,7 +1560,6 @@ footer {
   }
 
   .studio-topbar,
-  .access-banner,
   .input-rail,
   .canvas-panel,
   .prompt-rail,
@@ -1598,7 +1571,6 @@ footer {
     align-items: flex-start;
   }
 
-  .login-actions,
   .access-form,
   .action-stack,
   .stage-actions {
