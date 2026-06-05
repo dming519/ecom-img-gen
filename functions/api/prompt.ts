@@ -26,7 +26,12 @@ interface ChatCompletionPayload {
     message?: {
       content?: string;
     };
+    delta?: {
+      content?: string;
+    };
   }>;
+  content?: string;
+  text?: string;
   error?: {
     message?: string;
   };
@@ -56,9 +61,62 @@ function parsePromptJson(text: string) {
   };
 }
 
+function summarizeRawText(text: string) {
+  return text.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
 function normalizeCount(value: number | undefined) {
   if (!Number.isFinite(value)) return 5;
   return Math.min(10, Math.max(1, Math.round(value ?? 5)));
+}
+
+function extractContentFromSse(text: string) {
+  let content = "";
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) continue;
+
+    const data = trimmed.slice("data:".length).trim();
+    if (!data || data === "[DONE]") continue;
+
+    try {
+      const payload = JSON.parse(data) as ChatCompletionPayload;
+      content +=
+        payload.choices?.[0]?.delta?.content ??
+        payload.choices?.[0]?.message?.content ??
+        payload.content ??
+        payload.text ??
+        "";
+    } catch {
+      content += data;
+    }
+  }
+  return content.trim();
+}
+
+function extractChatContent(text: string) {
+  try {
+    const payload = JSON.parse(text) as ChatCompletionPayload;
+    return (
+      payload.choices?.[0]?.message?.content?.trim() ??
+      payload.choices?.[0]?.delta?.content?.trim() ??
+      payload.content?.trim() ??
+      payload.text?.trim() ??
+      ""
+    );
+  } catch {
+    const sseContent = extractContentFromSse(text);
+    if (sseContent) return sseContent;
+
+    const raw = text.trim();
+    if (raw.includes('"prompts"') || raw.includes("```json")) {
+      return raw;
+    }
+
+    throw new Error(
+      `Prompt 上游返回了无法解析的响应：${summarizeRawText(text) || "空响应"}`,
+    );
+  }
 }
 
 function createUpstreamRequest(
@@ -197,7 +255,7 @@ export async function onRequestPost(context: FunctionContext) {
     );
   }
   if (!upstream.ok) {
-    let detail = text.slice(0, 300);
+    let detail = summarizeRawText(text);
     try {
       const payload = JSON.parse(text) as ChatCompletionPayload;
       if (payload.error?.message) detail = payload.error.message;
@@ -209,10 +267,14 @@ export async function onRequestPost(context: FunctionContext) {
 
   let content = "";
   try {
-    const payload = JSON.parse(text) as ChatCompletionPayload;
-    content = payload.choices?.[0]?.message?.content?.trim() ?? "";
-  } catch {
-    return json({ error: "Prompt 上游返回了无法解析的 JSON" }, { status: 502 });
+    content = extractChatContent(text);
+  } catch (error) {
+    return json(
+      {
+        error: error instanceof Error ? error.message : String(error),
+      },
+      { status: 502 },
+    );
   }
 
   if (!content) {
@@ -241,7 +303,8 @@ export async function onRequestPost(context: FunctionContext) {
       {
         error:
           "Prompt 上游未按 JSON 格式返回：" +
-          (error instanceof Error ? error.message : String(error)),
+          (error instanceof Error ? error.message : String(error)) +
+          `；原始内容：${summarizeRawText(content) || "空响应"}`,
       },
       { status: 502 },
     );
