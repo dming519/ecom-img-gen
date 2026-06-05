@@ -23,7 +23,8 @@
 - [ ] Output directory 是 `out`
 - [ ] 已绑定 `TASKS_KV`
 - [ ] 已配置 OAuth Secrets
-- [ ] 已配置 OpenAI-compatible 接口 Secrets
+- [x] 已配置 Prompt 生成接口 Secrets
+- [x] 已配置 Worker 图像生成接口 Secrets
 - [x] 已配置 `IMAGE_WORKER_URL`
 - [x] 已配置 `IMAGE_WORKER_TOKEN`
 - [x] Pages 和 Worker 的 `IMAGE_WORKER_TOKEN` 完全一致
@@ -52,6 +53,5 @@
 
 - [ ] 配置 GitHub OAuth secrets
 - [ ] 配置 Google OAuth secrets
-- [ ] 配置 OpenAI-compatible 接口 secrets
 - [ ] DNS 添加 `eig -> ecom-img-gen.pages.dev` CNAME
 - [ ] 等待 `eig.easyauto.app` 证书和域名验证完成
