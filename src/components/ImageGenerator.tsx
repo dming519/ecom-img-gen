@@ -308,11 +308,11 @@ export default function ImageGenerator() {
     setError(null);
     if (!validateProduct()) return;
     if (!prompts.length) {
-      setError("请先生成商品详情图 Prompt。");
+      setError("请先生成详情图文案。");
       return;
     }
     if (prompts.some((item) => !item.prompt.trim())) {
-      setError("Prompt 不能为空，请检查后再生成。");
+      setError("详情图文案不能为空，请检查后再生成。");
       return;
     }
 
@@ -540,7 +540,7 @@ export default function ImageGenerator() {
         </div>
 
         <div className="run-status" aria-label="当前任务状态">
-          <span>{prompts.length ? `${prompts.length} 条 Prompt` : "Prompt 未生成"}</span>
+          <span>{prompts.length ? `${prompts.length} 条文案` : "文案未生成"}</span>
           <span>{productImages.length ? `${productImages.length} 张参考图` : "未上传参考图"}</span>
           <span>{imageBusy ? "生成中" : "待命"}</span>
         </div>
@@ -594,7 +594,7 @@ export default function ImageGenerator() {
                   </>
                 ) : (
                   <>
-                    <p className="auth-popover-note">登录后才能生成 Prompt 和商品详情图。</p>
+                    <p className="auth-popover-note">登录后才能生成详情图文案和商品详情图。</p>
                     <form className="access-form access-form-compact" onSubmit={handleAccessLogin}>
                       <label className="sr-only" htmlFor="access-code-popover-username">用户名</label>
                       <input
@@ -770,7 +770,7 @@ export default function ImageGenerator() {
               disabled={controlsDisabled}
               onClick={handleGeneratePrompts}
             >
-              {promptBusy ? "正在生成 Prompt..." : "生成 Prompt"}
+              {promptBusy ? "正在生成文案..." : "生成详情图文案"}
             </button>
             <button
               type="button"
@@ -811,13 +811,13 @@ export default function ImageGenerator() {
           <div className="panel-heading">
             <div>
               <span className="section-kicker">Queue</span>
-              <h2>Prompt 队列</h2>
+              <h2>详情图文案</h2>
             </div>
             <span className="panel-count">{prompts.length} 条</span>
           </div>
           <div className="prompt-editor-list">
             {prompts.length === 0 ? (
-              <div className="empty">生成 Prompt 后可在这里逐条修改。</div>
+              <div className="empty">生成详情图文案后可在这里逐条修改。</div>
             ) : (
               prompts.map((item, index) => (
                 <div

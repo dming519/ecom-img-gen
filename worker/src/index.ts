@@ -184,7 +184,7 @@ export class ImageTasksDO {
           status: "failed",
           createdAt: now,
           updatedAt: now,
-          error: "缺少商品详情图 Prompt",
+          error: "缺少详情图文案",
         }),
         { expirationTtl: 3600 },
       );
@@ -222,7 +222,7 @@ export class ImageTasksDO {
       let usedCompactPrompt = false;
       if (!upstream.ok) {
         warnings.push(
-          `原 Prompt 纯生成失败: HTTP ${upstream.status}: ${getUpstreamErrorDetail(text)}`,
+          `原详情图文案纯生成失败: HTTP ${upstream.status}: ${getUpstreamErrorDetail(text)}`,
         );
         usedCompactPrompt = true;
         upstream = await createImageRequest(
@@ -244,7 +244,7 @@ export class ImageTasksDO {
             status: "failed",
             createdAt: now,
             updatedAt: Date.now(),
-            error: [...warnings, `简化 Prompt 重试失败: HTTP ${upstream.status}: ${detail}`].join("；"),
+            error: [...warnings, `简化详情图文案重试失败: HTTP ${upstream.status}: ${detail}`].join("；"),
           }),
           { expirationTtl: 3600 },
         );
