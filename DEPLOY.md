@@ -24,7 +24,11 @@ npx wrangler kv namespace create TASKS_KV
 - 根目录 `wrangler.toml`
 - `worker/wrangler.toml`
 
-当前文件里沿用了参考项目的 KV ID，正式部署前应替换为 EcomImgGen 自己的 KV ID。
+当前项目使用的 KV：
+
+```text
+TASKS_KV = 6a7ee075ab4b4cbe9cfd80ed9fb0b40a
+```
 
 ## 2. 部署 Worker
 
@@ -38,7 +42,7 @@ Worker 名称：`ecom-img-gen-worker`
 部署后记录 Worker URL，例如：
 
 ```text
-https://ecom-img-gen-worker.<account>.workers.dev
+https://ecom-img-gen-worker.ldmcsy2020.workers.dev
 ```
 
 配置 Worker Secrets：
@@ -106,6 +110,27 @@ IMAGE_WORKER_TOKEN
 
 `PROMPT_MODEL` 可选。建议使用支持视觉输入的模型；不配置时使用 `OPENAI_MODEL`。
 
+当前已自动配置：
+
+```text
+AUTH_SECRET
+IMAGE_WORKER_URL
+IMAGE_WORKER_TOKEN
+```
+
+仍需配置：
+
+```text
+AUTH_GITHUB_ID
+AUTH_GITHUB_SECRET
+AUTH_GOOGLE_ID
+AUTH_GOOGLE_SECRET
+OPENAI_API_KEY
+OPENAI_BASE_URL
+OPENAI_MODEL
+PROMPT_MODEL
+```
+
 ## 5. 发布 Pages
 
 ```bash
@@ -123,3 +148,15 @@ eig.easyauto.app
 
 确保 `easyauto.app` 的 DNS 托管在 Cloudflare，绑定后等待证书签发完成。
 
+当前状态：
+
+- Pages custom domain 已添加：`eig.easyauto.app`
+- Cloudflare 返回验证错误：`CNAME record not set`
+- 需要在 DNS 中添加：
+
+```text
+Type: CNAME
+Name: eig
+Target: ecom-img-gen.pages.dev
+Proxy: enabled
+```
