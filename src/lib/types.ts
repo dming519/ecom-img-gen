@@ -83,9 +83,7 @@ export interface HistoryItem {
   timestamp: number;
 }
 
-export interface GeneratePromptOptions extends ProductInput {
-  template: string;
-}
+export type GeneratePromptOptions = ProductInput;
 
 export interface GeneratePromptResult {
   prompts: Array<{

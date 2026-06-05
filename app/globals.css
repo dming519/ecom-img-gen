@@ -517,7 +517,9 @@ button:disabled {
 }
 
 .selling-points {
-  min-height: 168px;
+  height: 220px;
+  min-height: 220px;
+  max-height: 340px;
   margin-bottom: 14px;
 }
 
@@ -974,7 +976,7 @@ button:disabled {
 }
 
 .prompt-editor textarea {
-  min-height: 132px;
+  min-height: 180px;
   margin: 0;
   resize: vertical;
   font-size: 0.84rem;
@@ -1474,9 +1476,9 @@ footer {
 }
 
 .prompt-editor textarea {
-  height: 132px;
-  min-height: 132px;
-  max-height: 240px;
+  height: 180px;
+  min-height: 180px;
+  max-height: 360px;
   padding: 8px 9px;
   background: var(--bg-soft);
   font-size: 0.8rem;

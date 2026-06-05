@@ -3,7 +3,6 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { createImageTask, generateDetailPrompts, pollImageTask } from "@/lib/api";
 import { dbAdd, dbAll, dbClear, dbDel, dbPut } from "@/lib/db";
-import { DETAIL_PROMPT_TEMPLATE } from "@/lib/promptTemplate";
 import type {
   AuthSession,
   DetailPromptItem,
@@ -284,10 +283,7 @@ export default function ImageGenerator() {
     if (!validateProduct()) return;
     setPromptBusy(true);
     try {
-      const result = await generateDetailPrompts({
-        ...currentProduct,
-        template: DETAIL_PROMPT_TEMPLATE,
-      });
+      const result = await generateDetailPrompts(currentProduct);
       const next = result.prompts.map((item, index) =>
         createPromptItem(index, item.title, item.prompt),
       );
