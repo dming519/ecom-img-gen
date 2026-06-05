@@ -2,6 +2,7 @@ export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 
 export type AuthProvider = "github" | "google" | "access";
 export type UserRole = "super_admin" | "admin" | "user";
+
 export interface AuthUser {
   provider: AuthProvider;
   id: string;
@@ -34,6 +35,17 @@ export interface AdminUserRow {
   createdAt: number;
   updatedAt: number;
   lastLoginAt: number;
+}
+
+export interface AccessCodeRow {
+  id: string;
+  label: string;
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+  createdBy: string | null;
+  lastUsedAt?: number;
+  useCount: number;
 }
 
 export interface ProductInput {

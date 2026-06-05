@@ -107,6 +107,7 @@ export default function ImageGenerator() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const authPopoverRef = useRef<HTMLDivElement | null>(null);
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
@@ -117,6 +118,10 @@ export default function ImageGenerator() {
     imageCount,
     productImages,
   };
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [session?.user?.image]);
 
   useEffect(() => {
     try {
@@ -363,7 +368,7 @@ export default function ImageGenerator() {
           size,
           inputImages: productImages,
         });
-        if (Number.isFinite(task.remainingCredits)) {
+        if (!task.unlimitedCredits && Number.isFinite(task.remainingCredits)) {
           setSession((previous) =>
             previous?.user
               ? {
@@ -541,11 +546,19 @@ export default function ImageGenerator() {
       : session?.user?.provider === "google"
         ? "Google"
         : "访问码";
-  const creditLabel = authenticated
-    ? `${session?.user?.remainingCredits ?? 0} 次可用`
-    : "未登录";
   const isAdmin =
     session?.user?.role === "admin" || session?.user?.role === "super_admin";
+  const isSuperAdmin = session?.user?.role === "super_admin";
+  const creditLabel = authenticated
+    ? isSuperAdmin
+      ? "不限次数"
+      : `${session?.user?.remainingCredits ?? 0} 次可用`
+    : "未登录";
+  const showUserImage = !!(
+    authenticated &&
+    session?.user?.image &&
+    !avatarFailed
+  );
 
   return (
     <main className="app-shell">
@@ -578,9 +591,14 @@ export default function ImageGenerator() {
               aria-haspopup="dialog"
               title={authenticated ? session?.user?.name || "账户" : "登录"}
             >
-              {authenticated && session?.user?.image ? (
+              {showUserImage && session?.user?.image ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={session.user.image} alt={session.user.name} className="auth-toggle-avatar" />
+                <img
+                  src={session.user.image}
+                  alt={session.user.name}
+                  className="auth-toggle-avatar"
+                  onError={() => setAvatarFailed(true)}
+                />
               ) : (
                 <Icon name="user" className="auth-toggle-icon" />
               )}
@@ -593,9 +611,14 @@ export default function ImageGenerator() {
                 ) : authenticated && session?.user ? (
                   <>
                     <div className="auth-popover-user">
-                      {session.user.image ? (
+                      {showUserImage && session.user.image ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={session.user.image} alt={session.user.name} className="auth-avatar" />
+                        <img
+                          src={session.user.image}
+                          alt={session.user.name}
+                          className="auth-avatar"
+                          onError={() => setAvatarFailed(true)}
+                        />
                       ) : (
                         <div className="auth-avatar auth-avatar-fallback">
                           {session.user.name.slice(0, 1).toUpperCase()}
@@ -610,7 +633,7 @@ export default function ImageGenerator() {
                       </div>
                     </div>
                     <div className="account-stats">
-                      <span>剩余 {session.user.remainingCredits ?? 0}</span>
+                      <span>{isSuperAdmin ? "不限次数" : `剩余 ${session.user.remainingCredits ?? 0}`}</span>
                       <span>已用 {session.user.usedCredits ?? 0}</span>
                     </div>
                     {isAdmin && (
@@ -687,120 +710,118 @@ export default function ImageGenerator() {
       <div className="studio-grid">
         <aside className="studio-panel input-rail">
           <div className="panel-heading">
-            <div>
-              <span className="section-kicker">Input</span>
-              <h2>用户输入</h2>
-            </div>
-            <span className="panel-count">{imageCount} 张</span>
+            <h2>产品资料</h2>
           </div>
 
-          <div className="form-grid">
-            <div>
-              <label htmlFor="product-name">产品名称</label>
-              <input
-                id="product-name"
-                type="text"
-                value={productName}
-                disabled={controlsDisabled}
-                placeholder="例如：玻尿酸修护精华"
-                onChange={(event) => setProductName(event.target.value)}
-              />
+          <div className="input-rail-body">
+            <div className="form-grid">
+              <div>
+                <label htmlFor="product-name">产品名称</label>
+                <input
+                  id="product-name"
+                  type="text"
+                  value={productName}
+                  disabled={controlsDisabled}
+                  placeholder="例如：玻尿酸修护精华"
+                  onChange={(event) => setProductName(event.target.value)}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="image-count">张数</label>
+                <input
+                  id="image-count"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={imageCount}
+                  disabled={controlsDisabled}
+                  onChange={(event) =>
+                    setImageCount(Math.min(10, Math.max(1, Number(event.target.value) || 1)))
+                  }
+                />
+              </div>
             </div>
 
-            <div>
-              <label htmlFor="image-count">张数</label>
-              <input
-                id="image-count"
-                type="number"
-                min={1}
-                max={10}
-                value={imageCount}
-                disabled={controlsDisabled}
-                onChange={(event) =>
-                  setImageCount(Math.min(10, Math.max(1, Number(event.target.value) || 1)))
-                }
-              />
+            <label htmlFor="selling-points">核心卖点/功效</label>
+            <textarea
+              id="selling-points"
+              className="selling-points"
+              value={sellingPoints}
+              disabled={controlsDisabled}
+              placeholder="输入核心卖点、适用人群、规格信息、购买理由"
+              onChange={(event) => setSellingPoints(event.target.value)}
+            />
+
+            <div className="field-row-head">
+              <label htmlFor="product-images">产品参考图</label>
+              {productImages.length > 0 && (
+                <button
+                  type="button"
+                  className="inline-action"
+                  disabled={controlsDisabled}
+                  onClick={() => setProductImages([])}
+                >
+                  清空
+                </button>
+              )}
             </div>
-          </div>
-
-          <label htmlFor="selling-points">卖点和功效</label>
-          <textarea
-            id="selling-points"
-            className="selling-points"
-            value={sellingPoints}
-            disabled={controlsDisabled}
-            placeholder="输入核心卖点、适用人群、规格信息、购买理由"
-            onChange={(event) => setSellingPoints(event.target.value)}
-          />
-
-          <div className="field-row-head">
-            <label htmlFor="product-images">产品参考图</label>
-            {productImages.length > 0 && (
+            <div className="product-media">
+              {productImages.map((src, index) => (
+                <div className="prompt-thumb" key={`${src.slice(0, 32)}-${index}`}>
+                  <button
+                    type="button"
+                    className="prompt-thumb-preview"
+                    onClick={() => setLightboxSrc(src)}
+                    aria-label={`查看产品图 ${index + 1}`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={src} alt={`产品图 ${index + 1}`} />
+                  </button>
+                  <button
+                    type="button"
+                    className="prompt-thumb-del"
+                    disabled={controlsDisabled}
+                    onClick={() => setProductImages((previous) => previous.filter((_, i) => i !== index))}
+                    aria-label={`移除产品图 ${index + 1}`}
+                  >
+                    <Icon name="close" />
+                  </button>
+                </div>
+              ))}
               <button
                 type="button"
-                className="inline-action"
+                className="prompt-upload-tile"
                 disabled={controlsDisabled}
-                onClick={() => setProductImages([])}
+                onClick={() => fileInputRef.current?.click()}
               >
-                清空
+                <Icon name="upload" />
+                <span>上传</span>
               </button>
-            )}
-          </div>
-          <div className="product-media">
-            {productImages.map((src, index) => (
-              <div className="prompt-thumb" key={`${src.slice(0, 32)}-${index}`}>
-                <button
-                  type="button"
-                  className="prompt-thumb-preview"
-                  onClick={() => setLightboxSrc(src)}
-                  aria-label={`查看产品图 ${index + 1}`}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={src} alt={`产品图 ${index + 1}`} />
-                </button>
-                <button
-                  type="button"
-                  className="prompt-thumb-del"
-                  disabled={controlsDisabled}
-                  onClick={() => setProductImages((previous) => previous.filter((_, i) => i !== index))}
-                  aria-label={`移除产品图 ${index + 1}`}
-                >
-                  <Icon name="close" />
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              className="prompt-upload-tile"
-              disabled={controlsDisabled}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Icon name="upload" />
-              <span>上传</span>
-            </button>
-          </div>
-          <input
-            id="product-images"
-            name="productImages"
-            ref={fileInputRef}
-            type="file"
-            aria-label="上传产品参考图"
-            accept="image/*"
-            multiple
-            hidden
-            onChange={(event) => handleSelectFiles(event.target.files)}
-          />
+            </div>
+            <input
+              id="product-images"
+              name="productImages"
+              ref={fileInputRef}
+              type="file"
+              aria-label="上传产品参考图"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(event) => handleSelectFiles(event.target.files)}
+            />
 
-          <div className="settings-row">
-            <div>
-              <label>图片尺寸</label>
-              <div className="param-controls" aria-label="图片尺寸">
-                <SizeSelector value={size} onChange={setSize} />
+            <div className="settings-row">
+              <div>
+                <label>图片尺寸</label>
+                <div className="param-controls" aria-label="图片尺寸">
+                  <SizeSelector value={size} onChange={setSize} />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="action-stack">
+          <div className="input-action-bar">
             <button
               type="button"
               className="btn-primary"
@@ -809,17 +830,13 @@ export default function ImageGenerator() {
             >
               {promptBusy ? "正在生成文案..." : "生成详情图文案"}
             </button>
+            {error && <div className="alert">{error}</div>}
           </div>
-
-          {error && <div className="alert">{error}</div>}
         </aside>
 
         <aside className="studio-panel prompt-rail">
           <div className="panel-heading">
-            <div>
-              <span className="section-kicker">Copy</span>
-              <h2>详情图文案</h2>
-            </div>
+            <h2>详情图文案</h2>
             <span className="panel-count">{prompts.length} 条</span>
           </div>
           <div className="prompt-editor-list">
@@ -869,10 +886,7 @@ export default function ImageGenerator() {
 
         <section className="studio-panel canvas-panel">
           <div className="panel-heading">
-            <div>
-              <span className="section-kicker">Output</span>
-              <h2>详情图展示</h2>
-            </div>
+            <h2>详情图预览</h2>
             <span className="panel-count">{size.replace("x", "×")}</span>
           </div>
           <Stage

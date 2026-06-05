@@ -3,6 +3,7 @@ import {
   DEFAULT_PROMPT_PATH,
 } from "./config";
 import type {
+  AccessCodeRow,
   AdminUserRow,
   CreateImageTaskOptions,
   GeneratePromptOptions,
@@ -20,6 +21,7 @@ interface CreateTaskPayload extends ErrorPayload {
   status?: string;
   remainingCredits?: number;
   usedCredits?: number;
+  unlimitedCredits?: boolean;
 }
 
 const RETRYABLE_FETCH_ERRORS = ["Failed to fetch", "NetworkError"];
@@ -77,7 +79,12 @@ export async function generateDetailPrompts(
 
 export async function createImageTask(
   options: CreateImageTaskOptions,
-): Promise<{ taskId: string; remainingCredits?: number; usedCredits?: number }> {
+): Promise<{
+  taskId: string;
+  remainingCredits?: number;
+  usedCredits?: number;
+  unlimitedCredits?: boolean;
+}> {
   const response = await fetchWithRetry(DEFAULT_GENERATE_PATH, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -99,6 +106,7 @@ export async function createImageTask(
     taskId: payload.taskId,
     remainingCredits: payload.remainingCredits,
     usedCredits: payload.usedCredits,
+    unlimitedCredits: payload.unlimitedCredits,
   };
 }
 
@@ -152,4 +160,48 @@ export async function updateAdminUser(
     throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
   }
   return JSON.parse(text) as { user: AdminUserRow };
+}
+
+export async function fetchAccessCodes(): Promise<{ accessCodes: AccessCodeRow[] }> {
+  const response = await fetchWithRetry("/api/admin/access-codes", {
+    method: "GET",
+    cache: "no-store",
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
+  }
+  return JSON.parse(text) as { accessCodes: AccessCodeRow[] };
+}
+
+export async function createAccessCode(
+  label: string,
+  code?: string,
+): Promise<{ accessCode: AccessCodeRow; code: string }> {
+  const response = await fetchWithRetry("/api/admin/access-codes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "create", label, code }),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
+  }
+  return JSON.parse(text) as { accessCode: AccessCodeRow; code: string };
+}
+
+export async function updateAccessCode(
+  id: string,
+  patch: { active?: boolean; label?: string },
+): Promise<{ accessCode: AccessCodeRow }> {
+  const response = await fetchWithRetry("/api/admin/access-codes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "update", id, ...patch }),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
+  }
+  return JSON.parse(text) as { accessCode: AccessCodeRow };
 }

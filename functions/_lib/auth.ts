@@ -1,4 +1,5 @@
 import type { AuthProvider, AuthUser } from "../../src/lib/types";
+import { resolveAccessCodeUser } from "./accessCodes";
 import { ensureManagedUser, hydrateManagedUser, type UserKvNamespace } from "./users";
 
 const SESSION_COOKIE = "ecomimggen_session";
@@ -162,14 +163,6 @@ function getGoogleClient(env: AuthEnv) {
   return { clientId, clientSecret };
 }
 
-function getAccessLoginCode(env: AuthEnv) {
-  const code = env.ACCESS_LOGIN_CODE?.trim();
-  if (!code) {
-    throw new Error("服务端未配置 ACCESS_LOGIN_CODE");
-  }
-  return code;
-}
-
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
     ...init,
@@ -298,7 +291,6 @@ export async function handleLoginRequest(
 export async function handleAccessLoginRequest(request: Request, env: AuthEnv) {
   try {
     const secret = getAuthSecret(env);
-    const expectedCode = getAccessLoginCode(env);
     const contentType = request.headers.get("Content-Type") || "";
     let code = "";
 
@@ -310,17 +302,11 @@ export async function handleAccessLoginRequest(request: Request, env: AuthEnv) {
       code = String(formData?.get("code") || "").trim();
     }
 
-    if (!code || code !== expectedCode) {
+    const user = code ? await resolveAccessCodeUser(env, code) : null;
+    if (!user) {
       return json({ error: "访问码不正确" }, { status: 401 });
     }
 
-    const user: AuthUser = {
-      provider: "access",
-      id: "access-code",
-      name: "访问码用户",
-      email: null,
-      image: null,
-    };
     const managed = await ensureManagedUser(env, user);
     const sessionPayload: SessionPayload = {
       user: managed.user,
