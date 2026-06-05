@@ -1,9 +1,10 @@
 import { requireSession } from "../../_lib/auth";
+import type { UserKvNamespace } from "../../_lib/users";
 
 interface FunctionContext {
   request: Request;
   env: {
-    TASKS_KV?: {
+    TASKS_KV?: UserKvNamespace & {
       get: (key: string) => Promise<string | null>;
     };
     AUTH_SECRET?: string;

@@ -5,14 +5,35 @@ export type AuthProvider = "github" | "google" | "access";
 export interface AuthUser {
   provider: AuthProvider;
   id: string;
+  userKey?: string;
   name: string;
   email: string | null;
   image: string | null;
+  role?: "admin" | "user";
+  remainingCredits?: number;
+  usedCredits?: number;
+  grantedCredits?: number;
 }
 
 export interface AuthSession {
   authenticated: boolean;
   user: AuthUser | null;
+}
+
+export interface AdminUserRow {
+  userKey: string;
+  provider: AuthProvider;
+  providerId: string;
+  name: string;
+  email: string | null;
+  image: string | null;
+  role: "admin" | "user";
+  remainingCredits: number;
+  usedCredits: number;
+  grantedCredits: number;
+  createdAt: number;
+  updatedAt: number;
+  lastLoginAt: number;
 }
 
 export interface ProductInput {

@@ -1,4 +1,5 @@
 import type { AuthProvider, AuthUser } from "../../src/lib/types";
+import { ensureManagedUser, hydrateManagedUser, type UserKvNamespace } from "./users";
 
 const SESSION_COOKIE = "ecomimggen_session";
 const STATE_COOKIE = "ecomimggen_oauth_state";
@@ -12,6 +13,7 @@ interface AuthEnv {
   AUTH_GOOGLE_ID?: string;
   AUTH_GOOGLE_SECRET?: string;
   ACCESS_LOGIN_CODE?: string;
+  TASKS_KV?: UserKvNamespace;
 }
 
 interface SessionPayload {
@@ -228,7 +230,11 @@ export async function getSessionFromRequest(request: Request, env: AuthEnv) {
     return null;
   }
 
-  return session;
+  const managed = await hydrateManagedUser(env, session.user);
+  return {
+    ...session,
+    user: managed.user,
+  };
 }
 
 export async function requireSession(request: Request, env: AuthEnv) {
@@ -315,8 +321,9 @@ export async function handleAccessLoginRequest(request: Request, env: AuthEnv) {
       email: null,
       image: null,
     };
+    const managed = await ensureManagedUser(env, user);
     const sessionPayload: SessionPayload = {
-      user,
+      user: managed.user,
       expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000,
     };
     const sessionCookie = createCookie(
@@ -328,7 +335,7 @@ export async function handleAccessLoginRequest(request: Request, env: AuthEnv) {
     return json(
       {
         authenticated: true,
-        user,
+        user: managed.user,
       },
       {
         headers: {
@@ -479,9 +486,10 @@ export async function handleCallbackRequest(
       provider === "github"
         ? await resolveGithubUser(env, request, code)
         : await resolveGoogleUser(env, request, code);
+    const managed = await ensureManagedUser(env, user);
 
     const sessionPayload: SessionPayload = {
-      user,
+      user: managed.user,
       expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000,
     };
 

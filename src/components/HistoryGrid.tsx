@@ -48,21 +48,32 @@ export default function HistoryGrid({
               const cover = item.prompts.find((prompt) => prompt.base64);
               const done = item.prompts.filter((prompt) => prompt.base64).length;
               const time = new Date(item.timestamp).toLocaleString("zh-CN", TIME_FMT);
+              const promptPreview = item.prompts
+                .slice(0, 2)
+                .map((prompt) => prompt.title)
+                .join(" / ");
               return (
                 <div
                   key={item.id ?? `history-${idx}-${item.timestamp}`}
-                  className={"tile" + (idx === activeIdx ? " is-active" : "")}
+                  className={"history-card" + (idx === activeIdx ? " is-active" : "")}
                   onClick={() => onSelect(idx)}
                 >
-                  <span className="tile-no">{done}/{item.prompts.length}</span>
-                  {cover?.base64 ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={"data:image/png;base64," + cover.base64} alt={item.product.name} />
-                  ) : (
-                    <div className="tile-empty">{item.product.name.slice(0, 8)}</div>
-                  )}
-                  <div className="tile-foot">
-                    <span title={item.product.name}>{time}</span>
+                  <div className="history-cover">
+                    <span className="tile-no">{done}/{item.prompts.length}</span>
+                    {cover?.base64 ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={"data:image/png;base64," + cover.base64} alt={item.product.name} />
+                    ) : (
+                      <div className="tile-empty">{item.product.name.slice(0, 8)}</div>
+                    )}
+                  </div>
+                  <div className="history-card-body">
+                    <strong title={item.product.name}>{item.product.name}</strong>
+                    <p title={item.product.sellingPoints}>{item.product.sellingPoints}</p>
+                    <small title={promptPreview}>{promptPreview || "暂无详情图文案"}</small>
+                  </div>
+                  <div className="history-card-foot">
+                    <span>{time}</span>
                     <button
                       className="tile-del"
                       type="button"
