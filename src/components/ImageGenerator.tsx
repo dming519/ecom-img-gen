@@ -12,6 +12,7 @@ import type {
   ProductInput,
 } from "@/lib/types";
 import HistoryGrid from "./HistoryGrid";
+import Icon from "./Icon";
 import Lightbox from "./Lightbox";
 import SizeSelector from "./SizeSelector";
 import Stage from "./Stage";
@@ -19,6 +20,13 @@ import Stage from "./Stage";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const DRAFT_KEY = "ecomimggen_draft";
 type WakeLockSentinelLike = { release: () => Promise<void> };
+const STATUS_LABEL: Record<DetailPromptItem["status"], string> = {
+  draft: "待生成",
+  queued: "排队中",
+  running: "生成中",
+  succeeded: "已完成",
+  failed: "失败",
+};
 
 interface DraftState {
   productName: string;
@@ -522,7 +530,9 @@ export default function ImageGenerator() {
     <main className="app-shell">
       <header className="studio-topbar">
         <div className="brand-block">
-          <span className="brand-mark" aria-hidden="true">E</span>
+          <span className="brand-mark" aria-hidden="true">
+            <Icon name="brand" />
+          </span>
           <div>
             <h1>EcomImgGen</h1>
             <p className="tagline">电商详情图生成工作台</p>
@@ -550,7 +560,7 @@ export default function ImageGenerator() {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={session.user.image} alt={session.user.name} className="auth-toggle-avatar" />
               ) : (
-                <span className="auth-toggle-icon" aria-hidden="true">U</span>
+                <Icon name="user" className="auth-toggle-icon" />
               )}
             </button>
 
@@ -586,7 +596,22 @@ export default function ImageGenerator() {
                   <>
                     <p className="auth-popover-note">登录后才能生成 Prompt 和商品详情图。</p>
                     <form className="access-form access-form-compact" onSubmit={handleAccessLogin}>
+                      <label className="sr-only" htmlFor="access-code-popover-username">用户名</label>
                       <input
+                        id="access-code-popover-username"
+                        className="sr-only"
+                        name="username"
+                        type="text"
+                        aria-label="用户名"
+                        value="access-code"
+                        readOnly
+                        tabIndex={-1}
+                        autoComplete="username"
+                      />
+                      <label className="sr-only" htmlFor="access-code-popover">访问码</label>
+                      <input
+                        id="access-code-popover"
+                        name="accessCode"
                         type="password"
                         value={accessCode}
                         onChange={(event) => setAccessCode(event.target.value)}
@@ -617,7 +642,7 @@ export default function ImageGenerator() {
             aria-label={dark ? "切换到浅色模式" : "切换到深色模式"}
             title={dark ? "切换到浅色模式" : "切换到深色模式"}
           >
-            {dark ? "L" : "D"}
+            <Icon name={dark ? "sun" : "moon"} />
           </button>
         </div>
       </header>
@@ -629,7 +654,22 @@ export default function ImageGenerator() {
             <p>当前可预览工作台结构；Prompt 生成和图片生成需要登录后调用服务端配置。</p>
           </div>
           <form className="access-form" onSubmit={handleAccessLogin}>
+            <label className="sr-only" htmlFor="access-code-banner-username">用户名</label>
             <input
+              id="access-code-banner-username"
+              className="sr-only"
+              name="username"
+              type="text"
+              aria-label="用户名"
+              value="access-code"
+              readOnly
+              tabIndex={-1}
+              autoComplete="username"
+            />
+            <label className="sr-only" htmlFor="access-code-banner">访问码</label>
+            <input
+              id="access-code-banner"
+              name="accessCode"
               type="password"
               value={accessCode}
               onChange={(event) => setAccessCode(event.target.value)}
@@ -698,7 +738,7 @@ export default function ImageGenerator() {
           />
 
           <div className="field-row-head">
-            <label>产品参考图</label>
+            <label htmlFor="product-images">产品参考图</label>
             {productImages.length > 0 && (
               <button
                 type="button"
@@ -729,7 +769,7 @@ export default function ImageGenerator() {
                   onClick={() => setProductImages((previous) => previous.filter((_, i) => i !== index))}
                   aria-label={`移除产品图 ${index + 1}`}
                 >
-                  x
+                  <Icon name="close" />
                 </button>
               </div>
             ))}
@@ -739,12 +779,16 @@ export default function ImageGenerator() {
               disabled={controlsDisabled}
               onClick={() => fileInputRef.current?.click()}
             >
-              上传
+              <Icon name="upload" />
+              <span>上传</span>
             </button>
           </div>
           <input
+            id="product-images"
+            name="productImages"
             ref={fileInputRef}
             type="file"
+            aria-label="上传产品参考图"
             accept="image/*"
             multiple
             hidden
@@ -831,7 +875,7 @@ export default function ImageGenerator() {
                       disabled={imageBusy}
                       onChange={(event) => handleTitleChange(item.id, event.target.value)}
                     />
-                    <span className={`status-pill is-${item.status}`}>{item.status}</span>
+                    <span className={`status-pill is-${item.status}`}>{STATUS_LABEL[item.status]}</span>
                   </div>
                   <textarea
                     value={item.prompt}

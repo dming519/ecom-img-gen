@@ -1,6 +1,7 @@
 "use client";
 
 import type { HistoryItem } from "@/lib/types";
+import Icon from "./Icon";
 
 interface HistoryGridProps {
   history: HistoryItem[];
@@ -32,7 +33,8 @@ export default function HistoryGrid({
           <span className="history-badge">{history.length} 组</span>
         </h2>
         <button className="btn-danger" type="button" onClick={onClearAll}>
-          清空
+          <Icon name="trash" />
+          <span>清空</span>
         </button>
       </div>
       <div className="history-grid">
@@ -70,7 +72,7 @@ export default function HistoryGrid({
                         onDelete(idx);
                       }}
                     >
-                      x
+                      <Icon name="trash" />
                     </button>
                   </div>
                 </div>
