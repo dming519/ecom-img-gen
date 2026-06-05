@@ -471,89 +471,102 @@ export default function ImageGenerator() {
   const controlsDisabled = sessionLoading || promptBusy || imageBusy || !authenticated;
 
   return (
-    <main className="wrap">
-      <div className="top-actions">
-        <div className="auth-popover-wrap" ref={authPopoverRef}>
-          <button
-            type="button"
-            className={`auth-toggle${authPopoverOpen ? " is-open" : ""}${authenticated ? " is-authenticated" : " is-guest"}`}
-            onClick={() => setAuthPopoverOpen((value) => !value)}
-            aria-label={authLabel}
-            aria-expanded={authPopoverOpen}
-            aria-haspopup="dialog"
-            title={authenticated ? session?.user?.name || "账户" : "登录"}
-          >
-            {authenticated && session?.user?.image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={session.user.image} alt={session.user.name} className="auth-toggle-avatar" />
-            ) : (
-              <span className="auth-toggle-icon" aria-hidden="true">U</span>
-            )}
-          </button>
-
-          {authPopoverOpen && (
-            <div className="auth-popover" role="dialog" aria-label="登录菜单">
-              {sessionLoading ? (
-                <p className="auth-popover-note">正在检查登录状态...</p>
-              ) : authenticated && session?.user ? (
-                <>
-                  <div className="auth-popover-user">
-                    {session.user.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={session.user.image} alt={session.user.name} className="auth-avatar" />
-                    ) : (
-                      <div className="auth-avatar auth-avatar-fallback">
-                        {session.user.name.slice(0, 1).toUpperCase()}
-                      </div>
-                    )}
-                    <div>
-                      <p className="auth-name">{session.user.name}</p>
-                      <p className="auth-meta">
-                        {session.user.provider === "github" ? "GitHub" : "Google"}
-                        {session.user.email ? ` · ${session.user.email}` : ""}
-                      </p>
-                    </div>
-                  </div>
-                  <p className="auth-popover-note">已登录，可使用内置生成配置。</p>
-                  <a className="btn-ghost auth-link auth-popover-link" href="/api/auth/logout?redirectTo=/">
-                    退出登录
-                  </a>
-                </>
-              ) : (
-                <>
-                  <p className="auth-popover-note">登录后才能生成 Prompt 和商品详情图。</p>
-                  <a className="btn-ghost auth-link auth-popover-link" href="/api/auth/login/github?redirectTo=/">
-                    使用 GitHub 登录
-                  </a>
-                  <a className="btn-ghost auth-link auth-popover-link" href="/api/auth/login/google?redirectTo=/">
-                    使用 Google 登录
-                  </a>
-                </>
-              )}
-            </div>
-          )}
+    <main className="app-shell">
+      <header className="studio-topbar">
+        <div className="brand-block">
+          <span className="brand-mark" aria-hidden="true">E</span>
+          <div>
+            <h1>EcomImgGen</h1>
+            <p className="tagline">电商详情图生成工作台</p>
+          </div>
         </div>
 
-        <button
-          type="button"
-          className="theme-toggle"
-          onClick={toggleTheme}
-          aria-label={dark ? "切换到浅色模式" : "切换到深色模式"}
-          title={dark ? "切换到浅色模式" : "切换到深色模式"}
-        >
-          {dark ? "L" : "D"}
-        </button>
-      </div>
+        <div className="run-status" aria-label="当前任务状态">
+          <span>{prompts.length ? `${prompts.length} 条 Prompt` : "Prompt 未生成"}</span>
+          <span>{productImages.length ? `${productImages.length} 张参考图` : "未上传参考图"}</span>
+          <span>{imageBusy ? "生成中" : "待命"}</span>
+        </div>
 
-      <header className="app-header">
-        <h1>EcomImgGen</h1>
-        <p className="tagline">商品详情图 Prompt 生成与逐张出图工作台</p>
+        <div className="top-actions">
+          <div className="auth-popover-wrap" ref={authPopoverRef}>
+            <button
+              type="button"
+              className={`auth-toggle${authPopoverOpen ? " is-open" : ""}${authenticated ? " is-authenticated" : " is-guest"}`}
+              onClick={() => setAuthPopoverOpen((value) => !value)}
+              aria-label={authLabel}
+              aria-expanded={authPopoverOpen}
+              aria-haspopup="dialog"
+              title={authenticated ? session?.user?.name || "账户" : "登录"}
+            >
+              {authenticated && session?.user?.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={session.user.image} alt={session.user.name} className="auth-toggle-avatar" />
+              ) : (
+                <span className="auth-toggle-icon" aria-hidden="true">U</span>
+              )}
+            </button>
+
+            {authPopoverOpen && (
+              <div className="auth-popover" role="dialog" aria-label="登录菜单">
+                {sessionLoading ? (
+                  <p className="auth-popover-note">正在检查登录状态...</p>
+                ) : authenticated && session?.user ? (
+                  <>
+                    <div className="auth-popover-user">
+                      {session.user.image ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={session.user.image} alt={session.user.name} className="auth-avatar" />
+                      ) : (
+                        <div className="auth-avatar auth-avatar-fallback">
+                          {session.user.name.slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
+                      <div>
+                        <p className="auth-name">{session.user.name}</p>
+                        <p className="auth-meta">
+                          {session.user.provider === "github" ? "GitHub" : "Google"}
+                          {session.user.email ? ` · ${session.user.email}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="auth-popover-note">已登录，可使用内置生成配置。</p>
+                    <a className="btn-ghost auth-link auth-popover-link" href="/api/auth/logout?redirectTo=/">
+                      退出登录
+                    </a>
+                  </>
+                ) : (
+                  <>
+                    <p className="auth-popover-note">登录后才能生成 Prompt 和商品详情图。</p>
+                    <a className="btn-ghost auth-link auth-popover-link" href="/api/auth/login/github?redirectTo=/">
+                      使用 GitHub 登录
+                    </a>
+                    <a className="btn-ghost auth-link auth-popover-link" href="/api/auth/login/google?redirectTo=/">
+                      使用 Google 登录
+                    </a>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={toggleTheme}
+            aria-label={dark ? "切换到浅色模式" : "切换到深色模式"}
+            title={dark ? "切换到浅色模式" : "切换到深色模式"}
+          >
+            {dark ? "L" : "D"}
+          </button>
+        </div>
       </header>
 
       {!sessionLoading && !authenticated && (
-        <section className="panel login-gate">
-          <h2>登录后使用</h2>
-          <p>生成 Prompt 和商品详情图会调用服务端内置配置，需要先登录。</p>
+        <section className="access-banner">
+          <div>
+            <h2>登录后使用生成能力</h2>
+            <p>当前可预览工作台结构；Prompt 生成和图片生成需要登录后调用服务端配置。</p>
+          </div>
           <div className="login-actions">
             <a className="btn-primary auth-link" href="/api/auth/login/github?redirectTo=/">GitHub 登录</a>
             <a className="btn-ghost auth-link" href="/api/auth/login/google?redirectTo=/">Google 登录</a>
@@ -561,8 +574,16 @@ export default function ImageGenerator() {
         </section>
       )}
 
-      <div className="workbench">
-        <section className="panel control-panel">
+      <div className="studio-grid">
+        <aside className="studio-panel input-rail">
+          <div className="panel-heading">
+            <div>
+              <span className="section-kicker">Input</span>
+              <h2>产品资料</h2>
+            </div>
+            <span className="panel-count">{imageCount} 张</span>
+          </div>
+
           <div className="form-grid">
             <div>
               <label htmlFor="product-name">产品名称</label>
@@ -577,7 +598,7 @@ export default function ImageGenerator() {
             </div>
 
             <div>
-              <label htmlFor="image-count">图片张数</label>
+              <label htmlFor="image-count">张数</label>
               <input
                 id="image-count"
                 type="number"
@@ -592,17 +613,29 @@ export default function ImageGenerator() {
             </div>
           </div>
 
-          <label htmlFor="selling-points">产品核心卖点和功效</label>
+          <label htmlFor="selling-points">卖点和功效</label>
           <textarea
             id="selling-points"
             className="selling-points"
             value={sellingPoints}
             disabled={controlsDisabled}
-            placeholder="输入主要卖点、功效、适用人群、规格信息、希望强调的购买理由..."
+            placeholder="主要卖点、功效、适用人群、规格信息、购买理由..."
             onChange={(event) => setSellingPoints(event.target.value)}
           />
 
-          <label>产品图片</label>
+          <div className="field-row-head">
+            <label>产品参考图</label>
+            {productImages.length > 0 && (
+              <button
+                type="button"
+                className="inline-action"
+                disabled={controlsDisabled}
+                onClick={() => setProductImages([])}
+              >
+                清空
+              </button>
+            )}
+          </div>
           <div className="product-media">
             {productImages.map((src, index) => (
               <div className="prompt-thumb" key={`${src.slice(0, 32)}-${index}`}>
@@ -634,16 +667,6 @@ export default function ImageGenerator() {
             >
               上传
             </button>
-            {productImages.length > 0 && (
-              <button
-                type="button"
-                className="prompt-clear-media"
-                disabled={controlsDisabled}
-                onClick={() => setProductImages([])}
-              >
-                清空
-              </button>
-            )}
           </div>
           <input
             ref={fileInputRef}
@@ -654,98 +677,110 @@ export default function ImageGenerator() {
             onChange={(event) => handleSelectFiles(event.target.files)}
           />
 
-          <label>图片尺寸</label>
-          <div className="param-controls" aria-label="图片尺寸">
-            <SizeSelector value={size} onChange={setSize} />
+          <div className="settings-row">
+            <div>
+              <label>图片尺寸</label>
+              <div className="param-controls" aria-label="图片尺寸">
+                <SizeSelector value={size} onChange={setSize} />
+              </div>
+            </div>
           </div>
 
-          <div className="action-row">
+          <div className="action-stack">
             <button
               type="button"
               className="btn-primary"
               disabled={controlsDisabled}
               onClick={handleGeneratePrompts}
             >
-              {promptBusy ? "正在生成 Prompt..." : "生成商品详情图 Prompt"}
+              {promptBusy ? "正在生成 Prompt..." : "生成 Prompt"}
             </button>
             <button
               type="button"
-              className="btn-primary btn-secondary"
+              className="btn-secondary"
               disabled={controlsDisabled || !prompts.length}
               onClick={handleGenerateImages}
             >
-              {imageBusy ? "正在逐张生成..." : "生成商品详情图"}
+              {imageBusy ? "正在逐张生成..." : "生成详情图"}
             </button>
           </div>
 
           {error && <div className="alert">{error}</div>}
+        </aside>
+
+        <section className="studio-panel canvas-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="section-kicker">Canvas</span>
+              <h2>详情图预览</h2>
+            </div>
+            <span className="panel-count">{size.replace("x", "×")}</span>
+          </div>
+          <Stage
+            prompts={prompts}
+            activeIndex={activePromptIdx}
+            busy={imageBusy}
+            error={null}
+            onSelect={setActivePromptIdx}
+            onDownload={handleDownload}
+            onZoom={(index) => {
+              const item = prompts[index];
+              if (item?.base64) setLightboxSrc("data:image/png;base64," + item.base64);
+            }}
+          />
         </section>
 
-        <div className="results-column">
-          <section className="panel preview-panel">
-            <Stage
-              prompts={prompts}
-              activeIndex={activePromptIdx}
-              busy={imageBusy}
-              error={null}
-              onSelect={setActivePromptIdx}
-              onDownload={handleDownload}
-              onZoom={(index) => {
-                const item = prompts[index];
-                if (item?.base64) setLightboxSrc("data:image/png;base64," + item.base64);
-              }}
-            />
-          </section>
-
-          <section className="panel prompt-panel">
-            <div className="history-bar">
-              <h2>Prompt 编辑</h2>
-              <span className="history-badge">{prompts.length} 条</span>
+        <aside className="studio-panel prompt-rail">
+          <div className="panel-heading">
+            <div>
+              <span className="section-kicker">Queue</span>
+              <h2>Prompt 队列</h2>
             </div>
-            <div className="prompt-editor-list">
-              {prompts.length === 0 ? (
-                <div className="empty">生成 Prompt 后可在这里逐条修改。</div>
-              ) : (
-                prompts.map((item, index) => (
-                  <div
-                    key={item.id}
-                    className={`prompt-editor${index === activePromptIdx ? " is-active" : ""}`}
-                  >
-                    <div className="prompt-editor-head">
-                      <button type="button" className="prompt-index" onClick={() => setActivePromptIdx(index)}>
-                        {index + 1}
-                      </button>
-                      <input
-                        type="text"
-                        value={item.title}
-                        disabled={imageBusy}
-                        onChange={(event) => handleTitleChange(item.id, event.target.value)}
-                      />
-                      <span className={`status-pill is-${item.status}`}>{item.status}</span>
-                    </div>
-                    <textarea
-                      value={item.prompt}
+            <span className="panel-count">{prompts.length} 条</span>
+          </div>
+          <div className="prompt-editor-list">
+            {prompts.length === 0 ? (
+              <div className="empty">生成 Prompt 后可在这里逐条修改。</div>
+            ) : (
+              prompts.map((item, index) => (
+                <div
+                  key={item.id}
+                  className={`prompt-editor${index === activePromptIdx ? " is-active" : ""}`}
+                >
+                  <div className="prompt-editor-head">
+                    <button type="button" className="prompt-index" onClick={() => setActivePromptIdx(index)}>
+                      {index + 1}
+                    </button>
+                    <input
+                      type="text"
+                      value={item.title}
                       disabled={imageBusy}
-                      onFocus={() => setActivePromptIdx(index)}
-                      onChange={(event) => handlePromptChange(item.id, event.target.value)}
+                      onChange={(event) => handleTitleChange(item.id, event.target.value)}
                     />
+                    <span className={`status-pill is-${item.status}`}>{item.status}</span>
                   </div>
-                ))
-              )}
-            </div>
-          </section>
-
-          <section className="panel history-panel">
-            <HistoryGrid
-              history={history}
-              activeIdx={activeHistoryIdx}
-              onSelect={handleSelectHistory}
-              onDelete={handleDeleteHistory}
-              onClearAll={handleClearHistory}
-            />
-          </section>
-        </div>
+                  <textarea
+                    value={item.prompt}
+                    disabled={imageBusy}
+                    onFocus={() => setActivePromptIdx(index)}
+                    onChange={(event) => handlePromptChange(item.id, event.target.value)}
+                  />
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
       </div>
+
+      <section className="studio-panel history-dock">
+        <HistoryGrid
+          history={history}
+          activeIdx={activeHistoryIdx}
+          onSelect={handleSelectHistory}
+          onDelete={handleDeleteHistory}
+          onClearAll={handleClearHistory}
+        />
+      </section>
 
       <footer>
         EcomImgGen · 历史记录保存在当前浏览器 · GitHub
