@@ -78,7 +78,7 @@ function summarizeRawText(text: string) {
 
 function normalizeCount(value: number | undefined) {
   if (!Number.isFinite(value)) return 5;
-  return Math.min(10, Math.max(1, Math.round(value ?? 5)));
+  return Math.min(8, Math.max(1, Math.round(value ?? 5)));
 }
 
 function resolveOpenAiEndpoint(baseUrl: string, path: string) {

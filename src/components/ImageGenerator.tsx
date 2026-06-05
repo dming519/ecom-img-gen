@@ -19,6 +19,7 @@ import SizeSelector from "./SizeSelector";
 import Stage from "./Stage";
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_DETAIL_IMAGES = 8;
 const DRAFT_KEY = "ecomimggen_draft";
 type WakeLockSentinelLike = { release: () => Promise<void> };
 const STATUS_LABEL: Record<DetailPromptItem["status"], string> = {
@@ -130,7 +131,11 @@ export default function ImageGenerator() {
       const draft = JSON.parse(raw) as DraftState;
       setProductName(draft.productName || "");
       setSellingPoints(draft.sellingPoints || "");
-      setImageCount(Number.isFinite(draft.imageCount) ? draft.imageCount : 5);
+      setImageCount(
+        Number.isFinite(draft.imageCount)
+          ? Math.min(MAX_DETAIL_IMAGES, Math.max(1, Math.round(draft.imageCount)))
+          : 5,
+      );
       setProductImages(Array.isArray(draft.productImages) ? draft.productImages : []);
       setPrompts(Array.isArray(draft.prompts) ? draft.prompts : []);
     } catch {
@@ -447,7 +452,7 @@ export default function ImageGenerator() {
       setActiveHistoryIdx(idx);
       setProductName(item.product.name);
       setSellingPoints(item.product.sellingPoints);
-      setImageCount(item.product.imageCount);
+      setImageCount(Math.min(MAX_DETAIL_IMAGES, Math.max(1, item.product.imageCount)));
       setProductImages(item.product.productImages);
       setPrompts(item.prompts);
       setActivePromptIdx(0);
@@ -733,11 +738,11 @@ export default function ImageGenerator() {
                   id="image-count"
                   type="number"
                   min={1}
-                  max={10}
+                  max={MAX_DETAIL_IMAGES}
                   value={imageCount}
                   disabled={controlsDisabled}
                   onChange={(event) =>
-                    setImageCount(Math.min(10, Math.max(1, Number(event.target.value) || 1)))
+                    setImageCount(Math.min(MAX_DETAIL_IMAGES, Math.max(1, Number(event.target.value) || 1)))
                   }
                 />
               </div>
