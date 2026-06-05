@@ -74,6 +74,61 @@ function getUpstreamErrorDetail(text: string) {
   return detail;
 }
 
+function createImageRequest(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  prompt: string,
+  size: ImageSize,
+  images: string[],
+) {
+  const hasImages = images.length > 0;
+  if (!hasImages) {
+    return fetch(resolveImageEndpoint(baseUrl, false), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        prompt,
+        ...(size !== "auto" ? { size } : {}),
+        response_format: "b64_json",
+      }),
+    });
+  }
+
+  const formData = new FormData();
+  formData.append("model", model);
+  formData.append("prompt", prompt);
+  if (size !== "auto") {
+    formData.append("size", size);
+  }
+  formData.append("response_format", "b64_json");
+  images.forEach((image, index) => {
+    const imageBlob = dataUrlToBlob(image);
+    const extension = imageBlob.type.split("/")[1] || "png";
+    formData.append("image[]", imageBlob, `product-${index + 1}.${extension}`);
+  });
+
+  return fetch(resolveImageEndpoint(baseUrl, true), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: formData,
+  });
+}
+
+function createCompactPrompt(prompt: string) {
+  return [
+    "生成一张4:5竖版电商商品详情页图片，高级品牌旗舰店风格，真实商业摄影质感。",
+    "画面需要包含清晰产品主视觉、中文标题、核心卖点模块、简洁信息层级、充足留白。",
+    "整体风格干净、现代、轻奢，避免廉价促销风、杂乱背景、错别字、乱码、水印、二维码、虚假Logo。",
+    "请参考以下原始需求摘要：",
+    prompt.replace(/\s+/g, " ").trim().slice(0, 500),
+  ].join("\n");
+}
+
 export class ImageTasksDO {
   state: DurableObjectState;
   env: Env;
@@ -145,62 +200,39 @@ export class ImageTasksDO {
     try {
       const hasImages = images.length > 0;
       let usedReferenceImages = hasImages;
-      let upstream = await fetch(
-        resolveImageEndpoint(baseUrl, hasImages),
-        hasImages
-          ? (() => {
-              const formData = new FormData();
-              formData.append("model", model);
-              formData.append("prompt", prompt);
-              if (size !== "auto") {
-                formData.append("size", size);
-              }
-              formData.append("response_format", "b64_json");
-              images.forEach((image, index) => {
-                const imageBlob = dataUrlToBlob(image);
-                const extension = imageBlob.type.split("/")[1] || "png";
-                formData.append("image[]", imageBlob, `product-${index + 1}.${extension}`);
-              });
-
-              return {
-                method: "POST",
-                headers: { Authorization: `Bearer ${apiKey}` },
-                body: formData,
-              } satisfies RequestInit;
-            })()
-          : {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${apiKey}`,
-              },
-              body: JSON.stringify({
-                model,
-                prompt,
-                ...(size !== "auto" ? { size } : {}),
-                response_format: "b64_json",
-              }),
-            },
+      let upstream = await createImageRequest(
+        baseUrl,
+        apiKey,
+        model,
+        prompt,
+        size,
+        images,
       );
-
       let text = await upstream.text();
-      let fallbackReason = "";
+      const warnings: string[] = [];
       if (!upstream.ok && hasImages) {
-        fallbackReason = `参考图模式失败: HTTP ${upstream.status}: ${getUpstreamErrorDetail(text)}`;
+        warnings.push(
+          `参考图模式失败: HTTP ${upstream.status}: ${getUpstreamErrorDetail(text)}`,
+        );
         usedReferenceImages = false;
-        upstream = await fetch(resolveImageEndpoint(baseUrl, false), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            prompt,
-            ...(size !== "auto" ? { size } : {}),
-            response_format: "b64_json",
-          }),
-        });
+        upstream = await createImageRequest(baseUrl, apiKey, model, prompt, size, []);
+        text = await upstream.text();
+      }
+
+      let usedCompactPrompt = false;
+      if (!upstream.ok) {
+        warnings.push(
+          `原 Prompt 纯生成失败: HTTP ${upstream.status}: ${getUpstreamErrorDetail(text)}`,
+        );
+        usedCompactPrompt = true;
+        upstream = await createImageRequest(
+          baseUrl,
+          apiKey,
+          model,
+          createCompactPrompt(prompt),
+          size,
+          [],
+        );
         text = await upstream.text();
       }
 
@@ -212,9 +244,7 @@ export class ImageTasksDO {
             status: "failed",
             createdAt: now,
             updatedAt: Date.now(),
-            error: fallbackReason
-              ? `${fallbackReason}；纯生成重试失败: HTTP ${upstream.status}: ${detail}`
-              : `HTTP ${upstream.status}: ${detail}`,
+            error: [...warnings, `简化 Prompt 重试失败: HTTP ${upstream.status}: ${detail}`].join("；"),
           }),
           { expirationTtl: 3600 },
         );
@@ -261,7 +291,8 @@ export class ImageTasksDO {
           updatedAt: Date.now(),
           model,
           usedReferenceImages,
-          warning: fallbackReason || null,
+          usedCompactPrompt,
+          warning: warnings.length ? warnings.join("；") : null,
           base64: result,
         }),
         { expirationTtl: 3600 },
