@@ -244,6 +244,35 @@ export async function consumeImageCredit(env: UserEnv, authUser: AuthUser) {
   };
 }
 
+export async function grantImageCredits(env: UserEnv, authUser: AuthUser, amount: number) {
+  const managed = await hydrateManagedUser(env, authUser);
+  const kv = env.TASKS_KV;
+  if (!kv || !managed.usage) {
+    throw new Error("服务端未配置用户次数表");
+  }
+
+  const credits = Math.max(1, Math.min(999, Math.round(amount)));
+  const now = Date.now();
+  const next: UsageRecord = {
+    ...managed.usage,
+    remainingCredits: managed.usage.remainingCredits + credits,
+    grantedCredits: managed.usage.grantedCredits + credits,
+    updatedAt: now,
+  };
+  await writeJson(kv, usageRecordKey(managed.user.userKey ?? getUserKey(managed.user)), next);
+
+  return {
+    user: {
+      ...managed.user,
+      remainingCredits: next.remainingCredits,
+      usedCredits: next.usedCredits,
+      grantedCredits: next.grantedCredits,
+    },
+    usage: next,
+    granted: credits,
+  };
+}
+
 export async function listManagedUsers(env: UserEnv) {
   const kv = env.TASKS_KV;
   if (!kv) throw new Error("服务端未配置用户表");

@@ -48,6 +48,19 @@ export interface AccessCodeRow {
   useCount: number;
 }
 
+export interface RedeemCodeRow {
+  id: string;
+  label: string;
+  credits: number;
+  maxRedemptions: number;
+  redeemCount: number;
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+  createdBy: string | null;
+  lastRedeemedAt?: number;
+}
+
 export interface ProductInput {
   name: string;
   sellingPoints: string;

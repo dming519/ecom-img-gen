@@ -9,6 +9,8 @@ import type {
   GeneratePromptOptions,
   GeneratePromptResult,
   ImageTaskStatus,
+  RedeemCodeRow,
+  AuthUser,
   UserRole,
 } from "./types";
 
@@ -204,4 +206,71 @@ export async function updateAccessCode(
     throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
   }
   return JSON.parse(text) as { accessCode: AccessCodeRow };
+}
+
+export async function fetchRedeemCodes(): Promise<{ redeemCodes: RedeemCodeRow[] }> {
+  const response = await fetchWithRetry("/api/admin/redeem-codes", {
+    method: "GET",
+    cache: "no-store",
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
+  }
+  return JSON.parse(text) as { redeemCodes: RedeemCodeRow[] };
+}
+
+export async function createRedeemCode(
+  label: string,
+  credits: number,
+  maxRedemptions: number,
+  code?: string,
+): Promise<{ redeemCode: RedeemCodeRow; code: string }> {
+  const response = await fetchWithRetry("/api/admin/redeem-codes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "create",
+      label,
+      credits,
+      maxRedemptions,
+      code,
+    }),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
+  }
+  return JSON.parse(text) as { redeemCode: RedeemCodeRow; code: string };
+}
+
+export async function updateRedeemCode(
+  id: string,
+  patch: { active?: boolean; label?: string },
+): Promise<{ redeemCode: RedeemCodeRow }> {
+  const response = await fetchWithRetry("/api/admin/redeem-codes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "update", id, ...patch }),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
+  }
+  return JSON.parse(text) as { redeemCode: RedeemCodeRow };
+}
+
+export async function redeemCredits(
+  code: string,
+): Promise<{ grantedCredits: number; user: AuthUser }> {
+  const response = await fetchWithRetry("/api/redeem-code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
+  }
+  return JSON.parse(text) as { grantedCredits: number; user: AuthUser };
 }

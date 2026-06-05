@@ -3,12 +3,15 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import {
   createAccessCode,
+  createRedeemCode,
   fetchAccessCodes,
   fetchAdminUsers,
+  fetchRedeemCodes,
   updateAccessCode,
   updateAdminUser,
+  updateRedeemCode,
 } from "@/lib/api";
-import type { AccessCodeRow, AdminUserRow, UserRole } from "@/lib/types";
+import type { AccessCodeRow, AdminUserRow, RedeemCodeRow, UserRole } from "@/lib/types";
 
 interface AdminPanelProps {
   open: boolean;
@@ -42,25 +45,34 @@ function AdminAvatar({ user }: { user: AdminUserRow }) {
 export default function AdminPanel({ open, onClose }: AdminPanelProps) {
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [accessCodes, setAccessCodes] = useState<AccessCodeRow[]>([]);
+  const [redeemCodes, setRedeemCodes] = useState<RedeemCodeRow[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [accessBusy, setAccessBusy] = useState(false);
+  const [redeemBusy, setRedeemBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accessLabel, setAccessLabel] = useState("");
   const [customCode, setCustomCode] = useState("");
   const [createdCode, setCreatedCode] = useState<string | null>(null);
+  const [redeemLabel, setRedeemLabel] = useState("");
+  const [customRedeemCode, setCustomRedeemCode] = useState("");
+  const [redeemCredits, setRedeemCredits] = useState(5);
+  const [redeemMaxUses, setRedeemMaxUses] = useState(1);
+  const [createdRedeemCode, setCreatedRedeemCode] = useState<string | null>(null);
 
   const loadAdminData = useCallback(async () => {
     if (!open) return;
     setLoading(true);
     setError(null);
     try {
-      const [userPayload, codePayload] = await Promise.all([
+      const [userPayload, codePayload, redeemPayload] = await Promise.all([
         fetchAdminUsers(),
         fetchAccessCodes(),
+        fetchRedeemCodes(),
       ]);
       setUsers(userPayload.users);
       setAccessCodes(codePayload.accessCodes);
+      setRedeemCodes(redeemPayload.redeemCodes);
     } catch (event) {
       setError(event instanceof Error ? event.message : String(event));
     } finally {
@@ -127,6 +139,49 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
       const payload = await updateAccessCode(accessCode.id, patch);
       setAccessCodes((previous) =>
         previous.map((item) => (item.id === accessCode.id ? payload.accessCode : item)),
+      );
+    } catch (event) {
+      setError(event instanceof Error ? event.message : String(event));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleCreateRedeemCode = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setRedeemBusy(true);
+    setError(null);
+    setCreatedRedeemCode(null);
+    try {
+      const payload = await createRedeemCode(
+        redeemLabel,
+        redeemCredits,
+        redeemMaxUses,
+        customRedeemCode,
+      );
+      setRedeemCodes((previous) => [payload.redeemCode, ...previous]);
+      setCreatedRedeemCode(payload.code);
+      setRedeemLabel("");
+      setCustomRedeemCode("");
+      setRedeemCredits(5);
+      setRedeemMaxUses(1);
+    } catch (event) {
+      setError(event instanceof Error ? event.message : String(event));
+    } finally {
+      setRedeemBusy(false);
+    }
+  };
+
+  const handleUpdateRedeemCode = async (
+    redeemCode: RedeemCodeRow,
+    patch: { active?: boolean; label?: string },
+  ) => {
+    setBusyKey(redeemCode.id);
+    setError(null);
+    try {
+      const payload = await updateRedeemCode(redeemCode.id, patch);
+      setRedeemCodes((previous) =>
+        previous.map((item) => (item.id === redeemCode.id ? payload.redeemCode : item)),
       );
     } catch (event) {
       setError(event instanceof Error ? event.message : String(event));
@@ -366,6 +421,142 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
                 {!accessCodes.length && !loading && (
                   <tr>
                     <td colSpan={6}>暂无访问码</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="access-code-section redeem-code-section">
+          <div className="admin-section-head">
+            <div>
+              <h3>兑换码</h3>
+              <p>创建给已登录用户使用的次数兑换码，创建后明文只显示一次。</p>
+            </div>
+            <span>{redeemCodes.length} 个兑换码</span>
+          </div>
+
+          <form className="access-code-form redeem-code-form" onSubmit={handleCreateRedeemCode}>
+            <input
+              type="text"
+              value={redeemLabel}
+              onChange={(event) => setRedeemLabel(event.target.value)}
+              placeholder="备注，例如：活动赠送 / 老客补偿"
+              aria-label="兑换码备注"
+            />
+            <input
+              type="text"
+              value={customRedeemCode}
+              onChange={(event) => setCustomRedeemCode(event.target.value)}
+              placeholder="自定义兑换码，可留空自动生成"
+              aria-label="自定义兑换码"
+            />
+            <input
+              type="number"
+              min={1}
+              max={999}
+              value={redeemCredits}
+              onChange={(event) => setRedeemCredits(Number(event.target.value) || 1)}
+              aria-label="每次增加次数"
+            />
+            <input
+              type="number"
+              min={1}
+              max={10000}
+              value={redeemMaxUses}
+              onChange={(event) => setRedeemMaxUses(Number(event.target.value) || 1)}
+              aria-label="可兑换次数"
+            />
+            <button className="btn-secondary" type="submit" disabled={redeemBusy}>
+              {redeemBusy ? "创建中..." : "创建兑换码"}
+            </button>
+          </form>
+
+          {createdRedeemCode && (
+            <div className="access-code-created">
+              <span>新兑换码</span>
+              <code>{createdRedeemCode}</code>
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(createdRedeemCode)}
+              >
+                复制
+              </button>
+            </div>
+          )}
+
+          <div className="admin-table-wrap">
+            <table className="admin-table access-code-table">
+              <thead>
+                <tr>
+                  <th>备注</th>
+                  <th>状态</th>
+                  <th>次数</th>
+                  <th>兑换进度</th>
+                  <th>最近兑换</th>
+                  <th>创建时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {redeemCodes.map((redeemCode) => {
+                  const busy = busyKey === redeemCode.id;
+                  return (
+                    <tr key={redeemCode.id}>
+                      <td>
+                        <input
+                          aria-label="兑换码备注"
+                          type="text"
+                          value={redeemCode.label}
+                          disabled={busy}
+                          onChange={(event) => {
+                            const label = event.target.value;
+                            setRedeemCodes((previous) =>
+                              previous.map((item) =>
+                                item.id === redeemCode.id ? { ...item, label } : item,
+                              ),
+                            );
+                          }}
+                          onBlur={(event) =>
+                            handleUpdateRedeemCode(redeemCode, { label: event.target.value })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <span className={`access-code-status${redeemCode.active ? " is-active" : ""}`}>
+                          {redeemCode.active ? "启用" : "停用"}
+                        </span>
+                      </td>
+                      <td>+{redeemCode.credits}</td>
+                      <td>
+                        {redeemCode.redeemCount} / {redeemCode.maxRedemptions}
+                      </td>
+                      <td>
+                        {redeemCode.lastRedeemedAt
+                          ? new Date(redeemCode.lastRedeemedAt).toLocaleString("zh-CN", TIME_FMT)
+                          : "未兑换"}
+                      </td>
+                      <td>{new Date(redeemCode.createdAt).toLocaleString("zh-CN", TIME_FMT)}</td>
+                      <td>
+                        <button
+                          className="btn-ghost"
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            handleUpdateRedeemCode(redeemCode, { active: !redeemCode.active })
+                          }
+                        >
+                          {redeemCode.active ? "停用" : "启用"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!redeemCodes.length && !loading && (
+                  <tr>
+                    <td colSpan={7}>暂无兑换码</td>
                   </tr>
                 )}
               </tbody>
