@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { createImageTask, generateDetailPrompts, pollImageTask } from "@/lib/api";
+import { createImageTask, generateDetailPrompts, pollImageTask, redeemCredits } from "@/lib/api";
 import { dbAdd, dbAll, dbClear, dbDel, dbPut } from "@/lib/db";
 import type {
   AuthSession,
@@ -65,29 +65,7 @@ function cloneProduct(input: ProductInput): ProductInput {
   };
 }
 
-function useTheme() {
-  const [dark, setDark] = useState(false);
-
-  useEffect(() => {
-    const savedDark = localStorage.getItem("ecomimggen_theme") === "dark";
-    setDark(savedDark);
-    document.documentElement.setAttribute("data-theme", savedDark ? "dark" : "light");
-  }, []);
-
-  const toggle = useCallback(() => {
-    setDark((previous) => {
-      const next = !previous;
-      localStorage.setItem("ecomimggen_theme", next ? "dark" : "light");
-      document.documentElement.setAttribute("data-theme", next ? "dark" : "light");
-      return next;
-    });
-  }, []);
-
-  return { dark, toggle };
-}
-
 export default function ImageGenerator() {
-  const { dark, toggle: toggleTheme } = useTheme();
   const [productName, setProductName] = useState("");
   const [sellingPoints, setSellingPoints] = useState("");
   const [imageCount, setImageCount] = useState(5);
@@ -101,7 +79,10 @@ export default function ImageGenerator() {
   const [sessionLoading, setSessionLoading] = useState(true);
   const [authPopoverOpen, setAuthPopoverOpen] = useState(false);
   const [accessCode, setAccessCode] = useState("");
+  const [redeemCode, setRedeemCode] = useState("");
   const [accessBusy, setAccessBusy] = useState(false);
+  const [redeemBusy, setRedeemBusy] = useState(false);
+  const [redeemMessage, setRedeemMessage] = useState<string | null>(null);
   const [promptBusy, setPromptBusy] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
@@ -524,6 +505,37 @@ export default function ImageGenerator() {
     }
   }, [accessCode]);
 
+  const handleRedeemCode = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const code = redeemCode.trim();
+    if (!code) {
+      setRedeemMessage("请输入兑换码。");
+      return;
+    }
+
+    setError(null);
+    setRedeemMessage(null);
+    setRedeemBusy(true);
+    try {
+      const payload = await redeemCredits(code);
+      setSession((previous) =>
+        previous
+          ? {
+              ...previous,
+              authenticated: true,
+              user: payload.user,
+            }
+          : { authenticated: true, user: payload.user },
+      );
+      setRedeemCode("");
+      setRedeemMessage(`已增加 ${payload.grantedCredits} 次生成机会。`);
+    } catch (event) {
+      setRedeemMessage(event instanceof Error ? event.message : String(event));
+    } finally {
+      setRedeemBusy(false);
+    }
+  }, [redeemCode]);
+
   const handleDownload = useCallback(
     (index: number) => {
       const item = prompts[index];
@@ -540,7 +552,8 @@ export default function ImageGenerator() {
   const authLabel = authenticated
     ? `${session?.user?.name || "已登录用户"} 账户菜单`
     : "打开登录菜单";
-  const controlsDisabled = sessionLoading || accessBusy || promptBusy || imageBusy || !authenticated;
+  const controlsDisabled =
+    sessionLoading || accessBusy || redeemBusy || promptBusy || imageBusy || !authenticated;
   const providerLabel =
     session?.user?.provider === "github"
       ? "GitHub"
@@ -637,6 +650,29 @@ export default function ImageGenerator() {
                       <span>{isSuperAdmin ? "不限次数" : `剩余 ${session.user.remainingCredits ?? 0}`}</span>
                       <span>已用 {session.user.usedCredits ?? 0}</span>
                     </div>
+                    {!isSuperAdmin && (
+                      <form className="redeem-form" onSubmit={handleRedeemCode}>
+                        <label htmlFor="redeem-code-popover">兑换码</label>
+                        <div className="redeem-form-row">
+                          <input
+                            id="redeem-code-popover"
+                            name="redeemCode"
+                            type="text"
+                            value={redeemCode}
+                            onChange={(event) => setRedeemCode(event.target.value)}
+                            placeholder="输入兑换码增加次数"
+                            aria-label="兑换码"
+                            autoComplete="one-time-code"
+                            disabled={redeemBusy}
+                          />
+                          <button className="btn-ghost" type="submit" disabled={redeemBusy}>
+                            {redeemBusy && <span className="btn-spinner" aria-hidden="true" />}
+                            {redeemBusy ? "兑换中" : "兑换"}
+                          </button>
+                        </div>
+                        {redeemMessage && <p className="redeem-message">{redeemMessage}</p>}
+                      </form>
+                    )}
                     {isAdmin && (
                       <button
                         className="btn-secondary auth-popover-link"
@@ -695,16 +731,6 @@ export default function ImageGenerator() {
               </div>
             )}
           </div>
-
-          <button
-            type="button"
-            className="theme-toggle"
-            onClick={toggleTheme}
-            aria-label={dark ? "切换到浅色模式" : "切换到深色模式"}
-            title={dark ? "切换到浅色模式" : "切换到深色模式"}
-          >
-            <Icon name={dark ? "sun" : "moon"} />
-          </button>
         </div>
       </header>
 
@@ -829,6 +855,7 @@ export default function ImageGenerator() {
               disabled={controlsDisabled}
               onClick={handleGeneratePrompts}
             >
+              {promptBusy && <span className="btn-spinner" aria-hidden="true" />}
               {promptBusy ? "正在生成文案..." : "生成详情图文案"}
             </button>
             {error && <div className="alert">{error}</div>}
@@ -841,7 +868,13 @@ export default function ImageGenerator() {
             <span className="panel-count">{prompts.length} 条</span>
           </div>
           <div className="prompt-editor-list">
-            {prompts.length === 0 ? (
+            {promptBusy ? (
+              <div className="busy-card">
+                <span className="busy-orbit" aria-hidden="true" />
+                <strong>正在生成详情图文案</strong>
+                <p>系统正在分析产品资料和参考图。</p>
+              </div>
+            ) : prompts.length === 0 ? (
               <div className="empty">生成详情图文案后可在这里逐条修改。</div>
             ) : (
               prompts.map((item, index) => (
@@ -880,6 +913,7 @@ export default function ImageGenerator() {
               disabled={controlsDisabled || !prompts.length}
               onClick={handleGenerateImages}
             >
+              {imageBusy && <span className="btn-spinner" aria-hidden="true" />}
               {imageBusy ? "正在逐张生成..." : "生成详情图"}
             </button>
           </div>

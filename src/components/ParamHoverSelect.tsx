@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 export interface ParamOption {
   label: string;
@@ -27,43 +27,34 @@ export default function ParamHoverSelect({
   keepOpenOnSelect = false,
 }: ParamHoverSelectProps) {
   const [open, setOpen] = useState(false);
-  const closeTimerRef = useRef<number | null>(null);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
   const current = options.find((option) => option.value === value) ?? options[0];
 
-  const clearCloseTimer = () => {
-    if (closeTimerRef.current == null) return;
-    window.clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = null;
-  };
-
-  const openPanel = () => {
-    clearCloseTimer();
-    setOpen(true);
-  };
-
-  const scheduleClose = () => {
-    clearCloseTimer();
-    closeTimerRef.current = window.setTimeout(() => setOpen(false), 120);
-  };
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Node && pickerRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
 
   return (
     <div
+      ref={pickerRef}
       className={`param-picker${open ? " is-open" : ""}${className ? ` ${className}` : ""}`}
-      onMouseEnter={openPanel}
-      onMouseLeave={scheduleClose}
-      onFocus={openPanel}
       onBlur={(event) => {
         const nextTarget = event.relatedTarget;
-        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-          scheduleClose();
-        }
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) setOpen(false);
       }}
     >
       <button
         type="button"
         className={`param-trigger${open ? " is-open" : ""}`}
-        onClick={openPanel}
+        onClick={() => setOpen((value) => !value)}
         aria-haspopup="true"
         aria-expanded={open}
         aria-controls={titleId}
