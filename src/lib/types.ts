@@ -37,6 +37,17 @@ export interface AdminUserRow {
   lastLoginAt: number;
 }
 
+export interface AccessCodeRow {
+  id: string;
+  label: string;
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+  createdBy: string | null;
+  lastUsedAt?: number;
+  useCount: number;
+}
+
 export interface ProductInput {
   name: string;
   sellingPoints: string;

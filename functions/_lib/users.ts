@@ -211,6 +211,13 @@ export async function consumeImageCredit(env: UserEnv, authUser: AuthUser) {
   if (!kv || !managed.usage) {
     throw new Error("服务端未配置用户次数表");
   }
+  if (managed.user.role === "super_admin") {
+    return {
+      user: managed.user,
+      usage: managed.usage,
+      unlimited: true,
+    };
+  }
   if (managed.usage.remainingCredits <= 0) {
     throw new Error("本账号详情图生成次数已用完，请联系管理员增加次数。");
   }
@@ -233,6 +240,7 @@ export async function consumeImageCredit(env: UserEnv, authUser: AuthUser) {
       grantedCredits: next.grantedCredits,
     },
     usage: next,
+    unlimited: false,
   };
 }
 

@@ -122,6 +122,7 @@ export async function onRequestPost(context: FunctionContext) {
       status: "pending",
       remainingCredits: creditResult.user.remainingCredits,
       usedCredits: creditResult.user.usedCredits,
+      unlimitedCredits: creditResult.unlimited,
     },
     { status: 202 },
   );

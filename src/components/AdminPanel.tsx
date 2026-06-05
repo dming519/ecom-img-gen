@@ -1,8 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { fetchAdminUsers, updateAdminUser } from "@/lib/api";
-import type { AdminUserRow, UserRole } from "@/lib/types";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  createAccessCode,
+  fetchAccessCodes,
+  fetchAdminUsers,
+  updateAccessCode,
+  updateAdminUser,
+} from "@/lib/api";
+import type { AccessCodeRow, AdminUserRow, UserRole } from "@/lib/types";
 
 interface AdminPanelProps {
   open: boolean;
@@ -22,19 +28,39 @@ const ROLE_LABELS: Record<UserRole, string> = {
   user: "用户",
 };
 
+function AdminAvatar({ user }: { user: AdminUserRow }) {
+  const [failed, setFailed] = useState(false);
+  if (user.image && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={user.image} alt={user.name} onError={() => setFailed(true)} />
+    );
+  }
+  return <span>{user.name.slice(0, 1).toUpperCase()}</span>;
+}
+
 export default function AdminPanel({ open, onClose }: AdminPanelProps) {
   const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [accessCodes, setAccessCodes] = useState<AccessCodeRow[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [accessBusy, setAccessBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [accessLabel, setAccessLabel] = useState("");
+  const [customCode, setCustomCode] = useState("");
+  const [createdCode, setCreatedCode] = useState<string | null>(null);
 
-  const loadUsers = useCallback(async () => {
+  const loadAdminData = useCallback(async () => {
     if (!open) return;
     setLoading(true);
     setError(null);
     try {
-      const payload = await fetchAdminUsers();
-      setUsers(payload.users);
+      const [userPayload, codePayload] = await Promise.all([
+        fetchAdminUsers(),
+        fetchAccessCodes(),
+      ]);
+      setUsers(userPayload.users);
+      setAccessCodes(codePayload.accessCodes);
     } catch (event) {
       setError(event instanceof Error ? event.message : String(event));
     } finally {
@@ -43,8 +69,8 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
   }, [open]);
 
   useEffect(() => {
-    loadUsers();
-  }, [loadUsers]);
+    loadAdminData();
+  }, [loadAdminData]);
 
   useEffect(() => {
     if (!open) return;
@@ -73,6 +99,42 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
     }
   };
 
+  const handleCreateAccessCode = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAccessBusy(true);
+    setError(null);
+    setCreatedCode(null);
+    try {
+      const payload = await createAccessCode(accessLabel, customCode);
+      setAccessCodes((previous) => [payload.accessCode, ...previous]);
+      setCreatedCode(payload.code);
+      setAccessLabel("");
+      setCustomCode("");
+    } catch (event) {
+      setError(event instanceof Error ? event.message : String(event));
+    } finally {
+      setAccessBusy(false);
+    }
+  };
+
+  const handleUpdateAccessCode = async (
+    accessCode: AccessCodeRow,
+    patch: { active?: boolean; label?: string },
+  ) => {
+    setBusyKey(accessCode.id);
+    setError(null);
+    try {
+      const payload = await updateAccessCode(accessCode.id, patch);
+      setAccessCodes((previous) =>
+        previous.map((item) => (item.id === accessCode.id ? payload.accessCode : item)),
+      );
+    } catch (event) {
+      setError(event instanceof Error ? event.message : String(event));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -92,7 +154,7 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
 
         <div className="admin-toolbar">
           <span>{loading ? "读取中" : `${users.length} 个用户`}</span>
-          <button className="btn-ghost" type="button" onClick={loadUsers} disabled={loading}>
+          <button className="btn-ghost" type="button" onClick={loadAdminData} disabled={loading}>
             刷新
           </button>
         </div>
@@ -118,12 +180,7 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
                   <tr key={user.userKey}>
                     <td>
                       <div className="admin-user-cell">
-                        {user.image ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={user.image} alt={user.name} />
-                        ) : (
-                          <span>{user.name.slice(0, 1).toUpperCase()}</span>
-                        )}
+                        <AdminAvatar user={user} />
                         <div>
                           <strong>{user.name}</strong>
                           <small>{user.email || user.userKey}</small>
@@ -147,38 +204,46 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
                       </select>
                     </td>
                     <td>
-                      <input
-                        aria-label={`${user.name} 的剩余次数`}
-                        type="number"
-                        min={0}
-                        value={user.remainingCredits}
-                        disabled={busy}
-                        onChange={(event) => {
-                          const nextValue = Number(event.target.value) || 0;
-                          setUsers((previous) =>
-                            previous.map((item) =>
-                              item.userKey === user.userKey
-                                ? { ...item, remainingCredits: nextValue }
-                                : item,
-                            ),
-                          );
-                        }}
-                        onBlur={(event) =>
-                          updateUser(user, { remainingCredits: Number(event.target.value) || 0 })
-                        }
-                      />
+                      {isSuperAdmin ? (
+                        <span className="unlimited-pill">不限</span>
+                      ) : (
+                        <input
+                          aria-label={`${user.name} 的剩余次数`}
+                          type="number"
+                          min={0}
+                          value={user.remainingCredits}
+                          disabled={busy}
+                          onChange={(event) => {
+                            const nextValue = Number(event.target.value) || 0;
+                            setUsers((previous) =>
+                              previous.map((item) =>
+                                item.userKey === user.userKey
+                                  ? { ...item, remainingCredits: nextValue }
+                                  : item,
+                              ),
+                            );
+                          }}
+                          onBlur={(event) =>
+                            updateUser(user, { remainingCredits: Number(event.target.value) || 0 })
+                          }
+                        />
+                      )}
                     </td>
                     <td>{user.usedCredits}</td>
                     <td>{new Date(user.lastLoginAt).toLocaleString("zh-CN", TIME_FMT)}</td>
                     <td>
-                      <button
-                        className="btn-ghost"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => updateUser(user, { remainingCredits: user.remainingCredits + 5 })}
-                      >
-                        +5
-                      </button>
+                      {isSuperAdmin ? (
+                        <span className="admin-muted-action">无需调整</span>
+                      ) : (
+                        <button
+                          className="btn-ghost"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => updateUser(user, { remainingCredits: user.remainingCredits + 5 })}
+                        >
+                          +5
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -191,6 +256,122 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
             </tbody>
           </table>
         </div>
+
+        <section className="access-code-section">
+          <div className="admin-section-head">
+            <div>
+              <h3>访问码</h3>
+              <p>创建给临时用户使用的登录码，创建后明文只显示一次。</p>
+            </div>
+            <span>{accessCodes.length} 个访问码</span>
+          </div>
+
+          <form className="access-code-form" onSubmit={handleCreateAccessCode}>
+            <input
+              type="text"
+              value={accessLabel}
+              onChange={(event) => setAccessLabel(event.target.value)}
+              placeholder="备注，例如：运营同事 / 临时演示"
+              aria-label="访问码备注"
+            />
+            <input
+              type="text"
+              value={customCode}
+              onChange={(event) => setCustomCode(event.target.value)}
+              placeholder="自定义访问码，可留空自动生成"
+              aria-label="自定义访问码"
+            />
+            <button className="btn-secondary" type="submit" disabled={accessBusy}>
+              {accessBusy ? "创建中..." : "创建访问码"}
+            </button>
+          </form>
+
+          {createdCode && (
+            <div className="access-code-created">
+              <span>新访问码</span>
+              <code>{createdCode}</code>
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(createdCode)}
+              >
+                复制
+              </button>
+            </div>
+          )}
+
+          <div className="admin-table-wrap">
+            <table className="admin-table access-code-table">
+              <thead>
+                <tr>
+                  <th>备注</th>
+                  <th>状态</th>
+                  <th>使用次数</th>
+                  <th>最近使用</th>
+                  <th>创建时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accessCodes.map((accessCode) => {
+                  const busy = busyKey === accessCode.id;
+                  return (
+                    <tr key={accessCode.id}>
+                      <td>
+                        <input
+                          aria-label="访问码备注"
+                          type="text"
+                          value={accessCode.label}
+                          disabled={busy}
+                          onChange={(event) => {
+                            const label = event.target.value;
+                            setAccessCodes((previous) =>
+                              previous.map((item) =>
+                                item.id === accessCode.id ? { ...item, label } : item,
+                              ),
+                            );
+                          }}
+                          onBlur={(event) =>
+                            handleUpdateAccessCode(accessCode, { label: event.target.value })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <span className={`access-code-status${accessCode.active ? " is-active" : ""}`}>
+                          {accessCode.active ? "启用" : "停用"}
+                        </span>
+                      </td>
+                      <td>{accessCode.useCount}</td>
+                      <td>
+                        {accessCode.lastUsedAt
+                          ? new Date(accessCode.lastUsedAt).toLocaleString("zh-CN", TIME_FMT)
+                          : "未使用"}
+                      </td>
+                      <td>{new Date(accessCode.createdAt).toLocaleString("zh-CN", TIME_FMT)}</td>
+                      <td>
+                        <button
+                          className="btn-ghost"
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            handleUpdateAccessCode(accessCode, { active: !accessCode.active })
+                          }
+                        >
+                          {accessCode.active ? "停用" : "启用"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!accessCodes.length && !loading && (
+                  <tr>
+                    <td colSpan={6}>暂无访问码</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </section>
     </div>
   );
