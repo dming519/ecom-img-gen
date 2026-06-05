@@ -146,7 +146,7 @@ export class ImageTasksDO {
               images.forEach((image, index) => {
                 const imageBlob = dataUrlToBlob(image);
                 const extension = imageBlob.type.split("/")[1] || "png";
-                formData.append("image", imageBlob, `product-${index + 1}.${extension}`);
+                formData.append("image[]", imageBlob, `product-${index + 1}.${extension}`);
               });
 
               return {
