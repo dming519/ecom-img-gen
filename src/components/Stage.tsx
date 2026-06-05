@@ -1,6 +1,7 @@
 "use client";
 
 import type { DetailPromptItem } from "@/lib/types";
+import Icon from "./Icon";
 
 interface StageProps {
   prompts: DetailPromptItem[];
@@ -26,8 +27,10 @@ export default function Stage({
   if (!prompts.length) {
     return (
       <div className="stage">
-        <div className="icon-large">▣</div>
-        <div className="icon-hint">商品详情图将在这里逐张生成</div>
+        <div className="stage-empty-card">
+          <Icon name="image" className="icon-large" />
+          <div className="icon-hint">商品详情图将在这里逐张生成</div>
+        </div>
       </div>
     );
   }
@@ -46,10 +49,12 @@ export default function Stage({
             <div className="stage-caption">{active.title}</div>
             <div className="stage-actions">
               <button className="btn-ghost" type="button" onClick={() => onDownload(activeIndex)}>
-                下载
+                <Icon name="download" />
+                <span>下载</span>
               </button>
               <button className="btn-ghost" type="button" onClick={() => onZoom(activeIndex)}>
-                大图
+                <Icon name="zoom" />
+                <span>预览</span>
               </button>
             </div>
           </>
@@ -62,12 +67,12 @@ export default function Stage({
               </>
             ) : active?.status === "failed" ? (
               <>
-                <div className="icon-large">!</div>
+                <Icon name="warning" className="icon-large" />
                 <div className="alert">{active.error || "生成失败"}</div>
               </>
             ) : (
               <>
-                <div className="icon-large">▥</div>
+                <Icon name="queue" className="icon-large" />
                 <div className="icon-hint">等待生成：{active?.title}</div>
               </>
             )}

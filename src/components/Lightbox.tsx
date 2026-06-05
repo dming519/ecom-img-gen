@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Icon from "./Icon";
 interface LightboxProps {
   src?: string | null;
   alt?: string;
@@ -38,7 +39,7 @@ export default function Lightbox({ src, alt = "Preview", onClose }: LightboxProp
         aria-label="关闭"
         onClick={onClose}
       >
-        ✕
+        <Icon name="close" />
       </button>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={imageSrc} alt={alt} />
