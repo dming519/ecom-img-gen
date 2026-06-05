@@ -100,5 +100,12 @@ https://github.com/dming519/ecom-img-gen
 https://eig.easyauto.app
 ```
 
-详细步骤见 [DEPLOY.md](./DEPLOY.md) 和 [DEPLOY-CHECKLIST.md](./DEPLOY-CHECKLIST.md)。
+当前 Cloudflare 资源：
 
+- Worker: `https://ecom-img-gen-worker.ldmcsy2020.workers.dev`
+- Pages: `https://ecom-img-gen.pages.dev`
+- Latest deployment: `https://9fbb0c4e.ecom-img-gen.pages.dev`
+- KV: `TASKS_KV` / `6a7ee075ab4b4cbe9cfd80ed9fb0b40a`
+- Custom domain: `eig.easyauto.app` 已添加到 Pages，等待 DNS CNAME 验证
+
+详细步骤见 [DEPLOY.md](./DEPLOY.md) 和 [DEPLOY-CHECKLIST.md](./DEPLOY-CHECKLIST.md)。
