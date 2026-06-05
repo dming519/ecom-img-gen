@@ -300,7 +300,7 @@ h1 {
 
 .access-banner {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
   gap: 16px;
   align-items: center;
   margin-top: 14px;
@@ -326,6 +326,32 @@ h1 {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.access-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.access-form input {
+  min-height: 40px;
+  background: var(--bg-panel);
+}
+
+.access-form .btn-primary {
+  min-width: 108px;
+  padding: 0 13px;
+}
+
+.access-form-compact {
+  grid-template-columns: 1fr;
+  margin-top: 10px;
+}
+
+.access-form-compact .btn-primary {
+  width: 100%;
 }
 
 .studio-grid {
@@ -1175,10 +1201,16 @@ footer {
   }
 
   .login-actions,
+  .access-form,
   .action-stack,
   .stage-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .access-form {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .form-grid,

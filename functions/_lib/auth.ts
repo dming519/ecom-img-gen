@@ -11,6 +11,7 @@ interface AuthEnv {
   AUTH_GITHUB_SECRET?: string;
   AUTH_GOOGLE_ID?: string;
   AUTH_GOOGLE_SECRET?: string;
+  ACCESS_LOGIN_CODE?: string;
 }
 
 interface SessionPayload {
@@ -159,6 +160,14 @@ function getGoogleClient(env: AuthEnv) {
   return { clientId, clientSecret };
 }
 
+function getAccessLoginCode(env: AuthEnv) {
+  const code = env.ACCESS_LOGIN_CODE?.trim();
+  if (!code) {
+    throw new Error("服务端未配置 ACCESS_LOGIN_CODE");
+  }
+  return code;
+}
+
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
     ...init,
@@ -278,6 +287,59 @@ export async function handleLoginRequest(
   }
 
   return redirect(authorizationUrl, [stateCookie]);
+}
+
+export async function handleAccessLoginRequest(request: Request, env: AuthEnv) {
+  try {
+    const secret = getAuthSecret(env);
+    const expectedCode = getAccessLoginCode(env);
+    const contentType = request.headers.get("Content-Type") || "";
+    let code = "";
+
+    if (contentType.includes("application/json")) {
+      const payload = (await request.json().catch(() => null)) as { code?: string } | null;
+      code = payload?.code?.trim() || "";
+    } else {
+      const formData = await request.formData().catch(() => null);
+      code = String(formData?.get("code") || "").trim();
+    }
+
+    if (!code || code !== expectedCode) {
+      return json({ error: "访问码不正确" }, { status: 401 });
+    }
+
+    const user: AuthUser = {
+      provider: "access",
+      id: "access-code",
+      name: "访问码用户",
+      email: null,
+      image: null,
+    };
+    const sessionPayload: SessionPayload = {
+      user,
+      expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000,
+    };
+    const sessionCookie = createCookie(
+      SESSION_COOKIE,
+      await encodeSignedPayload(sessionPayload, secret),
+      SESSION_TTL_SECONDS,
+    );
+
+    return json(
+      {
+        authenticated: true,
+        user,
+      },
+      {
+        headers: {
+          "Set-Cookie": sessionCookie,
+        },
+      },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return json({ error: message }, { status: 500 });
+  }
 }
 
 async function resolveGithubUser(env: AuthEnv, request: Request, code: string) {

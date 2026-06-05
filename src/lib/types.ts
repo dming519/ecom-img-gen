@@ -1,6 +1,6 @@
 export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 
-export type AuthProvider = "github" | "google";
+export type AuthProvider = "github" | "google" | "access";
 
 export interface AuthUser {
   provider: AuthProvider;

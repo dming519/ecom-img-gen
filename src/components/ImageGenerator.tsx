@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { createImageTask, generateDetailPrompts, pollImageTask } from "@/lib/api";
 import { dbAdd, dbAll, dbClear, dbDel, dbPut } from "@/lib/db";
 import { DETAIL_PROMPT_TEMPLATE } from "@/lib/promptTemplate";
@@ -91,6 +91,8 @@ export default function ImageGenerator() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [authPopoverOpen, setAuthPopoverOpen] = useState(false);
+  const [accessCode, setAccessCode] = useState("");
+  const [accessBusy, setAccessBusy] = useState(false);
   const [promptBusy, setPromptBusy] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -452,6 +454,46 @@ export default function ImageGenerator() {
     setActiveHistoryIdx(-1);
   }, []);
 
+  const handleAccessLogin = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const code = accessCode.trim();
+    if (!code) {
+      setError("请输入访问码。");
+      return;
+    }
+
+    setError(null);
+    setAccessBusy(true);
+    try {
+      const response = await fetch("/api/auth/login/access", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ code }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | AuthSession
+        | { error?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(
+          payload && "error" in payload && payload.error
+            ? payload.error
+            : `HTTP ${response.status}`,
+        );
+      }
+      setSession(payload as AuthSession);
+      setAccessCode("");
+      setAuthPopoverOpen(false);
+    } catch (event) {
+      setError(event instanceof Error ? event.message : String(event));
+    } finally {
+      setAccessBusy(false);
+    }
+  }, [accessCode]);
+
   const handleDownload = useCallback(
     (index: number) => {
       const item = prompts[index];
@@ -468,7 +510,13 @@ export default function ImageGenerator() {
   const authLabel = authenticated
     ? `${session?.user?.name || "已登录用户"} 账户菜单`
     : "打开登录菜单";
-  const controlsDisabled = sessionLoading || promptBusy || imageBusy || !authenticated;
+  const controlsDisabled = sessionLoading || accessBusy || promptBusy || imageBusy || !authenticated;
+  const providerLabel =
+    session?.user?.provider === "github"
+      ? "GitHub"
+      : session?.user?.provider === "google"
+        ? "Google"
+        : "访问码";
 
   return (
     <main className="app-shell">
@@ -522,11 +570,11 @@ export default function ImageGenerator() {
                         </div>
                       )}
                       <div>
-                        <p className="auth-name">{session.user.name}</p>
-                        <p className="auth-meta">
-                          {session.user.provider === "github" ? "GitHub" : "Google"}
+                      <p className="auth-name">{session.user.name}</p>
+                      <p className="auth-meta">
+                          {providerLabel}
                           {session.user.email ? ` · ${session.user.email}` : ""}
-                        </p>
+                      </p>
                       </div>
                     </div>
                     <p className="auth-popover-note">已登录，可使用内置生成配置。</p>
@@ -537,6 +585,19 @@ export default function ImageGenerator() {
                 ) : (
                   <>
                     <p className="auth-popover-note">登录后才能生成 Prompt 和商品详情图。</p>
+                    <form className="access-form access-form-compact" onSubmit={handleAccessLogin}>
+                      <input
+                        type="password"
+                        value={accessCode}
+                        onChange={(event) => setAccessCode(event.target.value)}
+                        placeholder="访问码"
+                        aria-label="访问码"
+                        autoComplete="current-password"
+                      />
+                      <button className="btn-primary" type="submit" disabled={accessBusy}>
+                        {accessBusy ? "登录中..." : "访问码登录"}
+                      </button>
+                    </form>
                     <a className="btn-ghost auth-link auth-popover-link" href="/api/auth/login/github?redirectTo=/">
                       使用 GitHub 登录
                     </a>
@@ -567,6 +628,19 @@ export default function ImageGenerator() {
             <h2>登录后使用生成能力</h2>
             <p>当前可预览工作台结构；Prompt 生成和图片生成需要登录后调用服务端配置。</p>
           </div>
+          <form className="access-form" onSubmit={handleAccessLogin}>
+            <input
+              type="password"
+              value={accessCode}
+              onChange={(event) => setAccessCode(event.target.value)}
+              placeholder="输入访问码"
+              aria-label="访问码"
+              autoComplete="current-password"
+            />
+            <button className="btn-primary" type="submit" disabled={accessBusy}>
+              {accessBusy ? "登录中..." : "访问码登录"}
+            </button>
+          </form>
           <div className="login-actions">
             <a className="btn-primary auth-link" href="/api/auth/login/github?redirectTo=/">GitHub 登录</a>
             <a className="btn-ghost auth-link" href="/api/auth/login/google?redirectTo=/">Google 登录</a>
