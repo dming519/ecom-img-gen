@@ -81,6 +81,17 @@ function normalizeCount(value: number | undefined) {
   return Math.min(8, Math.max(1, Math.round(value ?? 5)));
 }
 
+function normalizeGeneratedPromptText(text: string) {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trim();
+}
+
 function resolveOpenAiEndpoint(baseUrl: string, path: string) {
   const normalized = baseUrl.replace(/\/+$/, "");
   const base = normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
@@ -241,6 +252,7 @@ export async function onRequestPost(context: FunctionContext) {
     "",
     "输出格式要求：只返回 JSON，不要 Markdown，不要解释。",
     `JSON 结构：{"prompts":[{"title":"第1张：产品主图 / 核心卖点总览","prompt":"完整可直接用于 GPT-Image-2 的单张详情图文案"}]}`,
+    "prompt 字段如需分段，必须使用 \\n 表示换行，保留清晰的段落结构。",
     `prompts 数组长度必须等于 ${imageCount}。每个 prompt 必须是完整单张图片生成提示词，并包含统一视觉系统、构图、中文文案、负面提示词、4:5 竖版、严格参考产品图片等要求。`,
   ].join("\n");
 
@@ -315,7 +327,7 @@ export async function onRequestPost(context: FunctionContext) {
     const prompts = (parsed.prompts ?? [])
       .map((item, index) => ({
         title: item.title?.trim() || `第${index + 1}张商品详情图`,
-        prompt: item.prompt?.trim() || "",
+        prompt: normalizeGeneratedPromptText(item.prompt ?? ""),
       }))
       .filter((item) => item.prompt);
 
