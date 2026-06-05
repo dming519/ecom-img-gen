@@ -647,47 +647,6 @@ export default function ImageGenerator() {
         </div>
       </header>
 
-      {!sessionLoading && !authenticated && (
-        <section className="access-banner">
-          <div>
-            <h2>登录后使用生成能力</h2>
-            <p>当前可预览工作台结构；Prompt 生成和图片生成需要登录后调用服务端配置。</p>
-          </div>
-          <form className="access-form" onSubmit={handleAccessLogin}>
-            <label className="sr-only" htmlFor="access-code-banner-username">用户名</label>
-            <input
-              id="access-code-banner-username"
-              className="sr-only"
-              name="username"
-              type="text"
-              aria-label="用户名"
-              value="access-code"
-              readOnly
-              tabIndex={-1}
-              autoComplete="username"
-            />
-            <label className="sr-only" htmlFor="access-code-banner">访问码</label>
-            <input
-              id="access-code-banner"
-              name="accessCode"
-              type="password"
-              value={accessCode}
-              onChange={(event) => setAccessCode(event.target.value)}
-              placeholder="输入访问码"
-              aria-label="访问码"
-              autoComplete="current-password"
-            />
-            <button className="btn-primary" type="submit" disabled={accessBusy}>
-              {accessBusy ? "登录中..." : "访问码登录"}
-            </button>
-          </form>
-          <div className="login-actions">
-            <a className="btn-primary auth-link" href="/api/auth/login/github?redirectTo=/">GitHub 登录</a>
-            <a className="btn-ghost auth-link" href="/api/auth/login/google?redirectTo=/">Google 登录</a>
-          </div>
-        </section>
-      )}
-
       <div className="studio-grid">
         <aside className="studio-panel input-rail">
           <div className="panel-heading">
