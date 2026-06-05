@@ -32,6 +32,11 @@ interface ChatCompletionPayload {
   };
 }
 
+interface UpstreamRequest {
+  url: string;
+  init: RequestInit;
+}
+
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
     ...init,
@@ -54,6 +59,45 @@ function parsePromptJson(text: string) {
 function normalizeCount(value: number | undefined) {
   if (!Number.isFinite(value)) return 5;
   return Math.min(10, Math.max(1, Math.round(value ?? 5)));
+}
+
+function createUpstreamRequest(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  userText: string,
+  productImages: string[],
+): UpstreamRequest {
+  return {
+    url: `${baseUrl}/chat/completions`,
+    init: {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.7,
+        messages: [
+          {
+            role: "system",
+            content: DETAIL_PROMPT_TEMPLATE,
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userText },
+              ...productImages.map((imageUrl) => ({
+                type: "image_url",
+                image_url: { url: imageUrl },
+              })),
+            ],
+          },
+        ],
+      }),
+    },
+  };
 }
 
 export async function onRequestPost(context: FunctionContext) {
@@ -117,35 +161,41 @@ export async function onRequestPost(context: FunctionContext) {
     `prompts 数组长度必须等于 ${imageCount}。每个 prompt 必须是完整单张图片生成提示词，并包含统一视觉系统、构图、中文文案、负面提示词、4:5 竖版、严格参考产品图片等要求。`,
   ].join("\n");
 
-  const upstream = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.7,
-      messages: [
-        {
-          role: "system",
-          content: DETAIL_PROMPT_TEMPLATE,
-        },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: userText },
-            ...productImages.map((imageUrl) => ({
-              type: "image_url",
-              image_url: { url: imageUrl },
-            })),
-          ],
-        },
-      ],
-    }),
-  });
+  const upstreamRequest = createUpstreamRequest(
+    baseUrl,
+    apiKey,
+    model,
+    userText,
+    productImages,
+  );
 
-  const text = await upstream.text();
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamRequest.url, upstreamRequest.init);
+  } catch (error) {
+    return json(
+      {
+        error:
+          "Prompt 上游请求失败：" +
+          (error instanceof Error ? error.message : String(error)),
+      },
+      { status: 502 },
+    );
+  }
+
+  let text = "";
+  try {
+    text = await upstream.text();
+  } catch (error) {
+    return json(
+      {
+        error:
+          "Prompt 上游响应读取失败：" +
+          (error instanceof Error ? error.message : String(error)),
+      },
+      { status: 502 },
+    );
+  }
   if (!upstream.ok) {
     let detail = text.slice(0, 300);
     try {
