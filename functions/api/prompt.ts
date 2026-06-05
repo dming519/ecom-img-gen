@@ -1,5 +1,6 @@
 import { DETAIL_PROMPT_TEMPLATE } from "../../src/lib/promptTemplate";
 import { requireSession } from "../_lib/auth";
+import type { UserKvNamespace } from "../_lib/users";
 
 interface PromptRequestBody {
   name?: string;
@@ -18,6 +19,7 @@ interface FunctionContext {
     PROMPT_API_KEY?: string;
     PROMPT_BASE_URL?: string;
     PROMPT_MODEL?: string;
+    TASKS_KV?: UserKvNamespace;
   };
 }
 
@@ -137,7 +139,7 @@ function extractChatContent(text: string) {
     }
 
     throw new Error(
-      `Prompt 上游返回了无法解析的响应：${summarizeRawText(text) || "空响应"}`,
+      `详情图文案服务返回了无法解析的响应：${summarizeRawText(text) || "空响应"}`,
     );
   }
 }
@@ -184,7 +186,7 @@ function createUpstreamRequest(
 export async function onRequestPost(context: FunctionContext) {
   const session = await requireSession(context.request, context.env);
   if (!session) {
-    return json({ error: "请先登录后再生成 Prompt" }, { status: 401 });
+    return json({ error: "请先登录后再生成详情图文案" }, { status: 401 });
   }
 
   let body: PromptRequestBody;
@@ -230,7 +232,7 @@ export async function onRequestPost(context: FunctionContext) {
   }
 
   const userText = [
-    "请严格根据系统模板和上传产品图生成商品详情图 Prompt。",
+    "请严格根据系统模板和上传产品图生成商品详情图文案。",
     "",
     `产品名称：${name}`,
     `图片数量：${imageCount}`,
@@ -238,7 +240,7 @@ export async function onRequestPost(context: FunctionContext) {
     sellingPoints,
     "",
     "输出格式要求：只返回 JSON，不要 Markdown，不要解释。",
-    `JSON 结构：{"prompts":[{"title":"第1张：产品主图 / 核心卖点总览","prompt":"完整可直接用于 GPT-Image-2 的单张详情图 Prompt"}]}`,
+    `JSON 结构：{"prompts":[{"title":"第1张：产品主图 / 核心卖点总览","prompt":"完整可直接用于 GPT-Image-2 的单张详情图文案"}]}`,
     `prompts 数组长度必须等于 ${imageCount}。每个 prompt 必须是完整单张图片生成提示词，并包含统一视觉系统、构图、中文文案、负面提示词、4:5 竖版、严格参考产品图片等要求。`,
   ].join("\n");
 
@@ -257,7 +259,7 @@ export async function onRequestPost(context: FunctionContext) {
     return json(
       {
         error:
-          "Prompt 上游请求失败：" +
+          "详情图文案服务请求失败：" +
           (error instanceof Error ? error.message : String(error)),
       },
       { status: 502 },
@@ -271,7 +273,7 @@ export async function onRequestPost(context: FunctionContext) {
     return json(
       {
         error:
-          "Prompt 上游响应读取失败：" +
+          "详情图文案服务响应读取失败：" +
           (error instanceof Error ? error.message : String(error)),
       },
       { status: 502 },
@@ -286,7 +288,7 @@ export async function onRequestPost(context: FunctionContext) {
     } catch {
       // Keep raw response.
     }
-    return json({ error: `Prompt 生成失败: HTTP ${upstream.status}: ${detail}` }, { status: 502 });
+    return json({ error: `详情图文案生成失败: HTTP ${upstream.status}: ${detail}` }, { status: 502 });
   }
 
   let content = "";
@@ -303,7 +305,7 @@ export async function onRequestPost(context: FunctionContext) {
 
   if (!content) {
     return json(
-      { error: `Prompt 上游未返回内容：${summarizeRawText(text) || "空响应"}` },
+      { error: `详情图文案服务未返回内容：${summarizeRawText(text) || "空响应"}` },
       { status: 502 },
     );
   }
@@ -319,7 +321,7 @@ export async function onRequestPost(context: FunctionContext) {
 
     if (prompts.length !== imageCount) {
       return json(
-        { error: `Prompt 数量不匹配：期望 ${imageCount} 条，实际 ${prompts.length} 条` },
+        { error: `详情图文案数量不匹配：期望 ${imageCount} 条，实际 ${prompts.length} 条` },
         { status: 502 },
       );
     }
@@ -329,7 +331,7 @@ export async function onRequestPost(context: FunctionContext) {
     return json(
       {
         error:
-          "Prompt 上游未按 JSON 格式返回：" +
+          "详情图文案服务未按 JSON 格式返回：" +
           (error instanceof Error ? error.message : String(error)) +
           `；原始内容：${summarizeRawText(content) || "空响应"}`,
       },

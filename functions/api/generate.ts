@@ -1,5 +1,6 @@
 import type { ImageSize } from "../../src/lib/types";
 import { requireSession } from "../_lib/auth";
+import { consumeImageCredit, type UserKvNamespace } from "../_lib/users";
 
 interface GenerateRequestBody {
   prompt?: string;
@@ -10,7 +11,7 @@ interface GenerateRequestBody {
 interface FunctionContext {
   request: Request;
   env: {
-    TASKS_KV?: {
+    TASKS_KV?: UserKvNamespace & {
       put: (
         key: string,
         value: string,
@@ -63,7 +64,17 @@ export async function onRequestPost(context: FunctionContext) {
   const prompt = body.prompt?.trim() ?? "";
   const images = (body.inputImages ?? []).filter(Boolean);
   if (!prompt) {
-    return json({ error: "请输入商品详情图 Prompt" }, { status: 400 });
+    return json({ error: "请输入详情图文案" }, { status: 400 });
+  }
+
+  let creditResult: Awaited<ReturnType<typeof consumeImageCredit>>;
+  try {
+    creditResult = await consumeImageCredit(context.env, session.user);
+  } catch (error) {
+    return json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 402 },
+    );
   }
 
   const taskId = crypto.randomUUID();
@@ -105,5 +116,13 @@ export async function onRequestPost(context: FunctionContext) {
 
   context.waitUntil?.(dispatch);
 
-  return json({ taskId, status: "pending" }, { status: 202 });
+  return json(
+    {
+      taskId,
+      status: "pending",
+      remainingCredits: creditResult.user.remainingCredits,
+      usedCredits: creditResult.user.usedCredits,
+    },
+    { status: 202 },
+  );
 }

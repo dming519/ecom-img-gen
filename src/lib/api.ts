@@ -3,6 +3,7 @@ import {
   DEFAULT_PROMPT_PATH,
 } from "./config";
 import type {
+  AdminUserRow,
   CreateImageTaskOptions,
   GeneratePromptOptions,
   GeneratePromptResult,
@@ -16,6 +17,8 @@ interface ErrorPayload {
 interface CreateTaskPayload extends ErrorPayload {
   taskId?: string;
   status?: string;
+  remainingCredits?: number;
+  usedCredits?: number;
 }
 
 const RETRYABLE_FETCH_ERRORS = ["Failed to fetch", "NetworkError"];
@@ -73,7 +76,7 @@ export async function generateDetailPrompts(
 
 export async function createImageTask(
   options: CreateImageTaskOptions,
-): Promise<{ taskId: string }> {
+): Promise<{ taskId: string; remainingCredits?: number; usedCredits?: number }> {
   const response = await fetchWithRetry(DEFAULT_GENERATE_PATH, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -91,7 +94,11 @@ export async function createImageTask(
       typeof payload.error === "string" ? payload.error : "创建图片任务失败",
     );
   }
-  return { taskId: payload.taskId };
+  return {
+    taskId: payload.taskId,
+    remainingCredits: payload.remainingCredits,
+    usedCredits: payload.usedCredits,
+  };
 }
 
 export async function pollImageTask(
@@ -116,4 +123,32 @@ export async function pollImageTask(
   }
 
   throw new Error("任务超时，请重试");
+}
+
+export async function fetchAdminUsers(): Promise<{ users: AdminUserRow[] }> {
+  const response = await fetchWithRetry("/api/admin/users", {
+    method: "GET",
+    cache: "no-store",
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
+  }
+  return JSON.parse(text) as { users: AdminUserRow[] };
+}
+
+export async function updateAdminUser(
+  userKey: string,
+  patch: { remainingCredits?: number; role?: "admin" | "user" },
+): Promise<{ user: AdminUserRow }> {
+  const response = await fetchWithRetry("/api/admin/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userKey, ...patch }),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
+  }
+  return JSON.parse(text) as { user: AdminUserRow };
 }

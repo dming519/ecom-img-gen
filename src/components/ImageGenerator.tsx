@@ -11,6 +11,7 @@ import type {
   ImageSize,
   ProductInput,
 } from "@/lib/types";
+import AdminPanel from "./AdminPanel";
 import HistoryGrid from "./HistoryGrid";
 import Icon from "./Icon";
 import Lightbox from "./Lightbox";
@@ -103,6 +104,7 @@ export default function ImageGenerator() {
   const [accessBusy, setAccessBusy] = useState(false);
   const [promptBusy, setPromptBusy] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -361,6 +363,20 @@ export default function ImageGenerator() {
           size,
           inputImages: productImages,
         });
+        if (Number.isFinite(task.remainingCredits)) {
+          setSession((previous) =>
+            previous?.user
+              ? {
+                  ...previous,
+                  user: {
+                    ...previous.user,
+                    remainingCredits: task.remainingCredits,
+                    usedCredits: task.usedCredits,
+                  },
+                }
+              : previous,
+          );
+        }
 
         working = working.map((item, itemIndex) =>
           itemIndex === index
@@ -525,6 +541,10 @@ export default function ImageGenerator() {
       : session?.user?.provider === "google"
         ? "Google"
         : "访问码";
+  const creditLabel = authenticated
+    ? `${session?.user?.remainingCredits ?? 0} 次可用`
+    : "未登录";
+  const isAdmin = session?.user?.role === "admin";
 
   return (
     <main className="app-shell">
@@ -535,13 +555,14 @@ export default function ImageGenerator() {
           </span>
           <div>
             <h1>EcomImgGen</h1>
-            <p className="tagline">电商详情图生成工作台</p>
+            <p className="tagline">商品详情图生产台</p>
           </div>
         </div>
 
         <div className="run-status" aria-label="当前任务状态">
           <span>{prompts.length ? `${prompts.length} 条文案` : "文案未生成"}</span>
           <span>{productImages.length ? `${productImages.length} 张参考图` : "未上传参考图"}</span>
+          <span>{creditLabel}</span>
           <span>{imageBusy ? "生成中" : "待命"}</span>
         </div>
 
@@ -587,7 +608,22 @@ export default function ImageGenerator() {
                       </p>
                       </div>
                     </div>
-                    <p className="auth-popover-note">已登录，可使用内置生成配置。</p>
+                    <div className="account-stats">
+                      <span>剩余 {session.user.remainingCredits ?? 0}</span>
+                      <span>已用 {session.user.usedCredits ?? 0}</span>
+                    </div>
+                    {isAdmin && (
+                      <button
+                        className="btn-secondary auth-popover-link"
+                        type="button"
+                        onClick={() => {
+                          setAdminOpen(true);
+                          setAuthPopoverOpen(false);
+                        }}
+                      >
+                        后台管理
+                      </button>
+                    )}
                     <a className="btn-ghost auth-link auth-popover-link" href="/api/auth/logout?redirectTo=/">
                       退出登录
                     </a>
@@ -652,7 +688,7 @@ export default function ImageGenerator() {
           <div className="panel-heading">
             <div>
               <span className="section-kicker">Input</span>
-              <h2>产品资料</h2>
+              <h2>用户输入</h2>
             </div>
             <span className="panel-count">{imageCount} 张</span>
           </div>
@@ -692,7 +728,7 @@ export default function ImageGenerator() {
             className="selling-points"
             value={sellingPoints}
             disabled={controlsDisabled}
-            placeholder="主要卖点、功效、适用人群、规格信息、购买理由..."
+            placeholder="输入核心卖点、适用人群、规格信息、购买理由"
             onChange={(event) => setSellingPoints(event.target.value)}
           />
 
@@ -772,45 +808,15 @@ export default function ImageGenerator() {
             >
               {promptBusy ? "正在生成文案..." : "生成详情图文案"}
             </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={controlsDisabled || !prompts.length}
-              onClick={handleGenerateImages}
-            >
-              {imageBusy ? "正在逐张生成..." : "生成详情图"}
-            </button>
           </div>
 
           {error && <div className="alert">{error}</div>}
         </aside>
 
-        <section className="studio-panel canvas-panel">
-          <div className="panel-heading">
-            <div>
-              <span className="section-kicker">Canvas</span>
-              <h2>详情图预览</h2>
-            </div>
-            <span className="panel-count">{size.replace("x", "×")}</span>
-          </div>
-          <Stage
-            prompts={prompts}
-            activeIndex={activePromptIdx}
-            busy={imageBusy}
-            error={null}
-            onSelect={setActivePromptIdx}
-            onDownload={handleDownload}
-            onZoom={(index) => {
-              const item = prompts[index];
-              if (item?.base64) setLightboxSrc("data:image/png;base64," + item.base64);
-            }}
-          />
-        </section>
-
         <aside className="studio-panel prompt-rail">
           <div className="panel-heading">
             <div>
-              <span className="section-kicker">Queue</span>
+              <span className="section-kicker">Copy</span>
               <h2>详情图文案</h2>
             </div>
             <span className="panel-count">{prompts.length} 条</span>
@@ -829,6 +835,7 @@ export default function ImageGenerator() {
                       {index + 1}
                     </button>
                     <input
+                      aria-label={`详情图 ${index + 1} 标题`}
                       type="text"
                       value={item.title}
                       disabled={imageBusy}
@@ -837,6 +844,7 @@ export default function ImageGenerator() {
                     <span className={`status-pill is-${item.status}`}>{STATUS_LABEL[item.status]}</span>
                   </div>
                   <textarea
+                    aria-label={`详情图 ${index + 1} 文案`}
                     value={item.prompt}
                     disabled={imageBusy}
                     onFocus={() => setActivePromptIdx(index)}
@@ -846,7 +854,39 @@ export default function ImageGenerator() {
               ))
             )}
           </div>
+          <div className="prompt-action-bar">
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={controlsDisabled || !prompts.length}
+              onClick={handleGenerateImages}
+            >
+              {imageBusy ? "正在逐张生成..." : "生成详情图"}
+            </button>
+          </div>
         </aside>
+
+        <section className="studio-panel canvas-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="section-kicker">Output</span>
+              <h2>详情图展示</h2>
+            </div>
+            <span className="panel-count">{size.replace("x", "×")}</span>
+          </div>
+          <Stage
+            prompts={prompts}
+            activeIndex={activePromptIdx}
+            busy={imageBusy}
+            error={null}
+            onSelect={setActivePromptIdx}
+            onDownload={handleDownload}
+            onZoom={(index) => {
+              const item = prompts[index];
+              if (item?.base64) setLightboxSrc("data:image/png;base64," + item.base64);
+            }}
+          />
+        </section>
       </div>
 
       <section className="studio-panel history-dock">
@@ -874,6 +914,7 @@ export default function ImageGenerator() {
       </footer>
 
       <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+      <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />
     </main>
   );
 }
