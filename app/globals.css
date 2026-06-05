@@ -37,6 +37,7 @@
   --radius-control: 8px;
   --radius-pill: 999px;
   --topbar-h: 64px;
+  --workbench-h: calc(100vh - var(--topbar-h) - 38px);
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -371,7 +372,7 @@ h1 {
   display: grid;
   grid-template-columns: minmax(292px, 348px) minmax(480px, 1fr) minmax(340px, 416px);
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
   margin-top: 12px;
 }
 
@@ -388,13 +389,17 @@ h1 {
 .prompt-rail {
   position: sticky;
   top: calc(var(--topbar-h) + 30px);
-  max-height: calc(100vh - var(--topbar-h) - 44px);
+  height: var(--workbench-h);
+  max-height: var(--workbench-h);
   overflow: auto;
   padding: 14px;
 }
 
 .canvas-panel {
-  min-height: calc(100vh - var(--topbar-h) - 40px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: var(--workbench-h);
+  min-height: var(--workbench-h);
   padding: 0;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,255,255,0.36)),
@@ -1219,7 +1224,10 @@ footer {
 }
 
 .detail-stage {
-  min-height: calc(100vh - var(--topbar-h) - 100px);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  height: 100%;
+  min-height: 0;
   padding: 14px;
   gap: 12px;
 }
@@ -1237,7 +1245,8 @@ footer {
 }
 
 .stage {
-  min-height: calc(100vh - var(--topbar-h) - 152px);
+  min-height: 0;
+  height: 100%;
   border: 1px solid rgba(174, 184, 199, 0.62);
   background:
     linear-gradient(rgba(17, 24, 39, 0.024) 1px, transparent 1px),
@@ -1286,14 +1295,14 @@ footer {
 
 .stage-main {
   display: grid;
-  min-height: 100%;
+  min-height: 0;
   padding: 16px;
   place-items: center;
 }
 
 .stage-main img {
   width: min(100%, 500px);
-  max-height: calc(100vh - 250px);
+  max-height: min(100%, calc(var(--workbench-h) - 190px));
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 6px;
   background: #fff;
@@ -1359,6 +1368,8 @@ footer {
 }
 
 .prompt-rail {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   padding: 0;
 }
 
@@ -1369,15 +1380,18 @@ footer {
 }
 
 .prompt-editor-list {
-  max-height: calc(100vh - var(--topbar-h) - 120px);
+  height: auto;
+  min-height: 0;
+  max-height: none;
   overflow: auto;
-  padding: 12px;
+  padding: 10px;
 }
 
 .prompt-editor {
   border-radius: 8px;
   background: var(--bg-panel);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.68) inset;
+  padding: 8px;
 }
 
 .prompt-editor.is-active {
@@ -1388,14 +1402,19 @@ footer {
 }
 
 .prompt-editor-head {
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 
 .prompt-index {
+  width: 30px;
+  height: 30px;
   border-radius: 7px;
   background: #111827;
   border-color: #111827;
   color: #fff;
+  font-size: 0.78rem;
 }
 
 [data-theme="dark"] .prompt-index {
@@ -1404,13 +1423,21 @@ footer {
 }
 
 .prompt-editor textarea {
-  min-height: 156px;
+  height: 78px;
+  min-height: 78px;
+  max-height: 120px;
+  padding: 8px 9px;
   background: var(--bg-soft);
+  font-size: 0.8rem;
+  line-height: 1.48;
 }
 
 .status-pill {
-  min-width: 58px;
+  min-width: 54px;
   justify-content: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  font-size: 0.68rem;
 }
 
 .status-pill.is-draft {
@@ -1528,6 +1555,7 @@ footer {
   .prompt-rail,
   .canvas-panel {
     position: static;
+    height: auto;
     max-height: none;
   }
 
@@ -1537,6 +1565,7 @@ footer {
 
   .detail-stage,
   .stage {
+    height: auto;
     min-height: 440px;
   }
 
