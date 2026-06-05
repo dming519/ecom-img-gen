@@ -1,0 +1,26 @@
+{
+  "name": "ecom-img-gen",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "preview": "wrangler pages dev out --project-name ecom-img-gen",
+    "deploy": "next build && wrangler pages deploy out --project-name ecom-img-gen"
+  },
+  "dependencies": {
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260521.1",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^3.80.0"
+  }
+}

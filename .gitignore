@@ -1,0 +1,9 @@
+.next/
+out/
+node_modules/
+.wrangler/
+.idea/
+*.log
+*.err.log
+*.out.log
+
