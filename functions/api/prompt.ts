@@ -15,6 +15,8 @@ interface FunctionContext {
     OPENAI_API_KEY?: string;
     OPENAI_BASE_URL?: string;
     OPENAI_MODEL?: string;
+    PROMPT_API_KEY?: string;
+    PROMPT_BASE_URL?: string;
     PROMPT_MODEL?: string;
   };
 }
@@ -82,14 +84,22 @@ export async function onRequestPost(context: FunctionContext) {
     return json({ error: "请至少上传一张产品图片" }, { status: 400 });
   }
 
-  const apiKey = context.env.OPENAI_API_KEY?.trim();
-  const baseUrl = context.env.OPENAI_BASE_URL?.trim().replace(/\/+$/, "");
+  const apiKey =
+    context.env.PROMPT_API_KEY?.trim() || context.env.OPENAI_API_KEY?.trim();
+  const baseUrl = (
+    context.env.PROMPT_BASE_URL?.trim() ||
+    context.env.OPENAI_BASE_URL?.trim() ||
+    ""
+  ).replace(/\/+$/, "");
   const model =
     context.env.PROMPT_MODEL?.trim() || context.env.OPENAI_MODEL?.trim();
 
   if (!apiKey || !baseUrl || !model) {
     return json(
-      { error: "服务端缺少 OPENAI_API_KEY / OPENAI_BASE_URL / PROMPT_MODEL 配置" },
+      {
+        error:
+          "服务端缺少 PROMPT_API_KEY / PROMPT_BASE_URL / PROMPT_MODEL 配置",
+      },
       { status: 500 },
     );
   }
