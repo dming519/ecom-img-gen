@@ -30,8 +30,16 @@ interface ChatCompletionPayload {
       content?: string;
     };
   }>;
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        text?: string;
+      }>;
+    };
+  }>;
   content?: string;
   text?: string;
+  output_text?: string;
   error?: {
     message?: string;
   };
@@ -104,9 +112,17 @@ function extractContentFromSse(text: string) {
 function extractChatContent(text: string) {
   try {
     const payload = JSON.parse(text) as ChatCompletionPayload;
+    const geminiText = payload.candidates
+      ?.flatMap((candidate) => candidate.content?.parts ?? [])
+      .map((part) => part.text ?? "")
+      .join("")
+      .trim();
+
     return (
       payload.choices?.[0]?.message?.content?.trim() ??
       payload.choices?.[0]?.delta?.content?.trim() ??
+      geminiText ??
+      payload.output_text?.trim() ??
       payload.content?.trim() ??
       payload.text?.trim() ??
       ""
@@ -286,7 +302,10 @@ export async function onRequestPost(context: FunctionContext) {
   }
 
   if (!content) {
-    return json({ error: "Prompt 上游未返回内容" }, { status: 502 });
+    return json(
+      { error: `Prompt 上游未返回内容：${summarizeRawText(text) || "空响应"}` },
+      { status: 502 },
+    );
   }
 
   try {
