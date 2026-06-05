@@ -544,7 +544,8 @@ export default function ImageGenerator() {
   const creditLabel = authenticated
     ? `${session?.user?.remainingCredits ?? 0} 次可用`
     : "未登录";
-  const isAdmin = session?.user?.role === "admin";
+  const isAdmin =
+    session?.user?.role === "admin" || session?.user?.role === "super_admin";
 
   return (
     <main className="app-shell">

@@ -1,6 +1,7 @@
 export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 
 export type AuthProvider = "github" | "google" | "access";
+export type UserRole = "super_admin" | "admin" | "user";
 
 export interface AuthUser {
   provider: AuthProvider;
@@ -9,7 +10,7 @@ export interface AuthUser {
   name: string;
   email: string | null;
   image: string | null;
-  role?: "admin" | "user";
+  role?: UserRole;
   remainingCredits?: number;
   usedCredits?: number;
   grantedCredits?: number;
@@ -27,7 +28,7 @@ export interface AdminUserRow {
   name: string;
   email: string | null;
   image: string | null;
-  role: "admin" | "user";
+  role: UserRole;
   remainingCredits: number;
   usedCredits: number;
   grantedCredits: number;

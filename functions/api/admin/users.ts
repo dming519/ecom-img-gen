@@ -4,6 +4,7 @@ import {
   updateManagedUser,
   type UserKvNamespace,
 } from "../../_lib/users";
+import type { UserRole } from "../../../src/lib/types";
 
 interface FunctionContext {
   request: Request;
@@ -29,7 +30,7 @@ async function requireAdmin(context: FunctionContext) {
   if (!session) {
     return { response: json({ error: "请先登录" }, { status: 401 }) };
   }
-  if (session.user.role !== "admin") {
+  if (session.user.role !== "admin" && session.user.role !== "super_admin") {
     return { response: json({ error: "当前账号没有后台权限" }, { status: 403 }) };
   }
   return { session };
@@ -57,7 +58,7 @@ export async function onRequestPost(context: FunctionContext) {
     const body = (await context.request.json()) as {
       userKey?: string;
       remainingCredits?: number;
-      role?: "admin" | "user";
+      role?: UserRole;
     };
     const userKey = body.userKey?.trim();
     if (!userKey) {

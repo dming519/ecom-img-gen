@@ -1,4 +1,4 @@
-import type { AuthProvider, AuthUser, AdminUserRow } from "../../src/lib/types";
+import type { AuthProvider, AuthUser, AdminUserRow, UserRole } from "../../src/lib/types";
 
 export const INITIAL_IMAGE_CREDITS = 5;
 
@@ -25,7 +25,7 @@ interface UserRecord {
   name: string;
   email: string | null;
   image: string | null;
-  role: "admin" | "user";
+  role: UserRole;
   createdAt: number;
   updatedAt: number;
   lastLoginAt: number;
@@ -50,6 +50,11 @@ function userRecordKey(userKey: string) {
 
 function usageRecordKey(userKey: string) {
   return `usage:${userKey}`;
+}
+
+function normalizeRole(role: string | undefined): UserRole {
+  if (role === "super_admin" || role === "admin") return role;
+  return "user";
 }
 
 export function getUserKey(user: AuthUser) {
@@ -132,7 +137,7 @@ export async function ensureManagedUser(env: UserEnv, authUser: AuthUser) {
       user: {
         ...authUser,
         userKey: getUserKey(authUser),
-        role: authUser.role ?? "user",
+        role: normalizeRole(authUser.role),
       } satisfies AuthUser,
       record: null,
       usage: null,
@@ -145,7 +150,9 @@ export async function ensureManagedUser(env: UserEnv, authUser: AuthUser) {
   const existingAdmin = await kv.get(META_ADMIN);
   const canBecomeFirstAdmin = authUser.provider !== "access";
   const isFirstUser = !existingAdmin && canBecomeFirstAdmin;
-  const role = existing?.role ?? (isFirstUser ? "admin" : "user");
+  const isRegisteredSuperAdmin = existingAdmin === userKey;
+  const role: UserRole =
+    isFirstUser || isRegisteredSuperAdmin ? "super_admin" : normalizeRole(existing?.role);
 
   const record: UserRecord = {
     userKey,
@@ -182,10 +189,18 @@ export async function hydrateManagedUser(env: UserEnv, authUser: AuthUser) {
   const record = await readJson<UserRecord>(kv, userRecordKey(userKey));
   if (!record) return ensureManagedUser(env, authUser);
 
+  const superAdminKey = await kv.get(META_ADMIN);
+  const role: UserRole =
+    superAdminKey === userKey ? "super_admin" : normalizeRole(record.role);
+  const normalizedRecord = role === record.role ? record : { ...record, role, updatedAt: Date.now() };
+  if (normalizedRecord !== record) {
+    await writeJson(kv, userRecordKey(userKey), normalizedRecord);
+  }
+
   const usage = await readUsage(kv, userKey);
   return {
-    user: toSessionUser(record, usage),
-    record,
+    user: toSessionUser(normalizedRecord, usage),
+    record: normalizedRecord,
     usage,
   };
 }
@@ -242,8 +257,16 @@ export async function listManagedUsers(env: UserEnv) {
   for (const userKey of userKeys) {
     const record = await readJson<UserRecord>(kv, userRecordKey(userKey));
     if (!record) continue;
+    const superAdminKey = await kv.get(META_ADMIN);
+    const role: UserRole =
+      superAdminKey === userKey ? "super_admin" : normalizeRole(record.role);
+    const normalizedRecord =
+      role === record.role ? record : { ...record, role, updatedAt: Date.now() };
+    if (normalizedRecord !== record) {
+      await writeJson(kv, userRecordKey(userKey), normalizedRecord);
+    }
     const usage = await readUsage(kv, userKey);
-    rows.push(toAdminRow(record, usage));
+    rows.push(toAdminRow(normalizedRecord, usage));
   }
 
   return rows.sort((a, b) => b.lastLoginAt - a.lastLoginAt);
@@ -252,7 +275,7 @@ export async function listManagedUsers(env: UserEnv) {
 export async function updateManagedUser(
   env: UserEnv,
   userKey: string,
-  patch: { remainingCredits?: number; role?: "admin" | "user" },
+  patch: { remainingCredits?: number; role?: UserRole },
 ) {
   const kv = env.TASKS_KV;
   if (!kv) throw new Error("服务端未配置用户表");
@@ -260,9 +283,19 @@ export async function updateManagedUser(
   if (!record) throw new Error("用户不存在");
 
   const now = Date.now();
+  const superAdminKey = await kv.get(META_ADMIN);
+  const isSuperAdmin = superAdminKey === userKey;
   let nextRecord = record;
   if (patch.role) {
-    nextRecord = { ...nextRecord, role: patch.role, updatedAt: now };
+    const nextRole: UserRole = isSuperAdmin
+      ? "super_admin"
+      : patch.role === "super_admin"
+        ? "admin"
+        : patch.role;
+    nextRecord = { ...nextRecord, role: nextRole, updatedAt: now };
+    await writeJson(kv, userRecordKey(userKey), nextRecord);
+  } else if (isSuperAdmin && nextRecord.role !== "super_admin") {
+    nextRecord = { ...nextRecord, role: "super_admin", updatedAt: now };
     await writeJson(kv, userRecordKey(userKey), nextRecord);
   }
 
