@@ -8,6 +8,7 @@ import type {
   GeneratePromptOptions,
   GeneratePromptResult,
   ImageTaskStatus,
+  UserRole,
 } from "./types";
 
 interface ErrorPayload {
@@ -139,7 +140,7 @@ export async function fetchAdminUsers(): Promise<{ users: AdminUserRow[] }> {
 
 export async function updateAdminUser(
   userKey: string,
-  patch: { remainingCredits?: number; role?: "admin" | "user" },
+  patch: { remainingCredits?: number; role?: UserRole },
 ): Promise<{ user: AdminUserRow }> {
   const response = await fetchWithRetry("/api/admin/users", {
     method: "POST",

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { fetchAdminUsers, updateAdminUser } from "@/lib/api";
-import type { AdminUserRow } from "@/lib/types";
+import type { AdminUserRow, UserRole } from "@/lib/types";
 
 interface AdminPanelProps {
   open: boolean;
@@ -14,6 +14,12 @@ const TIME_FMT: Intl.DateTimeFormatOptions = {
   day: "2-digit",
   hour: "2-digit",
   minute: "2-digit",
+};
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  super_admin: "超级管理员",
+  admin: "管理员",
+  user: "用户",
 };
 
 export default function AdminPanel({ open, onClose }: AdminPanelProps) {
@@ -51,7 +57,7 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
 
   const updateUser = async (
     user: AdminUserRow,
-    patch: { remainingCredits?: number; role?: "admin" | "user" },
+    patch: { remainingCredits?: number; role?: UserRole },
   ) => {
     setBusyKey(user.userKey);
     setError(null);
@@ -107,6 +113,7 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
             <tbody>
               {users.map((user) => {
                 const busy = busyKey === user.userKey;
+                const isSuperAdmin = user.role === "super_admin";
                 return (
                   <tr key={user.userKey}>
                     <td>
@@ -128,11 +135,13 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
                       <select
                         aria-label={`${user.name} 的角色`}
                         value={user.role}
-                        disabled={busy}
+                        disabled={busy || isSuperAdmin}
                         onChange={(event) =>
-                          updateUser(user, { role: event.target.value as "admin" | "user" })
+                          updateUser(user, { role: event.target.value as UserRole })
                         }
+                        title={ROLE_LABELS[user.role]}
                       >
+                        {isSuperAdmin && <option value="super_admin">超级管理员</option>}
                         <option value="user">用户</option>
                         <option value="admin">管理员</option>
                       </select>
