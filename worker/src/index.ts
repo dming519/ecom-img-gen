@@ -62,6 +62,18 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
+function getUpstreamErrorDetail(text: string) {
+  let detail = text.replace(/\s+/g, " ").trim().slice(0, 300);
+  try {
+    const payload = JSON.parse(text) as ImagesPayload;
+    if (payload.error?.message) detail = payload.error.message;
+    if (payload.message) detail = payload.message;
+  } catch {
+    // Keep raw response.
+  }
+  return detail;
+}
+
 export class ImageTasksDO {
   state: DurableObjectState;
   env: Env;
@@ -132,7 +144,8 @@ export class ImageTasksDO {
 
     try {
       const hasImages = images.length > 0;
-      const upstream = await fetch(
+      let usedReferenceImages = hasImages;
+      let upstream = await fetch(
         resolveImageEndpoint(baseUrl, hasImages),
         hasImages
           ? (() => {
@@ -170,23 +183,38 @@ export class ImageTasksDO {
             },
       );
 
-      const text = await upstream.text();
+      let text = await upstream.text();
+      let fallbackReason = "";
+      if (!upstream.ok && hasImages) {
+        fallbackReason = `参考图模式失败: HTTP ${upstream.status}: ${getUpstreamErrorDetail(text)}`;
+        usedReferenceImages = false;
+        upstream = await fetch(resolveImageEndpoint(baseUrl, false), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            prompt,
+            ...(size !== "auto" ? { size } : {}),
+            response_format: "b64_json",
+          }),
+        });
+        text = await upstream.text();
+      }
+
       if (!upstream.ok) {
-        let detail = text.slice(0, 300);
-        try {
-          const payload = JSON.parse(text) as ImagesPayload;
-          if (payload.error?.message) detail = payload.error.message;
-          if (payload.message) detail = payload.message;
-        } catch {
-          // Keep raw response.
-        }
+        const detail = getUpstreamErrorDetail(text);
         await this.env.TASKS_KV.put(
           taskKey,
           JSON.stringify({
             status: "failed",
             createdAt: now,
             updatedAt: Date.now(),
-            error: `HTTP ${upstream.status}: ${detail}`,
+            error: fallbackReason
+              ? `${fallbackReason}；纯生成重试失败: HTTP ${upstream.status}: ${detail}`
+              : `HTTP ${upstream.status}: ${detail}`,
           }),
           { expirationTtl: 3600 },
         );
@@ -232,6 +260,8 @@ export class ImageTasksDO {
           createdAt: now,
           updatedAt: Date.now(),
           model,
+          usedReferenceImages,
+          warning: fallbackReason || null,
           base64: result,
         }),
         { expirationTtl: 3600 },
