@@ -35,6 +35,7 @@ interface ChatCompletionPayload {
   error?: {
     message?: string;
   };
+  message?: string;
 }
 
 interface UpstreamRequest {
@@ -68,6 +69,12 @@ function summarizeRawText(text: string) {
 function normalizeCount(value: number | undefined) {
   if (!Number.isFinite(value)) return 5;
   return Math.min(10, Math.max(1, Math.round(value ?? 5)));
+}
+
+function resolveOpenAiEndpoint(baseUrl: string, path: string) {
+  const normalized = baseUrl.replace(/\/+$/, "");
+  const base = normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
+  return `${base}${path}`;
 }
 
 function extractContentFromSse(text: string) {
@@ -127,7 +134,7 @@ function createUpstreamRequest(
   productImages: string[],
 ): UpstreamRequest {
   return {
-    url: `${baseUrl}/chat/completions`,
+    url: resolveOpenAiEndpoint(baseUrl, "/chat/completions"),
     init: {
       method: "POST",
       headers: {
@@ -259,6 +266,7 @@ export async function onRequestPost(context: FunctionContext) {
     try {
       const payload = JSON.parse(text) as ChatCompletionPayload;
       if (payload.error?.message) detail = payload.error.message;
+      if (payload.message) detail = payload.message;
     } catch {
       // Keep raw response.
     }

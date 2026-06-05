@@ -18,11 +18,20 @@ interface GenerateRequestBody {
 interface ImagesPayload {
   data?: Array<{ b64_json?: string }>;
   error?: { message?: string };
+  message?: string;
+}
+
+function resolveOpenAiEndpoint(baseUrl: string, path: string) {
+  const normalized = baseUrl.replace(/\/+$/, "");
+  const base = normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
+  return `${base}${path}`;
 }
 
 function resolveImageEndpoint(baseUrl: string, hasImages: boolean) {
-  const normalized = baseUrl.replace(/\/+$/, "");
-  return normalized + (hasImages ? "/images/edits" : "/images/generations");
+  return resolveOpenAiEndpoint(
+    baseUrl,
+    hasImages ? "/images/edits" : "/images/generations",
+  );
 }
 
 function dataUrlToBlob(dataUrl: string) {
@@ -167,6 +176,7 @@ export class ImageTasksDO {
         try {
           const payload = JSON.parse(text) as ImagesPayload;
           if (payload.error?.message) detail = payload.error.message;
+          if (payload.message) detail = payload.message;
         } catch {
           // Keep raw response.
         }
