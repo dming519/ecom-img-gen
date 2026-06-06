@@ -669,6 +669,10 @@ button:disabled {
   max-width: 100%;
 }
 
+.param-picker.is-open {
+  z-index: 120;
+}
+
 .param-trigger {
   min-height: 38px;
   display: inline-flex;
@@ -2059,6 +2063,34 @@ footer {
     font-size: 14px;
   }
 
+  .studio-topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand actions"
+      "status status";
+    align-items: start;
+    gap: 10px 12px;
+    padding: 10px;
+  }
+
+  .brand-block {
+    grid-area: brand;
+  }
+
+  .run-status {
+    grid-area: status;
+    gap: 6px;
+  }
+
+  .top-actions {
+    grid-area: actions;
+    justify-content: flex-end;
+  }
+
+  .auth-popover {
+    width: min(330px, calc(100vw - 28px));
+  }
+
   .studio-topbar,
   .input-rail,
   .canvas-panel,
@@ -2132,6 +2164,11 @@ footer {
   .param-popover {
     width: 100%;
     min-width: 0;
+  }
+
+  .settings-row .param-popover {
+    top: auto;
+    bottom: calc(100% + 8px);
   }
 
   .param-popover-options {
