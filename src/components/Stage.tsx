@@ -8,7 +8,6 @@ interface StageProps {
   prompts: DetailPromptItem[];
   activeIndex: number;
   busy: boolean;
-  error: string | null;
   onSelect: (index: number) => void;
   onDownload: (index: number) => void;
   onZoom: (index: number) => void;
@@ -18,7 +17,6 @@ export default function Stage({
   prompts,
   activeIndex,
   busy,
-  error,
   onSelect,
   onDownload,
   onZoom,
@@ -85,8 +83,6 @@ export default function Stage({
           </div>
         )}
       </div>
-
-      {error && <div className="alert stage-error">{error}</div>}
 
       <div className="result-strip" aria-label="详情图生成结果">
         {prompts.map((item, index) => {

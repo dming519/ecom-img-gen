@@ -2,7 +2,7 @@ export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 export type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 export type ImageQuality = "1K" | "2K" | "4K";
 
-export type AuthProvider = "github" | "google" | "access";
+type AuthProvider = "github" | "google" | "access";
 export type UserRole = "super_admin" | "admin" | "user";
 
 export interface AuthUser {
@@ -71,7 +71,7 @@ export interface ProductInput {
   productImageIds?: string[];
 }
 
-export type DetailImageStatus =
+type DetailImageStatus =
   | "draft"
   | "queued"
   | "running"
@@ -146,7 +146,7 @@ export interface ImageTaskStatus {
   billedAt?: number;
 }
 
-export type CutoutStatus =
+type CutoutStatus =
   | "draft"
   | "running"
   | "succeeded"

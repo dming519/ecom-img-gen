@@ -3,6 +3,8 @@ import type {
   CutoutHistoryItem,
   HistoryItem,
 } from "../../src/lib/types";
+import { requireSession } from "./auth";
+import { getUserKey, type UserKvNamespace } from "./users";
 
 export interface HistoryD1Result {
   success?: boolean;
@@ -50,6 +52,11 @@ export interface HistoryStorageEnv {
   HISTORY_BUCKET?: HistoryR2Bucket;
 }
 
+export interface HistoryStorageFunctionEnv extends HistoryStorageEnv {
+  AUTH_SECRET?: string;
+  TASKS_KV?: UserKvNamespace;
+}
+
 type HistoryKind = "detail" | "cutout";
 
 interface HistoryRow {
@@ -87,6 +94,29 @@ export function requireHistoryBindings(env: HistoryStorageEnv) {
     HISTORY_DB: env.HISTORY_DB,
     HISTORY_BUCKET: env.HISTORY_BUCKET,
   };
+}
+
+export async function requireUserHistoryStorage(
+  context: { request: Request; env: HistoryStorageFunctionEnv },
+  unauthenticatedMessage: string,
+) {
+  const session = await requireSession(context.request, context.env);
+  if (!session) {
+    return { response: json({ error: unauthenticatedMessage }, { status: 401 }) };
+  }
+  try {
+    return {
+      userKey: getUserKey(session.user),
+      storage: requireHistoryBindings(context.env),
+    };
+  } catch (error) {
+    return {
+      response: json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 500 },
+      ),
+    };
+  }
 }
 
 export async function ensureHistorySchema(db: HistoryD1Database) {

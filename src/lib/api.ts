@@ -112,7 +112,7 @@ export async function generateDetailPrompts(
   };
 }
 
-export async function pollPromptTask(
+async function pollPromptTask(
   taskId: string,
   timeoutMs = 6 * 60 * 1000,
 ): Promise<PromptTaskStatus> {

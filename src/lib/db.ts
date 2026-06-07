@@ -207,12 +207,6 @@ export async function dbPutCutoutDraft(
   return "active";
 }
 
-export async function dbClearCutoutDraft() {
-  await requestJson<{ ok: boolean }>("/api/history/cutout-draft", {
-    method: "DELETE",
-  });
-}
-
 export async function dbPutProductImage(dataUrl: string): Promise<string> {
   const payload = await requestJson<{ id: string }>("/api/history/image", {
     method: "POST",

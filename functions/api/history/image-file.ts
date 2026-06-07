@@ -1,28 +1,18 @@
-import { requireSession } from "../../_lib/auth";
 import {
   json,
   readStoredImageFile,
-  requireHistoryBindings,
-  type HistoryD1Database,
-  type HistoryR2Bucket,
+  requireUserHistoryStorage,
+  type HistoryStorageFunctionEnv,
 } from "../../_lib/historyStorage";
-import { getUserKey, type UserKvNamespace } from "../../_lib/users";
 
 interface FunctionContext {
   request: Request;
-  env: {
-    AUTH_SECRET?: string;
-    TASKS_KV?: UserKvNamespace;
-    HISTORY_DB?: HistoryD1Database;
-    HISTORY_BUCKET?: HistoryR2Bucket;
-  };
+  env: HistoryStorageFunctionEnv;
 }
 
 export async function onRequestGet(context: FunctionContext) {
-  const session = await requireSession(context.request, context.env);
-  if (!session) {
-    return json({ error: "请先登录后再读取图片" }, { status: 401 });
-  }
+  const auth = await requireUserHistoryStorage(context, "请先登录后再读取图片");
+  if ("response" in auth) return auth.response;
 
   const id = new URL(context.request.url).searchParams.get("id")?.trim();
   if (!id) {
@@ -30,8 +20,7 @@ export async function onRequestGet(context: FunctionContext) {
   }
 
   try {
-    const storage = requireHistoryBindings(context.env);
-    const file = await readStoredImageFile(storage, getUserKey(session.user), id);
+    const file = await readStoredImageFile(auth.storage, auth.userKey, id);
     if (!file) {
       return json({ error: "图片不存在或无权访问" }, { status: 404 });
     }

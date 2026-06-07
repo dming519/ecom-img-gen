@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "check": "tsc --noEmit && tsc -p worker/tsconfig.json --noEmit",
     "preview": "wrangler pages dev out --project-name ecom-img-gen",
     "deploy": "next build && wrangler pages deploy out --project-name ecom-img-gen"
   },

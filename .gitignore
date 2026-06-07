@@ -3,7 +3,7 @@ out/
 node_modules/
 .wrangler/
 .idea/
+*.tsbuildinfo
 *.log
 *.err.log
 *.out.log
-

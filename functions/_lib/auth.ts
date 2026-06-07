@@ -1,4 +1,4 @@
-import type { AuthProvider, AuthUser } from "../../src/lib/types";
+import type { AuthUser } from "../../src/lib/types";
 import { resolveAccessCodeUser } from "./accessCodes";
 import type { HistoryD1Database } from "./historyStorage";
 import { ensureManagedUser, hydrateManagedUser, type UserKvNamespace } from "./users";
@@ -19,13 +19,15 @@ interface AuthEnv {
   TASKS_KV?: UserKvNamespace;
 }
 
+export type OAuthProvider = "github" | "google";
+
 interface SessionPayload {
   user: AuthUser;
   expiresAt: number;
 }
 
 interface StatePayload {
-  provider: AuthProvider;
+  provider: OAuthProvider;
   state: string;
   redirectTo: string;
   expiresAt: number;
@@ -135,7 +137,7 @@ function getOrigin(request: Request) {
   return new URL(request.url).origin;
 }
 
-function getCallbackUrl(request: Request, provider: AuthProvider) {
+function getCallbackUrl(request: Request, provider: OAuthProvider) {
   return `${getOrigin(request)}/api/auth/callback/${provider}`;
 }
 
@@ -247,7 +249,7 @@ export async function handleSessionRequest(request: Request, env: AuthEnv) {
 export async function handleLoginRequest(
   request: Request,
   env: AuthEnv,
-  provider: AuthProvider,
+  provider: OAuthProvider,
 ) {
   const secret = getAuthSecret(env);
   const redirectTo = resolveRedirectPath(
@@ -438,7 +440,7 @@ async function resolveGoogleUser(env: AuthEnv, request: Request, code: string) {
 export async function handleCallbackRequest(
   request: Request,
   env: AuthEnv,
-  provider: AuthProvider,
+  provider: OAuthProvider,
 ) {
   try {
     const secret = getAuthSecret(env);

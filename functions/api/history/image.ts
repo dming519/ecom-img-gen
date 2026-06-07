@@ -1,45 +1,17 @@
-import { requireSession } from "../../_lib/auth";
 import {
   json,
-  requireHistoryBindings,
+  requireUserHistoryStorage,
   storeProductImage,
-  type HistoryD1Database,
-  type HistoryR2Bucket,
+  type HistoryStorageFunctionEnv,
 } from "../../_lib/historyStorage";
-import { getUserKey, type UserKvNamespace } from "../../_lib/users";
 
 interface FunctionContext {
   request: Request;
-  env: {
-    AUTH_SECRET?: string;
-    TASKS_KV?: UserKvNamespace;
-    HISTORY_DB?: HistoryD1Database;
-    HISTORY_BUCKET?: HistoryR2Bucket;
-  };
-}
-
-async function requireStorage(context: FunctionContext) {
-  const session = await requireSession(context.request, context.env);
-  if (!session) {
-    return { response: json({ error: "请先登录后再上传图片" }, { status: 401 }) };
-  }
-  try {
-    return {
-      userKey: getUserKey(session.user),
-      storage: requireHistoryBindings(context.env),
-    };
-  } catch (error) {
-    return {
-      response: json(
-        { error: error instanceof Error ? error.message : String(error) },
-        { status: 500 },
-      ),
-    };
-  }
+  env: HistoryStorageFunctionEnv;
 }
 
 export async function onRequestPost(context: FunctionContext) {
-  const auth = await requireStorage(context);
+  const auth = await requireUserHistoryStorage(context, "请先登录后再上传图片");
   if ("response" in auth) return auth.response;
 
   try {

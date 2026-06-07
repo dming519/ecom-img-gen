@@ -1,7 +1,9 @@
-import type { AuthProvider, AuthUser, AdminUserRow, UserRole } from "../../src/lib/types";
+import type { AuthUser, AdminUserRow, UserRole } from "../../src/lib/types";
 import type { HistoryD1Database } from "./historyStorage";
 
 export const INITIAL_IMAGE_CREDITS = 10;
+
+type AuthProvider = AuthUser["provider"];
 
 interface KvListResult {
   keys: Array<{ name: string }>;

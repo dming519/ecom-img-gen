@@ -1,7 +1,7 @@
 import { handleCallbackRequest } from "../../../_lib/auth";
 import type { HistoryD1Database } from "../../../_lib/historyStorage";
 import type { UserKvNamespace } from "../../../_lib/users";
-import type { AuthProvider } from "../../../../src/lib/types";
+import type { OAuthProvider } from "../../../_lib/auth";
 
 interface FunctionContext {
   request: Request;
@@ -19,7 +19,7 @@ interface FunctionContext {
   };
 }
 
-function isProvider(value: string | undefined): value is AuthProvider {
+function isProvider(value: string | undefined): value is OAuthProvider {
   return value === "github" || value === "google";
 }
 

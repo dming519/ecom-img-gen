@@ -460,6 +460,25 @@ export default function ImageGenerator({ initialMode }: ImageGeneratorProps = {}
     }
   }, []);
 
+  const updateSessionCredits = useCallback(
+    (result: { remainingCredits?: number; usedCredits?: number; unlimitedCredits?: boolean }) => {
+      if (result.unlimitedCredits || !Number.isFinite(result.remainingCredits)) return;
+      setSession((previous) =>
+        previous?.user
+          ? {
+              ...previous,
+              user: {
+                ...previous.user,
+                remainingCredits: result.remainingCredits,
+                usedCredits: result.usedCredits,
+              },
+            }
+          : previous,
+      );
+    },
+    [],
+  );
+
   const handleSelectFiles = useCallback(async (files: FileList | null) => {
     if (!files || !files.length) return;
     setError(null);
@@ -641,20 +660,7 @@ export default function ImageGenerator({ initialMode }: ImageGeneratorProps = {}
           imageAbortRef.current?.signal,
         );
         currentImageTaskIdRef.current = task.taskId;
-        if (!task.unlimitedCredits && Number.isFinite(task.remainingCredits)) {
-          setSession((previous) =>
-            previous?.user
-              ? {
-                  ...previous,
-                  user: {
-                    ...previous.user,
-                    remainingCredits: task.remainingCredits,
-                    usedCredits: task.usedCredits,
-                  },
-                }
-              : previous,
-          );
-        }
+        updateSessionCredits(task);
 
         working = working.map((item, itemIndex) =>
           itemIndex === index
@@ -689,20 +695,7 @@ export default function ImageGenerator({ initialMode }: ImageGeneratorProps = {}
           await persistHistory(historyItem);
           throw new Error(message);
         }
-        if (!result.unlimitedCredits && Number.isFinite(result.remainingCredits)) {
-          setSession((previous) =>
-            previous?.user
-              ? {
-                  ...previous,
-                  user: {
-                    ...previous.user,
-                    remainingCredits: result.remainingCredits,
-                    usedCredits: result.usedCredits,
-                  },
-                }
-              : previous,
-          );
-        }
+        updateSessionCredits(result);
 
         working = working.map((item, itemIndex) =>
           itemIndex === index
@@ -756,6 +749,7 @@ export default function ImageGenerator({ initialMode }: ImageGeneratorProps = {}
     prompts,
     quality,
     resolvedSize,
+    updateSessionCredits,
     validateProduct,
   ]);
 
@@ -869,20 +863,7 @@ export default function ImageGenerator({ initialMode }: ImageGeneratorProps = {}
         imageAbortRef.current?.signal,
       );
       currentImageTaskIdRef.current = task.taskId;
-      if (!task.unlimitedCredits && Number.isFinite(task.remainingCredits)) {
-        setSession((previous) =>
-          previous?.user
-            ? {
-                ...previous,
-                user: {
-                  ...previous.user,
-                  remainingCredits: task.remainingCredits,
-                  usedCredits: task.usedCredits,
-                },
-              }
-            : previous,
-        );
-      }
+      updateSessionCredits(task);
 
       working = working.map((item, itemIndex) =>
         itemIndex === targetIndex
@@ -917,20 +898,7 @@ export default function ImageGenerator({ initialMode }: ImageGeneratorProps = {}
         await persistHistory(historyItem);
         throw new Error(message);
       }
-      if (!result.unlimitedCredits && Number.isFinite(result.remainingCredits)) {
-        setSession((previous) =>
-          previous?.user
-            ? {
-                ...previous,
-                user: {
-                  ...previous.user,
-                  remainingCredits: result.remainingCredits,
-                  usedCredits: result.usedCredits,
-                },
-              }
-            : previous,
-        );
-      }
+      updateSessionCredits(result);
 
       working = working.map((item, itemIndex) =>
         itemIndex === targetIndex
@@ -988,6 +956,7 @@ export default function ImageGenerator({ initialMode }: ImageGeneratorProps = {}
     prompts,
     quality,
     resolvedSize,
+    updateSessionCredits,
     validateProduct,
   ]);
 
@@ -1668,7 +1637,6 @@ export default function ImageGenerator({ initialMode }: ImageGeneratorProps = {}
             prompts={prompts}
             activeIndex={activePromptIndex}
             busy={imageBusy}
-            error={null}
             onSelect={(index) => {
               setActivePromptIdx(index);
             }}
