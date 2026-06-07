@@ -22,6 +22,15 @@ interface FunctionContext {
   };
 }
 
+interface CutoutTaskRecord {
+  status?: string;
+  userKey?: string;
+  billedAt?: number;
+  createdAt?: number;
+  updatedAt?: number;
+  [key: string]: unknown;
+}
+
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
     ...init,
@@ -32,41 +41,26 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
-function normalizeTaskStatus(task: unknown) {
-  if (!task || typeof task !== "object") return task;
-  const value = task as {
-    status?: string;
-    createdAt?: number;
-    updatedAt?: number;
-  };
+function normalizeTaskStatus(task: CutoutTaskRecord) {
   if (
-    (value.status === "pending" || value.status === "running") &&
-    Number.isFinite(value.updatedAt) &&
-    Date.now() - Number(value.updatedAt) > 12 * 60 * 1000
+    (task.status === "pending" || task.status === "running") &&
+    Number.isFinite(task.updatedAt) &&
+    Date.now() - Number(task.updatedAt) > 12 * 60 * 1000
   ) {
     return {
-      ...value,
+      ...task,
       status: "failed",
-      error: "图片生成任务已超时，请重新生成。",
+      error: "抠图任务已超时，请重新生成。",
       updatedAt: Date.now(),
     };
   }
   return task;
 }
 
-interface ImageTaskRecord {
-  status?: string;
-  userKey?: string;
-  billedAt?: number;
-  createdAt?: number;
-  updatedAt?: number;
-  [key: string]: unknown;
-}
-
 export async function onRequestGet(context: FunctionContext) {
   const session = await requireSession(context.request, context.env);
   if (!session) {
-    return json({ error: "内置模式需要先登录" }, { status: 401 });
+    return json({ error: "请先登录" }, { status: 401 });
   }
 
   const kv = context.env.TASKS_KV;
@@ -80,13 +74,20 @@ export async function onRequestGet(context: FunctionContext) {
     return json({ error: "缺少 taskId" }, { status: 400 });
   }
 
-  const taskKey = `task:${taskId}`;
-  const task = await kv.get(taskKey);
-  if (!task) {
+  const taskKey = `cutout-task:${taskId}`;
+  const rawTask = await kv.get(taskKey);
+  if (!rawTask) {
     return json({ error: "任务不存在或已过期" }, { status: 404 });
   }
 
-  const normalized = normalizeTaskStatus(JSON.parse(task)) as ImageTaskRecord;
+  let task: CutoutTaskRecord;
+  try {
+    task = JSON.parse(rawTask) as CutoutTaskRecord;
+  } catch {
+    return json({ error: "任务数据损坏" }, { status: 500 });
+  }
+
+  const normalized = normalizeTaskStatus(task);
   const sessionUserKey = getUserKey(session.user);
   if (normalized.userKey && normalized.userKey !== sessionUserKey) {
     return json({ error: "无权访问该任务" }, { status: 403 });

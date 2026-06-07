@@ -3,7 +3,12 @@
 ## Cloudflare 资源
 
 - [x] 已创建/确认 EcomImgGen 使用的 `TASKS_KV`
+- [x] 已创建/确认 EcomImgGen 使用的 `HISTORY_DB` D1 数据库
+- [x] 已创建/确认 EcomImgGen 使用的 `HISTORY_BUCKET` R2 存储桶
 - [x] 根目录 `wrangler.toml` 已写入同一个 KV ID
+- [x] 根目录 `wrangler.toml` 已写入 D1/R2 绑定
+- [x] 已执行 `migrations/0001_history_storage.sql` 到远端 D1
+- [x] 已执行 `migrations/0002_admin_data_d1.sql` 到远端 D1
 - [x] `worker/wrangler.toml` 已写入同一个 KV ID
 
 ## Worker
@@ -22,6 +27,8 @@
 - [ ] Build command 是 `npm run build`
 - [ ] Output directory 是 `out`
 - [ ] 已绑定 `TASKS_KV`
+- [ ] 已绑定 `HISTORY_DB`
+- [ ] 已绑定 `HISTORY_BUCKET`
 - [ ] 已配置 OAuth Secrets
 - [x] 已配置 Prompt 生成接口 Secrets
 - [x] 已配置 Worker 图像生成接口 Secrets
@@ -37,8 +44,8 @@
 
 ## 发布验证
 
-- [ ] `npm run build` 通过
-- [ ] `npx tsc -p worker/tsconfig.json --noEmit` 通过
+- [x] `npm run build` 通过
+- [x] `npx tsc -p worker/tsconfig.json --noEmit` 通过
 - [x] Pages 发布成功
 - [ ] `https://eig.easyauto.app` 首页返回 200
 - [ ] 未登录时页面显示登录入口
@@ -47,7 +54,7 @@
 - [ ] 可修改 Prompt
 - [ ] 点击生成后会逐张创建任务并轮询
 - [ ] 图片完成后逐张展示
-- [ ] 刷新后历史记录仍在当前浏览器中
+- [ ] 刷新后历史记录从 D1 恢复，图片从 R2 加载
 
 ## 当前待补
 

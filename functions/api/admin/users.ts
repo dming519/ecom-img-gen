@@ -4,12 +4,14 @@ import {
   updateManagedUser,
   type UserKvNamespace,
 } from "../../_lib/users";
+import type { HistoryD1Database } from "../../_lib/historyStorage";
 import type { UserRole } from "../../../src/lib/types";
 
 interface FunctionContext {
   request: Request;
   env: {
     AUTH_SECRET?: string;
+    HISTORY_DB?: HistoryD1Database;
     TASKS_KV?: UserKvNamespace;
   };
 }

@@ -8,10 +8,12 @@
 还需要：
 
 1. KV
-2. Durable Object
-3. OAuth 配置
-4. Secrets
-5. 自定义域名 `eig.easyauto.app`
+2. D1
+3. R2
+4. Durable Object
+5. OAuth 配置
+6. Secrets
+7. 自定义域名 `eig.easyauto.app`
 
 ## 1. 创建 KV
 
@@ -30,7 +32,30 @@ npx wrangler kv namespace create TASKS_KV
 TASKS_KV = 6a7ee075ab4b4cbe9cfd80ed9fb0b40a
 ```
 
-## 2. 部署 Worker
+## 2. 创建历史数据库和图片存储桶
+
+```bash
+npx wrangler d1 create ecom-img-gen-history
+npx wrangler r2 bucket create ecom-img-gen-images
+```
+
+根目录 `wrangler.toml` 当前已绑定：
+
+```text
+HISTORY_DB = ecom-img-gen-history / 47b2ddfa-9418-4c60-b3ba-7f71112196c1
+HISTORY_BUCKET = ecom-img-gen-images
+```
+
+应用 D1 表结构：
+
+```bash
+npx wrangler d1 execute ecom-img-gen-history --remote --file migrations/0001_history_storage.sql
+npx wrangler d1 execute ecom-img-gen-history --remote --file migrations/0002_admin_data_d1.sql
+```
+
+Pages Function 首次访问时也会兜底创建同一套表。历史记录元数据写入 D1，参考图、生成图、抠图结果写入 R2；后台用户、访问码、兑换码和用户额度也写入 D1。
+
+## 3. 部署 Worker
 
 ```bash
 cd worker
@@ -56,7 +81,7 @@ npx wrangler secret put IMAGE_WORKER_TOKEN
 
 `IMAGE_WORKER_TOKEN` 是 Pages 调 Worker 的内部鉴权 token，Pages 和 Worker 必须一致。
 
-## 3. 配置 OAuth
+## 4. 配置 OAuth
 
 项目支持 GitHub 和 Google 登录。Cloudflare Pages 上需要配置：
 
@@ -77,7 +102,7 @@ https://eig.easyauto.app/api/auth/callback/google
 
 如果先使用 Pages 临时域名联调，也要把临时域名的 callback 加到 OAuth App 配置里。
 
-## 4. 配置 Pages
+## 5. 配置 Pages
 
 Cloudflare Pages 项目：
 
@@ -92,7 +117,7 @@ Build command: npm run build
 Output directory: out
 ```
 
-Pages 需要绑定同一个 `TASKS_KV`，并配置 Secrets：
+Pages 需要绑定同一个 `TASKS_KV`，并绑定 `HISTORY_DB` 和 `HISTORY_BUCKET`。同时配置 Secrets：
 
 ```text
 AUTH_SECRET
@@ -138,14 +163,14 @@ OPENAI_MODEL
 IMAGE_WORKER_TOKEN
 ```
 
-## 5. 发布 Pages
+## 6. 发布 Pages
 
 ```bash
 npm run build
 npx wrangler pages deploy out --project-name ecom-img-gen
 ```
 
-## 6. 绑定域名
+## 7. 绑定域名
 
 在 Cloudflare Pages 项目的 Custom domains 中绑定：
 

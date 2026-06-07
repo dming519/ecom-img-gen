@@ -1,5 +1,6 @@
 import type { AuthProvider, AuthUser } from "../../src/lib/types";
 import { resolveAccessCodeUser } from "./accessCodes";
+import type { HistoryD1Database } from "./historyStorage";
 import { ensureManagedUser, hydrateManagedUser, type UserKvNamespace } from "./users";
 
 const SESSION_COOKIE = "ecomimggen_session";
@@ -14,6 +15,7 @@ interface AuthEnv {
   AUTH_GOOGLE_ID?: string;
   AUTH_GOOGLE_SECRET?: string;
   ACCESS_LOGIN_CODE?: string;
+  HISTORY_DB?: HistoryD1Database;
   TASKS_KV?: UserKvNamespace;
 }
 

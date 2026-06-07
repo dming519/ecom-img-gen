@@ -263,7 +263,7 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
                         <span className="unlimited-pill">不限</span>
                       ) : (
                         <input
-                          aria-label={`${user.name} 的剩余次数`}
+                          aria-label={`${user.name} 的剩余图片张数`}
                           type="number"
                           min={0}
                           value={user.remainingCredits}
@@ -296,7 +296,7 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
                           disabled={busy}
                           onClick={() => updateUser(user, { remainingCredits: user.remainingCredits + 5 })}
                         >
-                          +5
+                          +5张
                         </button>
                       )}
                     </td>
@@ -458,7 +458,7 @@ export default function AdminPanel({ open, onClose }: AdminPanelProps) {
               max={999}
               value={redeemCredits}
               onChange={(event) => setRedeemCredits(Number(event.target.value) || 1)}
-              aria-label="每次增加次数"
+              aria-label="每次增加图片张数"
             />
             <input
               type="number"

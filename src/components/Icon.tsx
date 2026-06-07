@@ -11,7 +11,13 @@ type IconName =
   | "trash"
   | "spark"
   | "queue"
-  | "warning";
+  | "warning"
+  | "text"
+  | "video"
+  | "cutout"
+  | "brush"
+  | "eraser"
+  | "undo";
 
 interface IconProps {
   name: IconName;
@@ -63,6 +69,35 @@ const paths: Record<IconName, string[]> = {
     "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z",
     "M12 9v4",
     "M12 17h.01",
+  ],
+  text: ["M4 6h16", "M8 6v12", "M16 6v12", "M7 18h4", "M13 18h4"],
+  cutout: [
+    "M7 4h10",
+    "M7 20h10",
+    "M4 7v10",
+    "M20 7v10",
+    "M9 9h6v6H9z",
+    "M5 5l4 4",
+    "M15 15l4 4",
+  ],
+  brush: [
+    "M18.5 3.5l2 2L9 17l-4 1 1-4z",
+    "M14 8l2 2",
+    "M5 21c3 0 5-1.5 5-4",
+  ],
+  eraser: [
+    "M20 20H9",
+    "M3.5 14.5l8-8a2.1 2.1 0 0 1 3 0l3 3a2.1 2.1 0 0 1 0 3L10 20H7.5l-4-4z",
+    "M8 10l6 6",
+  ],
+  undo: [
+    "M9 7H4v5",
+    "M4 7l5 5",
+    "M5 17a8 8 0 1 0 2-8",
+  ],
+  video: [
+    "M4 6h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z",
+    "M16 10l6-3v10l-6-3",
   ],
 };
 

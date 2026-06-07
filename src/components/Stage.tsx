@@ -1,6 +1,7 @@
 "use client";
 
 import type { DetailPromptItem } from "@/lib/types";
+import { dbImageFileUrl } from "@/lib/db";
 import Icon from "./Icon";
 
 interface StageProps {
@@ -23,6 +24,11 @@ export default function Stage({
   onZoom,
 }: StageProps) {
   const active = prompts[activeIndex] ?? null;
+  const activeSrc = active?.base64
+    ? "data:image/png;base64," + active.base64
+    : active?.imageId
+      ? dbImageFileUrl(active.imageId)
+      : null;
 
   if (!prompts.length) {
     return (
@@ -38,15 +44,15 @@ export default function Stage({
   return (
     <div className="detail-stage">
       <div className="stage-main">
-        {active?.base64 ? (
+        {activeSrc ? (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={"data:image/png;base64," + active.base64}
-              alt={active.title}
+              src={activeSrc}
+              alt={active?.title ?? ""}
               onClick={() => onZoom(activeIndex)}
             />
-            <div className="stage-caption">{active.title}</div>
+            <div className="stage-caption">{active?.title}</div>
             <div className="stage-actions">
               <button className="btn-ghost" type="button" onClick={() => onDownload(activeIndex)}>
                 <Icon name="download" />
@@ -60,7 +66,7 @@ export default function Stage({
           </>
         ) : (
           <div className="stage-placeholder">
-            {busy || active?.status === "running" || active?.status === "queued" ? (
+            {busy && (active?.status === "running" || active?.status === "queued") ? (
               <>
                 <div className="spinner" />
                 <div className="loading-hint">正在生成：{active?.title}</div>
@@ -83,22 +89,29 @@ export default function Stage({
       {error && <div className="alert stage-error">{error}</div>}
 
       <div className="result-strip" aria-label="详情图生成结果">
-        {prompts.map((item, index) => (
-          <button
-            key={item.id}
-            type="button"
-            className={`result-thumb${index === activeIndex ? " is-active" : ""}`}
-            onClick={() => onSelect(index)}
-          >
-            <span className={`status-dot is-${item.status}`} />
-            {item.base64 ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={"data:image/png;base64," + item.base64} alt={item.title} />
-            ) : (
-              <span className="result-thumb-empty">{index + 1}</span>
-            )}
-          </button>
-        ))}
+        {prompts.map((item, index) => {
+          const itemSrc = item.base64
+            ? "data:image/png;base64," + item.base64
+            : item.imageId
+              ? dbImageFileUrl(item.imageId)
+              : null;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`result-thumb${index === activeIndex ? " is-active" : ""}`}
+              onClick={() => onSelect(index)}
+            >
+              <span className={`status-dot is-${item.status}`} />
+              {itemSrc ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={itemSrc} alt={item.title} />
+              ) : (
+                <span className="result-thumb-empty">{index + 1}</span>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

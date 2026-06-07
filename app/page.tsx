@@ -1,5 +1,5 @@
-import ImageGenerator from "@/components/ImageGenerator";
+import HomePage from "@/components/HomePage";
 
 export default function Page() {
-  return <ImageGenerator />;
+  return <HomePage />;
 }

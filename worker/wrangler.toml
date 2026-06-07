@@ -8,9 +8,19 @@ id = "6a7ee075ab4b4cbe9cfd80ed9fb0b40a"
 
 [durable_objects]
 bindings = [
-  { name = "IMAGE_TASKS", class_name = "ImageTasksDO" }
+  { name = "IMAGE_TASKS", class_name = "ImageTasksDO" },
+  { name = "PROMPT_TASKS", class_name = "PromptTasksDO" },
+  { name = "CUTOUT_TASKS", class_name = "CutoutTasksDO" }
 ]
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ImageTasksDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["PromptTasksDO"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["CutoutTasksDO"]

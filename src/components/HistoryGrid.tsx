@@ -1,6 +1,7 @@
 "use client";
 
 import type { HistoryItem } from "@/lib/types";
+import { dbImageFileUrl } from "@/lib/db";
 import Icon from "./Icon";
 
 interface HistoryGridProps {
@@ -45,13 +46,21 @@ export default function HistoryGrid({
             .map((item, idx) => ({ item, idx }))
             .reverse()
             .map(({ item, idx }) => {
-              const cover = item.prompts.find((prompt) => prompt.base64);
-              const done = item.prompts.filter((prompt) => prompt.base64).length;
+              const cover = item.prompts.find((prompt) => prompt.base64 || prompt.imageId);
+              const coverSrc = cover?.base64
+                ? "data:image/png;base64," + cover.base64
+                : cover?.imageId
+                  ? dbImageFileUrl(cover.imageId)
+                  : null;
+              const done = item.prompts.filter((prompt) => prompt.base64 || prompt.imageId).length;
               const time = new Date(item.timestamp).toLocaleString("zh-CN", TIME_FMT);
               const promptPreview = item.prompts
                 .slice(0, 2)
                 .map((prompt) => prompt.title)
                 .join(" / ");
+              const generationMeta = item.generation
+                ? `${item.generation.aspectRatio ?? "Auto"} · ${item.generation.quality ?? "1K"}`
+                : "默认参数";
               return (
                 <div
                   key={item.id ?? `history-${idx}-${item.timestamp}`}
@@ -60,9 +69,9 @@ export default function HistoryGrid({
                 >
                   <div className="history-cover">
                     <span className="tile-no">{done}/{item.prompts.length}</span>
-                    {cover?.base64 ? (
+                    {coverSrc ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={"data:image/png;base64," + cover.base64} alt={item.product.name} />
+                      <img src={coverSrc} alt={item.product.name} />
                     ) : (
                       <div className="tile-empty">{item.product.name.slice(0, 8)}</div>
                     )}
@@ -71,6 +80,7 @@ export default function HistoryGrid({
                     <strong title={item.product.name}>{item.product.name}</strong>
                     <p title={item.product.sellingPoints}>{item.product.sellingPoints}</p>
                     <small title={promptPreview}>{promptPreview || "暂无详情图文案"}</small>
+                    <span className="history-meta-pill">{generationMeta}</span>
                   </div>
                   <div className="history-card-foot">
                     <span>{time}</span>

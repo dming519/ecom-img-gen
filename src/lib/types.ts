@@ -1,4 +1,6 @@
 export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
+export type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
+export type ImageQuality = "1K" | "2K" | "4K";
 
 export type AuthProvider = "github" | "google" | "access";
 export type UserRole = "super_admin" | "admin" | "user";
@@ -66,6 +68,7 @@ export interface ProductInput {
   sellingPoints: string;
   imageCount: number;
   productImages: string[];
+  productImageIds?: string[];
 }
 
 export type DetailImageStatus =
@@ -82,6 +85,7 @@ export interface DetailPromptItem {
   prompt: string;
   status: DetailImageStatus;
   taskId?: string;
+  imageId?: string;
   base64?: string;
   model?: string;
   error?: string;
@@ -94,6 +98,11 @@ export interface HistoryItem {
   product: ProductInput;
   prompts: DetailPromptItem[];
   timestamp: number;
+  generation?: {
+    aspectRatio?: AspectRatio;
+    quality?: ImageQuality;
+    size?: ImageSize;
+  };
 }
 
 export type GeneratePromptOptions = ProductInput;
@@ -106,15 +115,84 @@ export interface GeneratePromptResult {
   model: string;
 }
 
+export interface PromptTaskStatus {
+  status: "pending" | "running" | "succeeded" | "failed";
+  prompts?: GeneratePromptResult["prompts"];
+  model?: string;
+  error?: string;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
 export interface CreateImageTaskOptions {
   prompt: string;
   size: ImageSize;
+  aspectRatio?: AspectRatio;
+  quality?: ImageQuality;
   inputImages: string[];
 }
 
 export interface ImageTaskStatus {
-  status: "pending" | "running" | "succeeded" | "failed";
+  status: "pending" | "running" | "succeeded" | "failed" | "canceled";
   base64?: string;
   model?: string;
   error?: string;
+  usedReferenceImages?: boolean;
+  usedCompactPrompt?: boolean;
+  warning?: string | null;
+  remainingCredits?: number;
+  usedCredits?: number;
+  unlimitedCredits?: boolean;
+  billedAt?: number;
+}
+
+export type CutoutStatus =
+  | "draft"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "canceled";
+
+export interface CreateCutoutTaskOptions {
+  sourceImage: string;
+  maskImage: string;
+}
+
+export interface CutoutTaskStatus {
+  status: "pending" | "running" | "succeeded" | "failed" | "canceled";
+  base64?: string;
+  model?: string;
+  error?: string;
+  remainingCredits?: number;
+  usedCredits?: number;
+  unlimitedCredits?: boolean;
+  billedAt?: number;
+}
+
+export interface CutoutHistoryItem {
+  id?: number;
+  sourceImageId?: string;
+  maskImageId?: string;
+  resultImageId?: string;
+  sourceImage?: string;
+  maskImage?: string;
+  resultBase64?: string;
+  status: CutoutStatus;
+  error?: string;
+  taskId?: string;
+  model?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CutoutDraft {
+  id: "active";
+  sourceImageId?: string;
+  maskImageId?: string;
+  resultImageId?: string;
+  resultBase64?: string | null;
+  brushSize?: number;
+  mode?: "brush" | "eraser";
+  canvasZoom?: number;
+  updatedAt: number;
 }

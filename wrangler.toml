@@ -4,3 +4,12 @@ pages_build_output_dir = "out"
 [[kv_namespaces]]
 binding = "TASKS_KV"
 id = "6a7ee075ab4b4cbe9cfd80ed9fb0b40a"
+
+[[d1_databases]]
+binding = "HISTORY_DB"
+database_name = "ecom-img-gen-history"
+database_id = "47b2ddfa-9418-4c60-b3ba-7f71112196c1"
+
+[[r2_buckets]]
+binding = "HISTORY_BUCKET"
+bucket_name = "ecom-img-gen-images"
