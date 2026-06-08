@@ -12,10 +12,18 @@ import QualitySelector from "./QualitySelector.vue"
 import SegmentedControl from "./SegmentedControl.vue"
 
 type MultiViewStatus = "draft" | "queued" | "running" | "succeeded" | "failed"
-type MultiViewCountValue = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8"
+type MultiViewAngleId =
+  | "front"
+  | "left-side"
+  | "right-side"
+  | "back"
+  | "oblique-45"
+  | "top"
+  | "bottom-up"
+  | "detail"
 
 interface MultiViewAngle {
-  id: string
+  id: MultiViewAngleId
   title: string
   instruction: string
 }
@@ -46,16 +54,6 @@ const PRODUCT_IMAGE_QUALITY = 0.82
 const MAX_REFERENCE_IMAGE_CHARS = 1_500_000
 const MAX_REFERENCE_IMAGE_TOTAL_CHARS = 6_000_000
 const MAX_MULTI_VIEW_IMAGES = 8
-const MULTI_VIEW_COUNT_OPTIONS: Array<{ label: string; value: MultiViewCountValue }> = [
-  { label: "正面", value: "1" },
-  { label: "左侧", value: "2" },
-  { label: "右侧", value: "3" },
-  { label: "背面", value: "4" },
-  { label: "45°斜侧", value: "5" },
-  { label: "俯视", value: "6" },
-  { label: "仰视", value: "7" },
-  { label: "局部特写", value: "8" },
-]
 const MULTI_VIEW_ASPECT_RATIO_OPTIONS: Array<{ label: string; value: AspectRatio }> = [
   { label: "Auto", value: "auto" },
   { label: "1:1", value: "1:1" },
@@ -116,10 +114,10 @@ const STATUS_LABEL: Record<MultiViewStatus, string> = {
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const productImages = ref<string[]>([])
-const imageCount = shallowRef(4)
+const selectedAngleIds = ref<MultiViewAngleId[]>(["front", "left-side", "right-side", "back"])
 const aspectRatio = shallowRef<AspectRatio>("1:1")
 const quality = shallowRef<ImageQuality>("1K")
-const items = ref<MultiViewItem[]>(createViewItems(imageCount.value))
+const items = ref<MultiViewItem[]>(createViewItems(selectedAngleIds.value))
 const busy = shallowRef(false)
 const error = shallowRef<string | null>(null)
 const currentTaskIdRef = shallowRef<string | null>(null)
@@ -127,6 +125,7 @@ const abortRef = shallowRef<AbortController | null>(null)
 const cancelRequestedRef = shallowRef(false)
 
 const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
+const angleControlsDisabled = computed(() => props.sessionLoading || busy.value)
 const remainingCredits = computed(() =>
   props.session?.user?.role === "super_admin"
     ? "不限次数"
@@ -135,6 +134,7 @@ const remainingCredits = computed(() =>
 const generationLabel = computed(() =>
   `${aspectRatio.value === "auto" ? "Auto" : aspectRatio.value} · ${quality.value}`,
 )
+const imageCount = computed(() => selectedAngleIds.value.length)
 const completedCount = computed(() =>
   items.value.filter((item) => item.status === "succeeded").length,
 )
@@ -142,9 +142,14 @@ const runningLabel = computed(() =>
   busy.value ? "生成中" : completedCount.value ? `${completedCount.value}/${items.value.length} 已完成` : "待命",
 )
 
-function createViewItems(count: number): MultiViewItem[] {
-  const normalized = Math.min(MAX_MULTI_VIEW_IMAGES, Math.max(1, Math.round(count)))
-  const selected = ANGLE_PRESETS.slice(0, normalized)
+function getSortedAngleIds(angleIds: MultiViewAngleId[]): MultiViewAngleId[] {
+  const selected = new Set(angleIds)
+  return ANGLE_PRESETS.map((angle) => angle.id).filter((id) => selected.has(id))
+}
+
+function createViewItems(angleIds: MultiViewAngleId[]): MultiViewItem[] {
+  const selectedIds = getSortedAngleIds(angleIds).slice(0, MAX_MULTI_VIEW_IMAGES)
+  const selected = ANGLE_PRESETS.filter((angle) => selectedIds.includes(angle.id))
 
   return selected.map((angle) => ({
     ...angle,
@@ -152,15 +157,24 @@ function createViewItems(count: number): MultiViewItem[] {
   }))
 }
 
-function toMultiViewCountValue(value: number): MultiViewCountValue {
-  const normalized = Math.min(MAX_MULTI_VIEW_IMAGES, Math.max(1, Math.round(value)))
-  return String(normalized) as MultiViewCountValue
+function isAngleSelected(angleId: MultiViewAngleId) {
+  return selectedAngleIds.value.includes(angleId)
 }
 
-function handleCountChange(value: number) {
+function handleAngleToggle(angleId: MultiViewAngleId) {
   if (busy.value) return
-  imageCount.value = Math.min(MAX_MULTI_VIEW_IMAGES, Math.max(1, Math.round(value)))
-  items.value = createViewItems(imageCount.value)
+  const current = selectedAngleIds.value
+  const next = current.includes(angleId)
+    ? current.filter((id) => id !== angleId)
+    : [...current, angleId]
+  if (!next.length) return
+  selectedAngleIds.value = getSortedAngleIds(next).slice(0, MAX_MULTI_VIEW_IMAGES)
+  items.value = createViewItems(selectedAngleIds.value)
+}
+
+function handleResetInput() {
+  productImages.value = []
+  items.value = createViewItems(selectedAngleIds.value)
 }
 
 function fileToCompressedDataURL(file: File): Promise<string> {
@@ -352,7 +366,7 @@ async function handleGenerateAll() {
   busy.value = true
   cancelRequestedRef.value = false
   abortRef.value = new AbortController()
-  items.value = createViewItems(imageCount.value)
+  items.value = createViewItems(selectedAngleIds.value)
   try {
     const generationImages = getGenerationImages()
     for (let index = 0; index < items.value.length; index += 1) {
@@ -449,7 +463,7 @@ function handleDownload(item: MultiViewItem) {
           type="button"
           class="inline-action panel-reset-action"
           :disabled="busy"
-          @click="productImages = []; items = createViewItems(imageCount)"
+          @click="handleResetInput"
         >
           重置
         </button>
@@ -525,15 +539,19 @@ function handleDownload(item: MultiViewItem) {
               <span>{{ imageCount }} 张</span>
             </div>
             <div class="param-controls" aria-label="视角">
-              <SegmentedControl
-                aria-label="视角"
-                ariaLabel="视角"
-                :value="toMultiViewCountValue(imageCount)"
-                :options="MULTI_VIEW_COUNT_OPTIONS"
-                :disabled="controlsDisabled"
-                class-name="multi-view-count-segments"
-                @change="handleCountChange(Number($event))"
-              />
+              <div class="multi-view-angle-options" role="group" aria-label="选择视角">
+                <button
+                  v-for="angle in ANGLE_PRESETS"
+                  :key="angle.id"
+                  type="button"
+                  :class="['multi-view-angle-option', { 'is-selected': isAngleSelected(angle.id) }]"
+                  :aria-pressed="isAngleSelected(angle.id)"
+                  :disabled="angleControlsDisabled"
+                  @click="handleAngleToggle(angle.id)"
+                >
+                  {{ angle.title }}
+                </button>
+              </div>
             </div>
           </div>
           <div class="setting-block">
@@ -830,17 +848,52 @@ function handleDownload(item: MultiViewItem) {
   height: 14px;
 }
 
-:deep(.multi-view-count-segments) {
+.multi-view-angle-options {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   padding: 5px;
+  border: 1px solid rgba(211, 219, 231, 0.72);
+  border-radius: var(--radius-control);
+  background: #edf3f8;
 }
 
-:deep(.multi-view-count-segments .segment-option) {
+.multi-view-angle-option {
   min-height: 34px;
   padding: 0 8px;
+  border: 1px solid rgba(203, 215, 230, 0.86);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--text-sub);
   font-size: 0.74rem;
+  font-weight: 760;
   white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    box-shadow 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+
+.multi-view-angle-option:hover:not(:disabled) {
+  border-color: rgba(23, 105, 255, 0.45);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.multi-view-angle-option.is-selected {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    0 8px 18px rgba(23, 105, 255, 0.18);
+}
+
+.multi-view-angle-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.64;
 }
 
 :deep(.multi-view-ratio-segments) {
