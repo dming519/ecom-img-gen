@@ -2662,10 +2662,25 @@ footer {
   right: auto;
   bottom: auto;
   transform: translate(-50%, -50%);
-  opacity: 0.42;
+  opacity: 0.68;
   mix-blend-mode: multiply;
   cursor: none;
   touch-action: none;
+}
+
+.cutout-feedback-canvas {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.cutout-canvas-stage.has-image .cutout-feedback-canvas {
+  box-shadow: none;
 }
 
 .cutout-brush-cursor {
@@ -2684,7 +2699,11 @@ footer {
 .cutout-brush-cursor.is-eraser {
   border-style: dashed;
   border-color: rgba(200, 50, 43, 0.95);
-  background: rgba(200, 50, 43, 0.08);
+  background: rgba(239, 68, 68, 0.18);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.94),
+    0 0 0 5px rgba(239, 68, 68, 0.16),
+    0 8px 18px rgba(15, 23, 42, 0.18);
 }
 
 .cutout-canvas-empty {

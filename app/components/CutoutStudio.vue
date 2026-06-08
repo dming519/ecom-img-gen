@@ -60,6 +60,7 @@ const cursorPreview = ref({ visible: false, x: 0, y: 0 })
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const imageCanvasRef = ref<HTMLCanvasElement | null>(null)
 const maskCanvasRef = ref<HTMLCanvasElement | null>(null)
+const feedbackCanvasRef = ref<HTMLCanvasElement | null>(null)
 const drawingRef = shallowRef(false)
 const lastPointRef = shallowRef<{ x: number; y: number } | null>(null)
 const abortRef = shallowRef<AbortController | null>(null)
@@ -137,10 +138,34 @@ function drawMaskCircle(
 ) {
   ctx.save()
   ctx.globalCompositeOperation = paintMode === "eraser" ? "destination-out" : "source-over"
-  ctx.fillStyle = "rgba(23,105,255,0.72)"
+  ctx.fillStyle = "rgba(23,105,255,0.92)"
   ctx.beginPath()
   ctx.arc(x, y, radius, 0, Math.PI * 2)
   ctx.fill()
+  ctx.restore()
+}
+
+function clearToolFeedback() {
+  const canvas = feedbackCanvasRef.value
+  const ctx = canvas?.getContext("2d")
+  if (!canvas || !ctx) return
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+}
+
+function drawToolFeedback(x: number, y: number, radius: number, paintMode: PaintMode) {
+  if (paintMode !== "eraser") return
+  const canvas = feedbackCanvasRef.value
+  const ctx = canvas?.getContext("2d")
+  if (!canvas || !ctx) return
+  ctx.save()
+  ctx.globalCompositeOperation = "source-over"
+  ctx.fillStyle = "rgba(239,68,68,0.34)"
+  ctx.strokeStyle = "rgba(185,28,28,0.88)"
+  ctx.lineWidth = Math.max(2, radius * 0.12)
+  ctx.beginPath()
+  ctx.arc(x, y, radius, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.stroke()
   ctx.restore()
 }
 
@@ -159,7 +184,8 @@ function hasMaskPixels(canvas: HTMLCanvasElement) {
 function redrawSource(dataUrl: string) {
   const imageCanvas = imageCanvasRef.value
   const maskCanvas = maskCanvasRef.value
-  if (!imageCanvas || !maskCanvas) return
+  const feedbackCanvas = feedbackCanvasRef.value
+  if (!imageCanvas || !maskCanvas || !feedbackCanvas) return
 
   const image = new Image()
   image.onload = () => {
@@ -170,6 +196,8 @@ function redrawSource(dataUrl: string) {
     imageCanvas.height = height
     maskCanvas.width = width
     maskCanvas.height = height
+    feedbackCanvas.width = width
+    feedbackCanvas.height = height
     canvasSize.value = { width, height }
     canvasZoom.value = pendingCanvasZoomRef.value ?? 1
     pendingCanvasZoomRef.value = null
@@ -179,6 +207,7 @@ function redrawSource(dataUrl: string) {
     ctx.clearRect(0, 0, width, height)
     ctx.drawImage(image, 0, 0, width, height)
     maskCtx.clearRect(0, 0, width, height)
+    clearToolFeedback()
     const pendingMask = pendingMaskRef.value
     if (pendingMask) {
       const maskImage = new Image()
@@ -315,6 +344,7 @@ function handlePointerDown(event: PointerEvent) {
   const ctx = canvas.getContext("2d")
   if (!ctx) return
   drawMaskCircle(ctx, point.x, point.y, brushSize.value / 2, mode.value)
+  drawToolFeedback(point.x, point.y, brushSize.value / 2, mode.value)
   maskDirty.value = hasMaskPixels(canvas)
 }
 
@@ -340,6 +370,12 @@ function handlePointerMove(event: PointerEvent) {
       brushSize.value / 2,
       mode.value,
     )
+    drawToolFeedback(
+      last.x + (next.x - last.x) * progress,
+      last.y + (next.y - last.y) * progress,
+      brushSize.value / 2,
+      mode.value,
+    )
   }
   lastPointRef.value = next
   maskDirty.value = hasMaskPixels(canvas)
@@ -359,6 +395,7 @@ function finishDrawing(event: PointerEvent) {
   }
   drawingRef.value = false
   lastPointRef.value = null
+  clearToolFeedback()
   if (wasDrawing) {
     persistCurrentDraft().catch((draftError) =>
       console.warn("抠图草稿保存失败:", draftError),
@@ -798,6 +835,12 @@ watch(sourceImage, (next) => {
             @pointerup="finishDrawing"
             @pointercancel="hideCursorPreview"
             @pointerleave="hideCursorPreview"
+          />
+          <canvas
+            ref="feedbackCanvasRef"
+            class="cutout-feedback-canvas"
+            aria-hidden="true"
+            :style="canvasStyle"
           />
           <span
             v-if="sourceImage && cursorPreview.visible && !busy"
