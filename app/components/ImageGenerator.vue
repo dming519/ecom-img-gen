@@ -32,10 +32,11 @@ import HistoryGrid from "./HistoryGrid.vue"
 import Icon from "./Icon.vue"
 import ImageCountSelector from "./ImageCountSelector.vue"
 import Lightbox from "./Lightbox.vue"
+import MultiViewStudio from "./MultiViewStudio.vue"
 import QualitySelector from "./QualitySelector.vue"
 import Stage from "./Stage.vue"
 
-type StudioMode = "image" | "cutout"
+type StudioMode = "image" | "cutout" | "multi-view"
 type WakeLockSentinelLike = { release: () => Promise<void> }
 
 const props = withDefaults(defineProps<{
@@ -149,7 +150,13 @@ const providerLabel = computed(() =>
       ? "Google"
       : "访问码",
 )
-const authRedirectPath = computed(() => (studioMode.value === "cutout" ? "/cutout/" : "/image/"))
+const authRedirectPath = computed(() =>
+  studioMode.value === "cutout"
+    ? "/cutout/"
+    : studioMode.value === "multi-view"
+      ? "/multi-view/"
+      : "/image/",
+)
 const isAdmin = computed(
   () => session.value?.user?.role === "admin" || session.value?.user?.role === "super_admin",
 )
@@ -297,17 +304,21 @@ function getPromptImageSrc(item: DetailPromptItem | undefined) {
   return null
 }
 
-// 支持 `/image/`、`/cutout/` 以及旧版 hash/query 写法，统一判断当前模块。
+// 支持 `/image/`、`/cutout/`、`/multi-view/` 以及旧版 hash/query 写法，统一判断当前模块。
 function readStudioModeFromUrl(): StudioMode {
   if (typeof window === "undefined") return props.initialMode
   const pathname = window.location.pathname.replace(/\/+$/, "")
   if (pathname.endsWith("/cutout")) return "cutout"
+  if (pathname.endsWith("/multi-view")) return "multi-view"
   if (pathname.endsWith("/image")) return "image"
   const hashMode = window.location.hash.replace(/^#/, "")
   if (hashMode === "cutout") return "cutout"
+  if (hashMode === "multi-view") return "multi-view"
   if (hashMode === "image") return "image"
   const module = new URL(window.location.href).searchParams.get("module")
-  return module === "cutout" ? "cutout" : "image"
+  if (module === "cutout") return "cutout"
+  if (module === "multi-view") return "multi-view"
+  return "image"
 }
 
 async function flushCutoutDraftIfNeeded() {
@@ -325,7 +336,9 @@ async function handleModuleLinkClick(event: MouseEvent, mode: StudioMode) {
   if (!window.ecomImgGenFlushCutoutDraft) return
   event.preventDefault()
   await flushCutoutDraftIfNeeded()
-  window.location.assign(mode === "cutout" ? "/cutout/" : "/image/")
+  window.location.assign(
+    mode === "cutout" ? "/cutout/" : mode === "multi-view" ? "/multi-view/" : "/image/",
+  )
 }
 
 async function handleHomeLinkClick(event: MouseEvent) {
@@ -931,7 +944,7 @@ watch(authPopoverOpen, (open) => {
 watch(
   [draftLoaded, productName, sellingPoints, imageCount, prompts, aspectRatio, quality, productImageIds],
   () => {
-    if (!draftLoaded.value || !import.meta.client) return
+    if (!draftLoaded.value || studioMode.value !== "image" || !import.meta.client) return
     try {
       const draft: DraftState = {
         productName: productName.value,
@@ -956,49 +969,55 @@ onMounted(() => {
   window.addEventListener("popstate", handleLocationChange)
   window.addEventListener("hashchange", handleLocationChange)
 
-  try {
-    localStorage.removeItem(PREVIOUS_DRAFT_KEY)
-    const raw = localStorage.getItem(DRAFT_KEY)
-    if (raw) {
-      const draft = JSON.parse(raw) as DraftState
-      productName.value = draft.productName || ""
-      sellingPoints.value = draft.sellingPoints || ""
-      imageCount.value = Number.isFinite(draft.imageCount)
-        ? Math.min(MAX_DETAIL_IMAGES, Math.max(1, Math.round(draft.imageCount)))
-        : 5
-      prompts.value = Array.isArray(draft.prompts)
-        ? draft.prompts.map(resetInterruptedPrompt)
-        : []
-      if (draft.aspectRatio && ASPECT_RATIO_VALUES.includes(draft.aspectRatio)) {
-        aspectRatio.value = draft.aspectRatio
+  if (studioMode.value === "image") {
+    try {
+      localStorage.removeItem(PREVIOUS_DRAFT_KEY)
+      const raw = localStorage.getItem(DRAFT_KEY)
+      if (raw) {
+        const draft = JSON.parse(raw) as DraftState
+        productName.value = draft.productName || ""
+        sellingPoints.value = draft.sellingPoints || ""
+        imageCount.value = Number.isFinite(draft.imageCount)
+          ? Math.min(MAX_DETAIL_IMAGES, Math.max(1, Math.round(draft.imageCount)))
+          : 5
+        prompts.value = Array.isArray(draft.prompts)
+          ? draft.prompts.map(resetInterruptedPrompt)
+          : []
+        if (draft.aspectRatio && ASPECT_RATIO_VALUES.includes(draft.aspectRatio)) {
+          aspectRatio.value = draft.aspectRatio
+        }
+        if (draft.quality && IMAGE_QUALITY_VALUES.includes(draft.quality)) {
+          quality.value = draft.quality
+        }
+        if (Array.isArray(draft.productImageIds) && draft.productImageIds.length) {
+          productImageIds.value = draft.productImageIds
+          dbGetProductImages(draft.productImageIds)
+            .then((images) => {
+              productImages.value = images.slice(0, 8)
+            })
+            .catch((event) => console.warn("产品参考图恢复失败:", event))
+        }
       }
-      if (draft.quality && IMAGE_QUALITY_VALUES.includes(draft.quality)) {
-        quality.value = draft.quality
-      }
-      if (Array.isArray(draft.productImageIds) && draft.productImageIds.length) {
-        productImageIds.value = draft.productImageIds
-        dbGetProductImages(draft.productImageIds)
-          .then((images) => {
-            productImages.value = images.slice(0, 8)
-          })
-          .catch((event) => console.warn("产品参考图恢复失败:", event))
-      }
+    } catch {
+      // Ignore invalid local draft.
+    } finally {
+      draftLoaded.value = true
     }
-  } catch {
-    // Ignore invalid local draft.
-  } finally {
+  } else {
     draftLoaded.value = true
   }
 
-  void (async () => {
-    try {
-      const items = (await dbAll()) ?? []
-      history.value = items
-      if (items.length) activeHistoryIdx.value = items.length - 1
-    } catch (event) {
-      console.warn("历史记录读取失败:", event)
-    }
-  })()
+  if (studioMode.value === "image") {
+    void (async () => {
+      try {
+        const items = (await dbAll()) ?? []
+        history.value = items
+        if (items.length) activeHistoryIdx.value = items.length - 1
+      } catch (event) {
+        console.warn("历史记录读取失败:", event)
+      }
+    })()
+  }
 
   void (async () => {
     try {
@@ -1066,10 +1085,15 @@ onBeforeUnmount(() => {
           <Icon name="cutout" />
           <span>抠图</span>
         </a>
-        <button type="button" class="creative-tab" disabled>
+        <a
+          href="/multi-view/"
+          :class="['creative-tab', { 'is-active': studioMode === 'multi-view' }]"
+          :aria-current="studioMode === 'multi-view' ? 'page' : undefined"
+          @click="event => handleModuleLinkClick(event, 'multi-view')"
+        >
           <Icon name="queue" />
           <span>多视角</span>
-        </button>
+        </a>
         <button type="button" class="creative-tab" disabled>
           <Icon name="text" />
           <span>分层</span>
@@ -1503,6 +1527,15 @@ onBeforeUnmount(() => {
     </template>
 
     <CutoutStudio
+      v-else-if="studioMode === 'cutout'"
+      :authenticated="authenticated"
+      :session-loading="sessionLoading"
+      :session="session"
+      @update:session="session = $event"
+      @zoom="lightboxSrc = $event"
+    />
+
+    <MultiViewStudio
       v-else
       :authenticated="authenticated"
       :session-loading="sessionLoading"
