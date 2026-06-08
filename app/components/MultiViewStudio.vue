@@ -442,17 +442,17 @@ function handleDownload(item: MultiViewItem) {
 
 <template>
   <div class="run-status" aria-label="当前多视角任务状态">
-      <span>{{ productImages.length ? `${productImages.length} 张参考图` : "未上传参考图" }}</span>
-      <span>{{ imageCount }} 个视角</span>
-      <span>{{ remainingCredits }}</span>
-      <span>{{ generationLabel }}</span>
-      <span>{{ runningLabel }}</span>
-    </div>
+    <span>{{ imageCount }} 个视角</span>
+    <span>{{ productImages.length ? `${productImages.length} 张参考图` : "未上传参考图" }}</span>
+    <span>{{ remainingCredits }}</span>
+    <span>{{ generationLabel }}</span>
+    <span>{{ runningLabel }}</span>
+  </div>
 
-    <div class="multi-view-grid">
-      <aside class="studio-panel multi-view-input">
+  <div class="multi-view-grid">
+    <aside class="studio-panel input-rail multi-view-input">
         <div class="panel-heading">
-          <h2>多视角设置</h2>
+          <h2>产品资料</h2>
           <button
             type="button"
             class="inline-action panel-reset-action"
@@ -463,7 +463,7 @@ function handleDownload(item: MultiViewItem) {
           </button>
         </div>
 
-        <div class="multi-view-input-body">
+        <div class="input-rail-body multi-view-input-body">
           <div class="field-row-head">
             <label for="multi-view-images">产品参考图</label>
             <button
