@@ -1,5 +1,9 @@
 .next/
+.nuxt/
+.vscode/
+.codex-logs/
 out/
+dist/
 node_modules/
 .wrangler/
 .idea/

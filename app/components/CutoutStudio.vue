@@ -1,0 +1,870 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue"
+import {
+  cancelCutoutTask,
+  createCutoutTask,
+  pollCutoutTask,
+} from "@/lib/api"
+import {
+  dbAddCutout,
+  dbAllCutouts,
+  dbClearCutouts,
+  dbDelCutout,
+  dbGetCutoutDraft,
+  dbGetProductImages,
+  dbPutCutout,
+  dbPutCutoutDraft,
+  dbPutProductImage,
+} from "@/lib/db"
+import type { AuthSession, CutoutDraft, CutoutHistoryItem } from "@/lib/types"
+import Icon from "./Icon.vue"
+
+type PaintMode = "brush" | "eraser"
+
+const props = defineProps<{
+  authenticated: boolean
+  sessionLoading: boolean
+  session: AuthSession | null
+}>()
+
+const emit = defineEmits<{
+  "update:session": [session: AuthSession | null]
+  zoom: [src: string]
+}>()
+
+const MAX_CUTOUT_IMAGE_BYTES = 10 * 1024 * 1024
+const CANVAS_EDGE = 960
+const MASK_HISTORY_LIMIT = 18
+
+const sourceImage = shallowRef<string | null>(null)
+const sourceImageId = shallowRef<string | undefined>()
+const resultImageId = shallowRef<string | undefined>()
+const resultBase64 = shallowRef<string | null>(null)
+const history = ref<CutoutHistoryItem[]>([])
+const activeHistoryIdx = shallowRef(-1)
+const brushSize = shallowRef(34)
+const mode = shallowRef<PaintMode>("brush")
+const busy = shallowRef(false)
+const error = shallowRef<string | null>(null)
+const canvasReady = shallowRef(false)
+const draftLoaded = shallowRef(false)
+const maskDirty = shallowRef(false)
+const historyStack = ref<string[]>([])
+const canvasSize = ref({ width: 0, height: 0 })
+const canvasZoom = shallowRef(1)
+const cursorPreview = ref({ visible: false, x: 0, y: 0 })
+
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const imageCanvasRef = ref<HTMLCanvasElement | null>(null)
+const maskCanvasRef = ref<HTMLCanvasElement | null>(null)
+const drawingRef = shallowRef(false)
+const lastPointRef = shallowRef<{ x: number; y: number } | null>(null)
+const abortRef = shallowRef<AbortController | null>(null)
+const taskIdRef = shallowRef<string | null>(null)
+const pendingMaskRef = shallowRef<string | null>(null)
+const pendingCanvasZoomRef = shallowRef<number | null>(null)
+
+const remainingCredits = computed(() => props.session?.user?.remainingCredits ?? 0)
+const isSuperAdmin = computed(() => props.session?.user?.role === "super_admin")
+const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
+const resultSrc = computed(() =>
+  resultBase64.value ? `data:image/png;base64,${resultBase64.value}` : null,
+)
+const canvasStyle = computed(() =>
+  canvasSize.value.width && canvasSize.value.height
+    ? {
+        width: `${Math.round(canvasSize.value.width * canvasZoom.value)}px`,
+        height: `${Math.round(canvasSize.value.height * canvasZoom.value)}px`,
+      }
+    : undefined,
+)
+
+declare global {
+  interface Window {
+    ecomImgGenFlushCutoutDraft?: () => Promise<void>
+  }
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function getPointerPoint(event: PointerEvent, canvas: HTMLCanvasElement) {
+  const rect = canvas.getBoundingClientRect()
+  return {
+    x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+    y: ((event.clientY - rect.top) / rect.height) * canvas.height,
+  }
+}
+
+function getCursorPreviewPoint(event: PointerEvent, canvas: HTMLCanvasElement) {
+  const stage = canvas.parentElement
+  const rect = stage?.getBoundingClientRect() ?? canvas.getBoundingClientRect()
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+  }
+}
+
+function drawMaskCircle(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  paintMode: PaintMode,
+) {
+  ctx.save()
+  ctx.globalCompositeOperation = paintMode === "eraser" ? "destination-out" : "source-over"
+  ctx.fillStyle = "rgba(23,105,255,0.72)"
+  ctx.beginPath()
+  ctx.arc(x, y, radius, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+function hasMaskPixels(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return false
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+  for (let index = 3; index < pixels.length; index += 4) {
+    if ((pixels[index] ?? 0) > 8) return true
+  }
+  return false
+}
+
+function redrawSource(dataUrl: string) {
+  const imageCanvas = imageCanvasRef.value
+  const maskCanvas = maskCanvasRef.value
+  if (!imageCanvas || !maskCanvas) return
+
+  const image = new Image()
+  image.onload = () => {
+    const scale = Math.min(1, CANVAS_EDGE / Math.max(image.naturalWidth, image.naturalHeight))
+    const width = Math.max(1, Math.round(image.naturalWidth * scale))
+    const height = Math.max(1, Math.round(image.naturalHeight * scale))
+    imageCanvas.width = width
+    imageCanvas.height = height
+    maskCanvas.width = width
+    maskCanvas.height = height
+    canvasSize.value = { width, height }
+    canvasZoom.value = pendingCanvasZoomRef.value ?? 1
+    pendingCanvasZoomRef.value = null
+    const ctx = imageCanvas.getContext("2d")
+    const maskCtx = maskCanvas.getContext("2d")
+    if (!ctx || !maskCtx) return
+    ctx.clearRect(0, 0, width, height)
+    ctx.drawImage(image, 0, 0, width, height)
+    maskCtx.clearRect(0, 0, width, height)
+    const pendingMask = pendingMaskRef.value
+    if (pendingMask) {
+      const maskImage = new Image()
+      maskImage.onload = () => {
+        maskCtx.clearRect(0, 0, width, height)
+        maskCtx.drawImage(maskImage, 0, 0, width, height)
+        maskDirty.value = hasMaskPixels(maskCanvas)
+        pendingMaskRef.value = null
+      }
+      maskImage.src = pendingMask
+    } else {
+      maskDirty.value = false
+    }
+    canvasReady.value = true
+    historyStack.value = []
+  }
+  image.onerror = () => {
+    error.value = "图片读取失败，请重新上传。"
+  }
+  image.src = dataUrl
+}
+
+async function persistCurrentDraft(
+  overrides: Partial<Omit<CutoutDraft, "id" | "updatedAt">> = {},
+) {
+  if (!draftLoaded.value) return
+  const hasMaskOverride = Object.prototype.hasOwnProperty.call(overrides, "maskImageId")
+  let maskImageId = overrides.maskImageId
+  const maskCanvas = maskCanvasRef.value
+  if (!hasMaskOverride && maskCanvas && hasMaskPixels(maskCanvas)) {
+    maskImageId = await dbPutProductImage(maskCanvas.toDataURL("image/png"))
+  }
+  const hasResultOverride = Object.prototype.hasOwnProperty.call(overrides, "resultBase64")
+  const hasResultImageOverride = Object.prototype.hasOwnProperty.call(overrides, "resultImageId")
+  const nextSourceImageId = overrides.sourceImageId ?? sourceImageId.value
+  const nextResultBase64 = hasResultOverride ? overrides.resultBase64 : resultBase64.value
+  const nextResultImageId = hasResultImageOverride ? overrides.resultImageId : resultImageId.value
+  if (!nextSourceImageId && !maskImageId && !nextResultBase64) return
+  try {
+    const draft = {
+      sourceImageId: nextSourceImageId,
+      maskImageId,
+      resultImageId: nextResultBase64 ? nextResultImageId : undefined,
+      resultBase64: nextResultBase64,
+      brushSize: overrides.brushSize ?? brushSize.value,
+      mode: overrides.mode ?? mode.value,
+      canvasZoom: overrides.canvasZoom ?? canvasZoom.value,
+      updatedAt: Date.now(),
+    }
+    await dbPutCutoutDraft(draft)
+    resultImageId.value = draft.resultImageId
+  } catch (event) {
+    console.warn("抠图草稿保存失败:", event)
+  }
+}
+
+async function persistCutout(item: CutoutHistoryItem) {
+  try {
+    if (item.id == null) {
+      const id = await dbAddCutout(item)
+      item.id = id as number
+    } else {
+      await dbPutCutout(item)
+    }
+  } catch (event) {
+    console.warn("抠图历史写入失败:", event)
+  }
+}
+
+async function handleFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  error.value = null
+  if (!file.type.startsWith("image/")) {
+    error.value = "请上传图片文件。"
+    return
+  }
+  if (file.size > MAX_CUTOUT_IMAGE_BYTES) {
+    error.value = "图片过大，请上传 10MB 以内的图片。"
+    return
+  }
+  try {
+    const dataUrl = await fileToDataUrl(file)
+    const id = await dbPutProductImage(dataUrl)
+    pendingMaskRef.value = null
+    pendingCanvasZoomRef.value = null
+    sourceImage.value = dataUrl
+    sourceImageId.value = id
+    resultImageId.value = undefined
+    resultBase64.value = null
+    canvasZoom.value = 1
+    activeHistoryIdx.value = -1
+    await dbPutCutoutDraft({
+      sourceImageId: id,
+      maskImageId: undefined,
+      resultImageId: undefined,
+      resultBase64: null,
+      brushSize: brushSize.value,
+      mode: mode.value,
+      canvasZoom: 1,
+      updatedAt: Date.now(),
+    })
+  } catch (uploadError) {
+    error.value = uploadError instanceof Error ? uploadError.message : String(uploadError)
+  } finally {
+    if (fileInputRef.value) fileInputRef.value.value = ""
+  }
+}
+
+function pushMaskHistory() {
+  const maskCanvas = maskCanvasRef.value
+  if (!maskCanvas) return
+  historyStack.value = [
+    ...historyStack.value,
+    maskCanvas.toDataURL("image/png"),
+  ].slice(-MASK_HISTORY_LIMIT)
+}
+
+function handlePointerDown(event: PointerEvent) {
+  const canvas = maskCanvasRef.value
+  if (!canvas || controlsDisabled.value || !sourceImage.value) return
+  event.preventDefault()
+  pushMaskHistory()
+  drawingRef.value = true
+  canvas.setPointerCapture(event.pointerId)
+  const point = getPointerPoint(event, canvas)
+  lastPointRef.value = point
+  cursorPreview.value = { visible: true, ...getCursorPreviewPoint(event, canvas) }
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return
+  drawMaskCircle(ctx, point.x, point.y, brushSize.value / 2, mode.value)
+  maskDirty.value = hasMaskPixels(canvas)
+}
+
+function handlePointerMove(event: PointerEvent) {
+  const canvas = maskCanvasRef.value
+  if (!canvas || controlsDisabled.value || !sourceImage.value) return
+  event.preventDefault()
+  cursorPreview.value = { visible: true, ...getCursorPreviewPoint(event, canvas) }
+  if (!drawingRef.value) return
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return
+  const next = getPointerPoint(event, canvas)
+  const last = lastPointRef.value ?? next
+  const distance = Math.hypot(next.x - last.x, next.y - last.y)
+  const steps = Math.max(1, Math.ceil(distance / Math.max(4, brushSize.value / 4)))
+  for (let index = 0; index <= steps; index += 1) {
+    const progress = index / steps
+    drawMaskCircle(
+      ctx,
+      last.x + (next.x - last.x) * progress,
+      last.y + (next.y - last.y) * progress,
+      brushSize.value / 2,
+      mode.value,
+    )
+  }
+  lastPointRef.value = next
+  maskDirty.value = hasMaskPixels(canvas)
+}
+
+function handlePointerEnter(event: PointerEvent) {
+  const canvas = maskCanvasRef.value
+  if (!canvas || controlsDisabled.value || !sourceImage.value) return
+  cursorPreview.value = { visible: true, ...getCursorPreviewPoint(event, canvas) }
+}
+
+function finishDrawing(event: PointerEvent) {
+  const wasDrawing = drawingRef.value
+  const canvas = maskCanvasRef.value
+  if (canvas && canvas.hasPointerCapture(event.pointerId)) {
+    canvas.releasePointerCapture(event.pointerId)
+  }
+  drawingRef.value = false
+  lastPointRef.value = null
+  if (wasDrawing) {
+    persistCurrentDraft().catch((draftError) =>
+      console.warn("抠图草稿保存失败:", draftError),
+    )
+  }
+}
+
+function hideCursorPreview(event: PointerEvent) {
+  finishDrawing(event)
+  cursorPreview.value = { ...cursorPreview.value, visible: false }
+}
+
+function handleUndo() {
+  const maskCanvas = maskCanvasRef.value
+  const last = historyStack.value.at(-1)
+  if (!maskCanvas || !last) return
+  const image = new Image()
+  image.onload = () => {
+    const ctx = maskCanvas.getContext("2d")
+    if (!ctx) return
+    ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height)
+    ctx.drawImage(image, 0, 0, maskCanvas.width, maskCanvas.height)
+    maskDirty.value = hasMaskPixels(maskCanvas)
+    persistCurrentDraft().catch((draftError) =>
+      console.warn("抠图草稿保存失败:", draftError),
+    )
+  }
+  image.src = last
+  historyStack.value = historyStack.value.slice(0, -1)
+}
+
+function handleClearMask() {
+  const maskCanvas = maskCanvasRef.value
+  if (!maskCanvas) return
+  const ctx = maskCanvas.getContext("2d")
+  if (!ctx) return
+  pushMaskHistory()
+  ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height)
+  maskDirty.value = false
+  persistCurrentDraft({ maskImageId: undefined }).catch((draftError) =>
+    console.warn("抠图草稿保存失败:", draftError),
+  )
+}
+
+function exportMaskImage() {
+  const maskCanvas = maskCanvasRef.value
+  if (!maskCanvas || !hasMaskPixels(maskCanvas)) {
+    throw new Error("请先涂抹需要抠出的产品区域。")
+  }
+  const output = document.createElement("canvas")
+  output.width = maskCanvas.width
+  output.height = maskCanvas.height
+  const ctx = output.getContext("2d")
+  if (!ctx) throw new Error("浏览器不支持生成 mask 图片。")
+  ctx.fillStyle = "#000"
+  ctx.fillRect(0, 0, output.width, output.height)
+  const sourceCtx = maskCanvas.getContext("2d")
+  if (!sourceCtx) throw new Error("浏览器不支持读取涂抹区域。")
+  const sourcePixels = sourceCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height)
+  const outputPixels = ctx.getImageData(0, 0, output.width, output.height)
+  for (let index = 0; index < sourcePixels.data.length; index += 4) {
+    if ((sourcePixels.data[index + 3] ?? 0) > 8) {
+      outputPixels.data[index] = 255
+      outputPixels.data[index + 1] = 255
+      outputPixels.data[index + 2] = 255
+      outputPixels.data[index + 3] = 255
+    }
+  }
+  ctx.putImageData(outputPixels, 0, 0)
+  return output.toDataURL("image/png")
+}
+
+function updateSessionCredits(result: {
+  remainingCredits?: number
+  usedCredits?: number
+  unlimitedCredits?: boolean
+}) {
+  if (result.unlimitedCredits || !Number.isFinite(result.remainingCredits)) return
+  if (!props.session?.user) return
+  emit("update:session", {
+    ...props.session,
+    user: {
+      ...props.session.user,
+      remainingCredits: result.remainingCredits,
+      usedCredits: result.usedCredits,
+    },
+  })
+}
+
+async function handleGenerate() {
+  error.value = null
+  if (!props.authenticated) {
+    error.value = "请先登录后再使用抠图。"
+    return
+  }
+  if (!sourceImage.value) {
+    error.value = "请先上传一张包含产品的图片。"
+    return
+  }
+  let apiMaskImage: string
+  try {
+    apiMaskImage = exportMaskImage()
+  } catch (maskError) {
+    error.value = maskError instanceof Error ? maskError.message : String(maskError)
+    return
+  }
+
+  busy.value = true
+  abortRef.value = new AbortController()
+  let item: CutoutHistoryItem = {
+    sourceImageId: sourceImageId.value,
+    sourceImage: sourceImage.value,
+    status: "running",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }
+
+  try {
+    const editorMaskImage = maskCanvasRef.value?.toDataURL("image/png")
+    const maskImageId = editorMaskImage ? await dbPutProductImage(editorMaskImage) : undefined
+    item = { ...item, maskImageId, maskImage: editorMaskImage }
+    await persistCurrentDraft({ maskImageId })
+    await persistCutout(item)
+    history.value = [...history.value, item]
+    activeHistoryIdx.value = history.value.length - 1
+
+    const created = await createCutoutTask(
+      { sourceImage: sourceImage.value, maskImage: apiMaskImage },
+      abortRef.value.signal,
+    )
+    taskIdRef.value = created.taskId
+    updateSessionCredits(created)
+    item = { ...item, taskId: created.taskId, status: "running", updatedAt: Date.now() }
+    await persistCutout(item)
+    history.value = history.value.map((historyItem) =>
+      historyItem.id === item.id ? item : historyItem,
+    )
+
+    const result = await pollCutoutTask(created.taskId, undefined, abortRef.value.signal)
+    if (result.status === "canceled") {
+      item = { ...item, status: "canceled", error: "抠图已中断", updatedAt: Date.now() }
+      await persistCutout(item)
+      history.value = history.value.map((historyItem) =>
+        historyItem.id === item.id ? item : historyItem,
+      )
+      return
+    }
+    if (result.status === "failed") {
+      const message = result.error || "抠图失败"
+      item = { ...item, status: "failed", error: message, updatedAt: Date.now() }
+      await persistCutout(item)
+      history.value = history.value.map((historyItem) =>
+        historyItem.id === item.id ? item : historyItem,
+      )
+      error.value = message
+      return
+    }
+    updateSessionCredits(result)
+    item = {
+      ...item,
+      status: "succeeded",
+      taskId: undefined,
+      error: undefined,
+      model: result.model,
+      resultImageId: undefined,
+      resultBase64: result.base64,
+      updatedAt: Date.now(),
+    }
+    resultBase64.value = result.base64 ?? null
+    await persistCutout(item)
+    resultImageId.value = item.resultImageId
+    await persistCurrentDraft({
+      resultImageId: item.resultImageId,
+      resultBase64: result.base64 ?? null,
+    })
+    history.value = history.value.map((historyItem) =>
+      historyItem.id === item.id ? item : historyItem,
+    )
+  } catch (generateError) {
+    if (generateError instanceof DOMException && generateError.name === "AbortError") {
+      item = { ...item, status: "canceled", error: "抠图已中断", updatedAt: Date.now() }
+      await persistCutout(item)
+    } else {
+      const message = generateError instanceof Error ? generateError.message : String(generateError)
+      item = { ...item, status: "failed", error: message, updatedAt: Date.now() }
+      await persistCutout(item)
+      error.value = message
+    }
+    history.value = history.value.map((historyItem) =>
+      historyItem.id === item.id ? item : historyItem,
+    )
+  } finally {
+    taskIdRef.value = null
+    abortRef.value = null
+    busy.value = false
+  }
+}
+
+function handleCancel() {
+  const taskId = taskIdRef.value
+  if (taskId) cancelCutoutTask(taskId).catch((event) => console.warn("取消抠图任务失败:", event))
+  abortRef.value?.abort()
+  busy.value = false
+}
+
+async function handleSelectHistory(index: number) {
+  const item = history.value[index]
+  if (!item) return
+  activeHistoryIdx.value = index
+  resultImageId.value = item.resultImageId
+  resultBase64.value = item.resultBase64 ?? null
+  error.value = item.error ?? null
+  await dbPutCutoutDraft({
+    sourceImageId: item.sourceImageId,
+    maskImageId: item.maskImageId,
+    resultImageId: item.resultImageId,
+    resultBase64: item.resultBase64 ?? null,
+    brushSize: brushSize.value,
+    mode: mode.value,
+    canvasZoom: canvasZoom.value,
+    updatedAt: Date.now(),
+  })
+  if (item.sourceImageId) {
+    const [restored] = await dbGetProductImages([item.sourceImageId])
+    if (item.maskImageId) {
+      const [restoredMask] = await dbGetProductImages([item.maskImageId])
+      pendingMaskRef.value = restoredMask ?? null
+    } else {
+      pendingMaskRef.value = null
+    }
+    if (restored) {
+      sourceImageId.value = item.sourceImageId
+      sourceImage.value = restored
+    }
+  }
+}
+
+function handleDeleteHistory(index: number) {
+  const item = history.value[index]
+  if (!item) return
+  if (item.id != null) dbDelCutout(item.id).catch((event) => console.warn(event))
+  history.value = history.value.filter((_, itemIndex) => itemIndex !== index)
+  if (activeHistoryIdx.value === index) {
+    activeHistoryIdx.value = history.value.length ? Math.min(index, history.value.length - 1) : -1
+  } else if (activeHistoryIdx.value > index) {
+    activeHistoryIdx.value -= 1
+  }
+}
+
+async function handleClearHistory() {
+  if (!confirm("确定清空所有抠图历史？此操作不可撤销。")) return
+  await dbClearCutouts()
+  history.value = []
+  activeHistoryIdx.value = -1
+}
+
+function handleDownload() {
+  if (!resultBase64.value) return
+  const anchor = document.createElement("a")
+  anchor.href = `data:image/png;base64,${resultBase64.value}`
+  anchor.download = `ecom-cutout-${Date.now()}.png`
+  anchor.click()
+}
+
+onMounted(() => {
+  void (async () => {
+    try {
+      const items = await dbAllCutouts()
+      history.value = items
+      if (items.length) activeHistoryIdx.value = items.length - 1
+    } catch (event) {
+      console.warn("抠图历史读取失败:", event)
+    }
+  })()
+
+  void (async () => {
+    try {
+      const draft = await dbGetCutoutDraft()
+      if (!draft) return
+      brushSize.value = clamp(Number(draft.brushSize ?? 34), 12, 96)
+      mode.value = draft.mode === "eraser" ? "eraser" : "brush"
+      resultImageId.value = draft.resultImageId
+      resultBase64.value = draft.resultBase64 ?? null
+      const [sourceImages, maskImages] = await Promise.all([
+        draft.sourceImageId ? dbGetProductImages([draft.sourceImageId]) : Promise.resolve([]),
+        draft.maskImageId ? dbGetProductImages([draft.maskImageId]) : Promise.resolve([]),
+      ])
+      pendingMaskRef.value = maskImages[0] ?? null
+      pendingCanvasZoomRef.value = clamp(Number(draft.canvasZoom ?? 1), 0.45, 2.2)
+      if (sourceImages[0]) {
+        sourceImageId.value = draft.sourceImageId
+        sourceImage.value = sourceImages[0]
+      }
+    } catch (event) {
+      console.warn("抠图草稿恢复失败:", event)
+    } finally {
+      draftLoaded.value = true
+    }
+  })()
+
+  window.ecomImgGenFlushCutoutDraft = persistCurrentDraft
+})
+
+onBeforeUnmount(() => {
+  if (window.ecomImgGenFlushCutoutDraft === persistCurrentDraft) {
+    delete window.ecomImgGenFlushCutoutDraft
+  }
+})
+
+watch(sourceImage, (next) => {
+  if (next) redrawSource(next)
+})
+</script>
+
+<template>
+  <div class="run-status cutout-status" aria-label="抠图任务状态">
+    <span>{{ sourceImage ? "原图已上传" : "等待上传" }}</span>
+    <span>{{ maskDirty ? "已涂抹区域" : "未涂抹" }}</span>
+    <span>{{ isSuperAdmin ? "不限次数" : `${remainingCredits} 张可用` }}</span>
+    <span>{{ busy ? "抠图中" : "待命" }}</span>
+  </div>
+
+  <div class="cutout-grid">
+    <aside class="studio-panel cutout-panel cutout-source-panel">
+      <div class="panel-heading">
+        <h2>产品原图</h2>
+        <span class="panel-count">上传</span>
+      </div>
+      <div class="cutout-panel-body">
+        <button
+          type="button"
+          :class="['cutout-upload-zone', { 'has-image': sourceImage }]"
+          :disabled="controlsDisabled"
+          @click="fileInputRef?.click()"
+        >
+          <img v-if="sourceImage" :src="sourceImage" alt="待抠图产品原图">
+          <span v-else>
+            <Icon name="upload" />
+            <strong>上传产品图片</strong>
+            <small>建议使用产品清晰、主体完整的图片</small>
+          </span>
+        </button>
+        <input ref="fileInputRef" type="file" accept="image/*" hidden @change="handleFileChange">
+        <div class="cutout-source-actions">
+          <button type="button" class="btn-ghost" :disabled="controlsDisabled" @click="fileInputRef?.click()">
+            <Icon name="upload" />
+            更换图片
+          </button>
+          <button type="button" class="btn-ghost" :disabled="!sourceImage" @click="sourceImage && emit('zoom', sourceImage)">
+            <Icon name="zoom" />
+            查看原图
+          </button>
+        </div>
+        <div class="cutout-help">
+          <strong>操作逻辑</strong>
+          <p>用画笔覆盖需要抠出的产品本体，系统会基于原图和涂抹区域生成白底产品图。</p>
+        </div>
+      </div>
+      <div v-if="error" class="alert cutout-alert">{{ error }}</div>
+    </aside>
+
+    <section class="studio-panel cutout-panel cutout-canvas-panel">
+      <div class="panel-heading">
+        <h2>涂抹区域</h2>
+        <span class="panel-count">{{ brushSize }}px</span>
+      </div>
+      <div class="cutout-toolbar">
+        <div class="tool-segment">
+          <button type="button" :class="{ 'is-active': mode === 'brush' }" :disabled="controlsDisabled" @click="mode = 'brush'">
+            <Icon name="brush" />
+            画笔
+          </button>
+          <button type="button" :class="{ 'is-active': mode === 'eraser' }" :disabled="controlsDisabled" @click="mode = 'eraser'">
+            <Icon name="eraser" />
+            橡皮
+          </button>
+        </div>
+        <label class="brush-slider">
+          <span>笔刷</span>
+          <input
+            type="range"
+            min="12"
+            max="96"
+            :value="brushSize"
+            :disabled="controlsDisabled"
+            @input="event => brushSize = clamp(Number((event.target as HTMLInputElement).value), 12, 96)"
+          >
+        </label>
+        <div class="cutout-toolbar-actions">
+          <div class="cutout-zoom-actions" aria-label="画布缩放">
+            <button type="button" class="btn-ghost" :disabled="!sourceImage" @click="canvasZoom = clamp(canvasZoom - 0.15, 0.45, 2.2)">-</button>
+            <span>{{ Math.round(canvasZoom * 100) }}%</span>
+            <button type="button" class="btn-ghost" :disabled="!sourceImage" @click="canvasZoom = clamp(canvasZoom + 0.15, 0.45, 2.2)">+</button>
+            <button type="button" class="btn-ghost" :disabled="!sourceImage || canvasZoom === 1" @click="canvasZoom = 1">复位</button>
+          </div>
+          <button type="button" class="btn-ghost" :disabled="controlsDisabled || !historyStack.length" @click="handleUndo">
+            <Icon name="undo" />
+            撤销
+          </button>
+          <button type="button" class="btn-ghost" :disabled="controlsDisabled || !maskDirty" @click="handleClearMask">
+            清空
+          </button>
+        </div>
+      </div>
+      <div class="cutout-canvas-wrap">
+        <div :class="['cutout-canvas-stage', { 'has-image': sourceImage, 'is-busy': busy }]">
+          <canvas ref="imageCanvasRef" aria-hidden="true" :style="canvasStyle" />
+          <canvas
+            ref="maskCanvasRef"
+            class="cutout-mask-canvas"
+            :style="canvasStyle"
+            aria-label="涂抹需要抠出的产品区域"
+            @pointerenter="handlePointerEnter"
+            @pointerdown="handlePointerDown"
+            @pointermove="handlePointerMove"
+            @pointerup="finishDrawing"
+            @pointercancel="hideCursorPreview"
+            @pointerleave="hideCursorPreview"
+          />
+          <span
+            v-if="sourceImage && cursorPreview.visible && !busy"
+            :class="['cutout-brush-cursor', `is-${mode}`]"
+            aria-hidden="true"
+            :style="{
+              width: `${Math.max(10, brushSize * canvasZoom)}px`,
+              height: `${Math.max(10, brushSize * canvasZoom)}px`,
+              left: `${cursorPreview.x}px`,
+              top: `${cursorPreview.y}px`,
+            }"
+          />
+          <div v-if="!sourceImage" class="cutout-canvas-empty">
+            <Icon name="cutout" />
+            <span>上传图片后在这里涂抹产品</span>
+          </div>
+          <div v-if="busy" class="cutout-busy-layer">
+            <span class="busy-orbit" aria-hidden="true" />
+            <strong>正在抠图</strong>
+            <p>正在提取涂抹产品并补全遮挡部分。</p>
+          </div>
+        </div>
+      </div>
+      <div class="cutout-action-bar">
+        <button v-if="busy" type="button" class="btn-danger" @click="handleCancel">
+          中断抠图
+        </button>
+        <button
+          v-else
+          type="button"
+          class="btn-primary"
+          :disabled="controlsDisabled || !sourceImage || !canvasReady || !maskDirty"
+          @click="handleGenerate"
+        >
+          <Icon name="cutout" />
+          开始抠图
+        </button>
+      </div>
+    </section>
+
+    <section class="studio-panel cutout-panel cutout-result-panel">
+      <div class="panel-heading">
+        <h2>白底结果</h2>
+        <span class="panel-count">{{ resultBase64 ? "已生成" : "预览" }}</span>
+      </div>
+      <div class="cutout-result-stage">
+        <template v-if="resultSrc">
+          <button type="button" class="cutout-result-image" @click="emit('zoom', resultSrc)">
+            <img :src="resultSrc" alt="白底产品抠图结果">
+          </button>
+          <div class="stage-actions">
+            <button type="button" class="btn-ghost" @click="handleDownload">
+              <Icon name="download" />
+              下载
+            </button>
+            <button type="button" class="btn-ghost" @click="emit('zoom', resultSrc)">
+              <Icon name="zoom" />
+              放大
+            </button>
+          </div>
+        </template>
+        <div v-else class="stage-placeholder cutout-result-empty">
+          <Icon name="image" class="icon-large" />
+          <div class="icon-hint">抠图结果会生成白底产品图</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="studio-panel history-dock cutout-history-dock">
+    <div class="history-bar">
+      <h2>抠图历史</h2>
+      <button type="button" class="inline-action" :disabled="!history.length" @click="handleClearHistory">
+        清空历史
+      </button>
+    </div>
+    <div v-if="history.length" class="cutout-history-grid">
+      <article
+        v-for="(item, index) in history"
+        :key="item.id ?? `${item.createdAt}-${index}`"
+        :class="['cutout-history-card', { 'is-active': index === activeHistoryIdx }]"
+      >
+        <button type="button" class="cutout-history-main" @click="handleSelectHistory(index)">
+          <div class="cutout-history-image">
+            <img v-if="item.resultBase64" :src="`data:image/png;base64,${item.resultBase64}`" alt="抠图历史结果">
+            <span v-else>{{ item.status === "failed" ? "失败" : "处理中" }}</span>
+          </div>
+          <div>
+            <strong>
+              {{
+                item.status === "succeeded"
+                  ? "白底产品图"
+                  : item.status === "failed"
+                    ? "抠图失败"
+                    : item.status === "canceled"
+                      ? "已中断"
+                      : "处理中"
+              }}
+            </strong>
+            <p>{{ item.error || "包含原图、涂抹区域和抠图结果。" }}</p>
+            <small>{{ new Date(item.createdAt).toLocaleString() }}</small>
+          </div>
+        </button>
+        <button type="button" class="tile-del" aria-label="删除抠图历史" @click="handleDeleteHistory(index)">
+          <Icon name="trash" />
+        </button>
+      </article>
+    </div>
+    <div v-else class="empty">暂无抠图历史。</div>
+  </section>
+</template>

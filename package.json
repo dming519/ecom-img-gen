@@ -3,24 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "check": "tsc --noEmit && tsc -p worker/tsconfig.json --noEmit",
-    "preview": "wrangler pages dev out --project-name ecom-img-gen",
-    "deploy": "next build && wrangler pages deploy out --project-name ecom-img-gen"
+    "dev": "nuxt dev",
+    "build": "nuxt build --preset=cloudflare_pages",
+    "start": "nuxt preview",
+    "check": "nuxt prepare && vue-tsc --noEmit && tsc -p worker/tsconfig.json --noEmit",
+    "preview": "wrangler pages dev dist --project-name ecom-img-gen",
+    "deploy": "nuxt build --preset=cloudflare_pages && wrangler pages deploy dist --project-name ecom-img-gen"
   },
   "dependencies": {
-    "next": "^15.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "nuxt": "^4.4.7",
+    "vue": "^3.5.35"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260521.1",
     "@types/node": "^22.0.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
     "typescript": "^5.6.0",
+    "vue-tsc": "^3.3.3",
     "wrangler": "^4.98.0"
   }
 }

@@ -53,7 +53,7 @@ npx wrangler d1 execute ecom-img-gen-history --remote --file migrations/0001_his
 npx wrangler d1 execute ecom-img-gen-history --remote --file migrations/0002_admin_data_d1.sql
 ```
 
-Pages Function 首次访问时也会兜底创建同一套表。历史记录元数据写入 D1，参考图、生成图、抠图结果写入 R2；后台用户、访问码、兑换码和用户额度也写入 D1。
+Nuxt/Nitro API 首次访问时也会兜底创建同一套表。历史记录元数据写入 D1，参考图、生成图、抠图结果写入 R2；后台用户、访问码、兑换码和用户额度也写入 D1。
 
 ## 3. 部署 Worker
 
@@ -114,7 +114,7 @@ ecom-img-gen
 
 ```text
 Build command: npm run build
-Output directory: out
+Output directory: dist
 ```
 
 Pages 需要绑定同一个 `TASKS_KV`，并绑定 `HISTORY_DB` 和 `HISTORY_BUCKET`。同时配置 Secrets：
@@ -167,7 +167,7 @@ IMAGE_WORKER_TOKEN
 
 ```bash
 npm run build
-npx wrangler pages deploy out --project-name ecom-img-gen
+npx wrangler pages deploy dist --project-name ecom-img-gen
 ```
 
 ## 7. 绑定域名

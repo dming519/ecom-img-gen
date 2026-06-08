@@ -1,0 +1,1497 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue"
+import {
+  cancelImageTask,
+  createImageTask,
+  generateDetailPrompts,
+  pollImageTask,
+  redeemCredits,
+} from "@/lib/api"
+import {
+  dbAdd,
+  dbAll,
+  dbClear,
+  dbDel,
+  dbGetProductImages,
+  dbImageFileUrl,
+  dbPut,
+} from "@/lib/db"
+import { resolveImageSize } from "@/lib/imageOptions"
+import type {
+  AspectRatio,
+  AuthSession,
+  DetailPromptItem,
+  HistoryItem,
+  ImageQuality,
+  ProductInput,
+} from "@/lib/types"
+import AdminPanel from "./AdminPanel.vue"
+import AspectRatioSelector from "./AspectRatioSelector.vue"
+import CutoutStudio from "./CutoutStudio.vue"
+import HistoryGrid from "./HistoryGrid.vue"
+import Icon from "./Icon.vue"
+import ImageCountSelector from "./ImageCountSelector.vue"
+import Lightbox from "./Lightbox.vue"
+import QualitySelector from "./QualitySelector.vue"
+import Stage from "./Stage.vue"
+
+type StudioMode = "image" | "cutout"
+type WakeLockSentinelLike = { release: () => Promise<void> }
+
+const props = withDefaults(defineProps<{
+  initialMode?: StudioMode
+}>(), {
+  initialMode: "image",
+})
+
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024
+const MAX_PRODUCT_IMAGE_EDGE = 1280
+const PRODUCT_IMAGE_QUALITY = 0.82
+const MAX_PROMPT_IMAGE_CHARS = 1_500_000
+const MAX_PROMPT_IMAGE_TOTAL_CHARS = 6_000_000
+const MAX_DETAIL_IMAGES = 8
+const LEGACY_DRAFT_KEY = "ecomimggen_draft"
+const DRAFT_KEY = "ecomimggen_draft_v2"
+const ASPECT_RATIO_VALUES: AspectRatio[] = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16"]
+const IMAGE_QUALITY_VALUES: ImageQuality[] = ["1K", "2K", "4K"]
+const STATUS_LABEL: Record<DetailPromptItem["status"], string> = {
+  draft: "待生成",
+  queued: "排队中",
+  running: "生成中",
+  succeeded: "已完成",
+  failed: "失败",
+}
+
+interface DraftState {
+  productName: string
+  sellingPoints: string
+  imageCount: number
+  prompts: DetailPromptItem[]
+  aspectRatio?: AspectRatio
+  quality?: ImageQuality
+  productImageIds?: string[]
+}
+
+class ImageGenerationCancelledError extends Error {
+  constructor() {
+    super("已中断生成详情图")
+    this.name = "ImageGenerationCancelledError"
+  }
+}
+
+const studioMode = shallowRef<StudioMode>(props.initialMode)
+const productName = shallowRef("")
+const sellingPoints = shallowRef("")
+const imageCount = shallowRef(5)
+const productImages = ref<string[]>([])
+const productImageIds = ref<string[]>([])
+const aspectRatio = shallowRef<AspectRatio>("3:4")
+const quality = shallowRef<ImageQuality>("1K")
+const prompts = ref<DetailPromptItem[]>([])
+const history = ref<HistoryItem[]>([])
+const activeHistoryIdx = shallowRef(-1)
+const activePromptIdx = shallowRef(0)
+const session = shallowRef<AuthSession | null>(null)
+const sessionLoading = shallowRef(true)
+const authPopoverOpen = shallowRef(false)
+const accessCode = shallowRef("")
+const redeemCode = shallowRef("")
+const accessBusy = shallowRef(false)
+const redeemBusy = shallowRef(false)
+const redeemMessage = shallowRef<string | null>(null)
+const promptBusy = shallowRef(false)
+const imageBusy = shallowRef(false)
+const draftLoaded = shallowRef(false)
+const adminOpen = shallowRef(false)
+const error = shallowRef<string | null>(null)
+const lightboxSrc = shallowRef<string | null>(null)
+const avatarFailed = shallowRef(false)
+
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const authPopoverRef = ref<HTMLDivElement | null>(null)
+const wakeLockRef = shallowRef<WakeLockSentinelLike | null>(null)
+const imageAbortRef = shallowRef<AbortController | null>(null)
+const imageCancelRequestedRef = shallowRef(false)
+const currentImageTaskIdRef = shallowRef<string | null>(null)
+
+const currentProduct = computed<ProductInput>(() => ({
+  name: productName.value.trim(),
+  sellingPoints: sellingPoints.value.trim(),
+  imageCount: imageCount.value,
+  productImages: productImages.value,
+  productImageIds: productImageIds.value,
+}))
+const resolvedSize = computed(() => resolveImageSize(aspectRatio.value))
+const generationLabel = computed(() =>
+  `${aspectRatio.value === "auto" ? "Auto" : aspectRatio.value} · ${quality.value}`,
+)
+const authenticated = computed(() => !!session.value?.authenticated)
+const authLabel = computed(() =>
+  authenticated.value ? `${session.value?.user?.name || "已登录用户"} 账户菜单` : "打开登录菜单",
+)
+const controlsDisabled = computed(
+  () =>
+    sessionLoading.value ||
+    accessBusy.value ||
+    redeemBusy.value ||
+    promptBusy.value ||
+    imageBusy.value ||
+    !authenticated.value,
+)
+const providerLabel = computed(() =>
+  session.value?.user?.provider === "github"
+    ? "GitHub"
+    : session.value?.user?.provider === "google"
+      ? "Google"
+      : "访问码",
+)
+const authRedirectPath = computed(() => (studioMode.value === "cutout" ? "/cutout/" : "/image/"))
+const isAdmin = computed(
+  () => session.value?.user?.role === "admin" || session.value?.user?.role === "super_admin",
+)
+const isSuperAdmin = computed(() => session.value?.user?.role === "super_admin")
+const creditLabel = computed(() =>
+  authenticated.value
+    ? isSuperAdmin.value
+      ? "不限次数"
+      : `${session.value?.user?.remainingCredits ?? 0} 张可用`
+    : "未登录",
+)
+const showUserImage = computed(
+  () => !!(authenticated.value && session.value?.user?.image && !avatarFailed.value),
+)
+const activePromptIndex = computed(() =>
+  prompts.value.length
+    ? Math.min(Math.max(activePromptIdx.value, 0), prompts.value.length - 1)
+    : 0,
+)
+const activePrompt = computed(() => prompts.value[activePromptIndex.value] ?? null)
+
+function fileToCompressedDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const image = new Image()
+      image.onload = () => {
+        const scale = Math.min(
+          1,
+          MAX_PRODUCT_IMAGE_EDGE / Math.max(image.naturalWidth, image.naturalHeight),
+        )
+        const width = Math.max(1, Math.round(image.naturalWidth * scale))
+        const height = Math.max(1, Math.round(image.naturalHeight * scale))
+        const canvas = document.createElement("canvas")
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true })
+        if (!ctx) {
+          reject(new Error("浏览器不支持图片压缩，请更换图片后重试"))
+          return
+        }
+        ctx.drawImage(image, 0, 0, width, height)
+        resolve(canvas.toDataURL("image/jpeg", PRODUCT_IMAGE_QUALITY))
+      }
+      image.onerror = () => reject(new Error("图片读取失败，请更换图片后重试"))
+      image.src = String(reader.result)
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+function createPromptItem(index: number, title: string, prompt: string): DetailPromptItem {
+  return {
+    id: crypto.randomUUID(),
+    index,
+    title,
+    prompt,
+    status: "draft",
+  }
+}
+
+function resetInterruptedPrompt(item: DetailPromptItem): DetailPromptItem {
+  if (item.status !== "queued" && item.status !== "running") return item
+  return {
+    ...item,
+    status: item.base64 ? "succeeded" : "draft",
+    taskId: item.base64 ? item.taskId : undefined,
+    error: undefined,
+    updatedAt: Date.now(),
+  }
+}
+
+function resetActiveGenerationPrompts(items: DetailPromptItem[]): DetailPromptItem[] {
+  return items.map((item) =>
+    item.status === "queued" || item.status === "running"
+      ? {
+          ...item,
+          status: item.base64 ? "succeeded" : "draft",
+          taskId: item.base64 ? item.taskId : undefined,
+          error: undefined,
+          updatedAt: Date.now(),
+        }
+      : item,
+  )
+}
+
+function cloneProduct(input: ProductInput): ProductInput {
+  return {
+    name: input.name,
+    sellingPoints: input.sellingPoints,
+    imageCount: input.imageCount,
+    productImages: [...input.productImages],
+    productImageIds: input.productImageIds ? [...input.productImageIds] : [],
+  }
+}
+
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === "string") resolve(reader.result)
+      else reject(new Error("图片读取失败"))
+    }
+    reader.onerror = () => reject(new Error("图片读取失败"))
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function imageSrcToDataUrl(src: string) {
+  const value = src.trim()
+  if (value.startsWith("data:image/")) return value
+  const response = await fetch(value, { credentials: "same-origin", cache: "no-store" })
+  if (!response.ok) throw new Error("产品参考图读取失败，请重新上传图片。")
+  const blob = await response.blob()
+  if (!blob.type.startsWith("image/")) throw new Error("产品参考图格式无效，请重新上传图片。")
+  return blobToDataUrl(blob)
+}
+
+async function getPromptReadyImages(images: string[]) {
+  const dataUrls = await Promise.all(images.slice(0, 8).map(imageSrcToDataUrl))
+  const next = dataUrls
+    .filter((image) => image.startsWith("data:image/"))
+    .filter((image) => image.length <= MAX_PROMPT_IMAGE_CHARS)
+    .slice(0, 8)
+  const total = next.reduce((sum, image) => sum + image.length, 0)
+  if (!next.length) throw new Error("产品参考图过大或格式无效，请重新上传图片。")
+  if (total > MAX_PROMPT_IMAGE_TOTAL_CHARS) {
+    throw new Error("产品参考图总大小过大，请减少图片数量或重新上传后再生成。")
+  }
+  return next
+}
+
+function getPromptImageSrc(item: DetailPromptItem | undefined) {
+  if (!item) return null
+  if (item.base64) return `data:image/png;base64,${item.base64}`
+  if (item.imageId) return dbImageFileUrl(item.imageId)
+  return null
+}
+
+function readStudioModeFromUrl(): StudioMode {
+  if (typeof window === "undefined") return props.initialMode
+  const pathname = window.location.pathname.replace(/\/+$/, "")
+  if (pathname.endsWith("/cutout")) return "cutout"
+  if (pathname.endsWith("/image")) return "image"
+  const hashMode = window.location.hash.replace(/^#/, "")
+  if (hashMode === "cutout") return "cutout"
+  if (hashMode === "image") return "image"
+  const module = new URL(window.location.href).searchParams.get("module")
+  return module === "cutout" ? "cutout" : "image"
+}
+
+async function flushCutoutDraftIfNeeded() {
+  const flushCutoutDraft = window.ecomImgGenFlushCutoutDraft
+  if (!flushCutoutDraft) return
+  try {
+    await flushCutoutDraft()
+  } catch (draftError) {
+    console.warn("抠图草稿保存失败:", draftError)
+  }
+}
+
+async function handleModuleLinkClick(event: MouseEvent, mode: StudioMode) {
+  if (mode === studioMode.value) return
+  if (!window.ecomImgGenFlushCutoutDraft) return
+  event.preventDefault()
+  await flushCutoutDraftIfNeeded()
+  window.location.assign(mode === "cutout" ? "/cutout/" : "/image/")
+}
+
+async function handleHomeLinkClick(event: MouseEvent) {
+  if (!window.ecomImgGenFlushCutoutDraft) return
+  event.preventDefault()
+  await flushCutoutDraftIfNeeded()
+  window.location.assign("/")
+}
+
+async function persistHistory(item: HistoryItem) {
+  try {
+    if (item.id == null) {
+      const id = await dbAdd(item)
+      item.id = id as number
+    } else {
+      await dbPut(item)
+    }
+    if (item.product.productImageIds?.length) {
+      productImageIds.value = item.product.productImageIds
+    }
+  } catch (event) {
+    console.warn("历史记录写入失败:", event)
+  }
+}
+
+function updateSessionCredits(result: {
+  remainingCredits?: number
+  usedCredits?: number
+  unlimitedCredits?: boolean
+}) {
+  if (result.unlimitedCredits || !Number.isFinite(result.remainingCredits)) return
+  if (!session.value?.user) return
+  session.value = {
+    ...session.value,
+    user: {
+      ...session.value.user,
+      remainingCredits: result.remainingCredits,
+      usedCredits: result.usedCredits,
+    },
+  }
+}
+
+async function handleSelectFiles(files: FileList | null) {
+  if (!files?.length) return
+  error.value = null
+  const accepted: string[] = []
+  for (const file of Array.from(files)) {
+    if (!file.type.startsWith("image/")) {
+      error.value = `已忽略非图片文件：${file.name}`
+      continue
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      error.value = `图片过大（>8MB）已忽略：${file.name}`
+      continue
+    }
+    try {
+      accepted.push(await fileToCompressedDataURL(file))
+    } catch (event) {
+      console.warn("读取图片失败:", event)
+    }
+  }
+  if (accepted.length) productImages.value = [...productImages.value, ...accepted].slice(0, 8)
+  if (fileInputRef.value) fileInputRef.value.value = ""
+}
+
+function handleResetProductInput() {
+  if (promptBusy.value || imageBusy.value) return
+  error.value = null
+  productName.value = ""
+  sellingPoints.value = ""
+  imageCount.value = 5
+  productImages.value = []
+  productImageIds.value = []
+  aspectRatio.value = "3:4"
+  quality.value = "1K"
+  prompts.value = []
+  activePromptIdx.value = 0
+  activeHistoryIdx.value = -1
+  if (fileInputRef.value) fileInputRef.value.value = ""
+}
+
+function validateProduct() {
+  if (!session.value?.authenticated) {
+    error.value = "请先登录后再使用 EcomImgGen。"
+    return false
+  }
+  if (!productName.value.trim()) {
+    error.value = "请输入产品名称。"
+    return false
+  }
+  if (!sellingPoints.value.trim()) {
+    error.value = "请输入产品核心卖点和功效。"
+    return false
+  }
+  if (!productImages.value.length) {
+    error.value = "请至少上传一张产品参考图。系统已禁止纯文案生成，以保证产品外观一致。"
+    return false
+  }
+  return true
+}
+
+async function handleGeneratePrompts() {
+  error.value = null
+  if (!validateProduct()) return
+  promptBusy.value = true
+  try {
+    const result = await generateDetailPrompts({
+      ...currentProduct.value,
+      productImages: await getPromptReadyImages(productImages.value),
+    })
+    prompts.value = result.prompts.map((item, index) =>
+      createPromptItem(index, item.title, item.prompt),
+    )
+    activePromptIdx.value = 0
+  } catch (event) {
+    error.value = event instanceof Error ? event.message : String(event)
+  } finally {
+    promptBusy.value = false
+  }
+}
+
+function handlePromptChange(id: string, value: string) {
+  prompts.value = prompts.value.map((item) =>
+    item.id === id
+      ? { ...item, prompt: value, status: item.base64 ? item.status : "draft" }
+      : item,
+  )
+}
+
+function handleTitleChange(id: string, value: string) {
+  prompts.value = prompts.value.map((item) => (item.id === id ? { ...item, title: value } : item))
+}
+
+async function requestWakeLock() {
+  try {
+    const maybeWakeLock = (
+      navigator as Navigator & {
+        wakeLock?: { request: (type: "screen") => Promise<WakeLockSentinelLike> }
+      }
+    ).wakeLock
+    if (maybeWakeLock) wakeLockRef.value = await maybeWakeLock.request("screen")
+  } catch {
+    // Wake Lock is optional.
+  }
+}
+
+async function cleanupImageGeneration() {
+  imageAbortRef.value = null
+  imageCancelRequestedRef.value = false
+  currentImageTaskIdRef.value = null
+  if (wakeLockRef.value) {
+    await wakeLockRef.value.release().catch(() => undefined)
+    wakeLockRef.value = null
+  }
+  imageBusy.value = false
+}
+
+async function handleGenerateImages() {
+  error.value = null
+  if (!validateProduct()) return
+  if (!prompts.value.length) {
+    error.value = "请先生成详情图文案。"
+    return
+  }
+  if (prompts.value.some((item) => !item.prompt.trim())) {
+    error.value = "详情图文案不能为空，请检查后再生成。"
+    return
+  }
+
+  imageBusy.value = true
+  imageCancelRequestedRef.value = false
+  imageAbortRef.value = new AbortController()
+  let historyItem: HistoryItem = {
+    product: cloneProduct(currentProduct.value),
+    prompts: prompts.value.map((item) => ({
+      ...item,
+      status: "draft",
+      imageId: undefined,
+      base64: undefined,
+    })),
+    timestamp: Date.now(),
+    generation: {
+      aspectRatio: aspectRatio.value,
+      quality: quality.value,
+      size: resolvedSize.value,
+    },
+  }
+
+  try {
+    const generationImages = await getPromptReadyImages(productImages.value)
+    await requestWakeLock()
+    await persistHistory(historyItem)
+    history.value = [...history.value, historyItem]
+    activeHistoryIdx.value = history.value.length - 1
+
+    let working = historyItem.prompts
+    for (let index = 0; index < working.length; index += 1) {
+      if (imageCancelRequestedRef.value) throw new ImageGenerationCancelledError()
+      activePromptIdx.value = index
+      working = working.map((item, itemIndex) =>
+        itemIndex === index
+          ? { ...item, status: "queued", error: undefined, updatedAt: Date.now() }
+          : item,
+      )
+      historyItem = { ...historyItem, prompts: working }
+      prompts.value = working
+      await persistHistory(historyItem)
+
+      const task = await createImageTask(
+        {
+          prompt: working[index]?.prompt ?? "",
+          size: resolvedSize.value,
+          aspectRatio: aspectRatio.value,
+          quality: quality.value,
+          inputImages: generationImages,
+        },
+        imageAbortRef.value?.signal,
+      )
+      currentImageTaskIdRef.value = task.taskId
+      updateSessionCredits(task)
+
+      working = working.map((item, itemIndex) =>
+        itemIndex === index
+          ? { ...item, status: "running", taskId: task.taskId, updatedAt: Date.now() }
+          : item,
+      )
+      historyItem = { ...historyItem, prompts: working }
+      prompts.value = working
+      await persistHistory(historyItem)
+
+      const result = await pollImageTask(task.taskId, undefined, imageAbortRef.value?.signal)
+      if (imageCancelRequestedRef.value || result.status === "canceled") {
+        throw new ImageGenerationCancelledError()
+      }
+      if (result.status === "failed") {
+        const message = result.error || "任务执行失败"
+        working = working.map((item, itemIndex) =>
+          itemIndex === index
+            ? { ...item, status: "failed", error: message, updatedAt: Date.now() }
+            : item,
+        )
+        historyItem = { ...historyItem, prompts: working }
+        prompts.value = working
+        await persistHistory(historyItem)
+        throw new Error(message)
+      }
+      updateSessionCredits(result)
+
+      working = working.map((item, itemIndex) =>
+        itemIndex === index
+          ? {
+              ...item,
+              status: "succeeded",
+              imageId: undefined,
+              base64: result.base64,
+              model: result.model,
+              updatedAt: Date.now(),
+            }
+          : item,
+      )
+      historyItem = { ...historyItem, prompts: working }
+      prompts.value = working
+      currentImageTaskIdRef.value = null
+      history.value = history.value.map((item) => (item.id === historyItem.id ? historyItem : item))
+      await persistHistory(historyItem)
+    }
+  } catch (event) {
+    if (
+      event instanceof ImageGenerationCancelledError ||
+      (event instanceof DOMException && event.name === "AbortError")
+    ) {
+      historyItem = { ...historyItem, prompts: resetActiveGenerationPrompts(historyItem.prompts) }
+      prompts.value = historyItem.prompts
+      history.value = history.value.map((item) => (item.id === historyItem.id ? historyItem : item))
+      await persistHistory(historyItem)
+    } else {
+      error.value = event instanceof Error ? event.message : String(event)
+    }
+  } finally {
+    await cleanupImageGeneration()
+  }
+}
+
+async function handleRegenerateActiveImage() {
+  error.value = null
+  if (!validateProduct()) return
+  if (!prompts.value.length) {
+    error.value = "请先生成详情图文案。"
+    return
+  }
+  const targetIndex = Math.min(Math.max(activePromptIdx.value, 0), prompts.value.length - 1)
+  const target = prompts.value[targetIndex]
+  if (!target?.prompt.trim()) {
+    error.value = "当前详情图文案不能为空，请检查后再重新生成。"
+    return
+  }
+
+  imageBusy.value = true
+  imageCancelRequestedRef.value = false
+  imageAbortRef.value = new AbortController()
+  let historyItem: HistoryItem = history.value[activeHistoryIdx.value]
+    ? {
+        ...history.value[activeHistoryIdx.value],
+        product: cloneProduct(currentProduct.value),
+        prompts: prompts.value.map(resetInterruptedPrompt),
+        timestamp: Date.now(),
+        generation: {
+          aspectRatio: aspectRatio.value,
+          quality: quality.value,
+          size: resolvedSize.value,
+        },
+      }
+    : {
+        product: cloneProduct(currentProduct.value),
+        prompts: prompts.value.map(resetInterruptedPrompt),
+        timestamp: Date.now(),
+        generation: {
+          aspectRatio: aspectRatio.value,
+          quality: quality.value,
+          size: resolvedSize.value,
+        },
+      }
+
+  try {
+    const generationImages = await getPromptReadyImages(productImages.value)
+    await requestWakeLock()
+    await persistHistory(historyItem)
+    const existingIndex = history.value.findIndex((item) => item.id === historyItem.id)
+    if (existingIndex >= 0) {
+      history.value = history.value.map((item, index) => (index === existingIndex ? historyItem : item))
+      activeHistoryIdx.value = existingIndex
+    } else {
+      history.value = [...history.value, historyItem]
+      activeHistoryIdx.value = history.value.length - 1
+    }
+
+    let working: DetailPromptItem[] = historyItem.prompts.map((item, itemIndex) =>
+      itemIndex === targetIndex
+        ? {
+            ...item,
+            status: "queued" as const,
+            imageId: undefined,
+            base64: undefined,
+            model: undefined,
+            taskId: undefined,
+            error: undefined,
+            updatedAt: Date.now(),
+          }
+        : item,
+    )
+    historyItem = { ...historyItem, prompts: working }
+    prompts.value = working
+    await persistHistory(historyItem)
+
+    const task = await createImageTask(
+      {
+        prompt: working[targetIndex]?.prompt ?? "",
+        size: resolvedSize.value,
+        aspectRatio: aspectRatio.value,
+        quality: quality.value,
+        inputImages: generationImages,
+      },
+      imageAbortRef.value?.signal,
+    )
+    currentImageTaskIdRef.value = task.taskId
+    updateSessionCredits(task)
+
+    working = working.map((item, itemIndex): DetailPromptItem =>
+      itemIndex === targetIndex
+        ? { ...item, status: "running" as const, taskId: task.taskId, updatedAt: Date.now() }
+        : item,
+    )
+    historyItem = { ...historyItem, prompts: working }
+    prompts.value = working
+    await persistHistory(historyItem)
+
+    const result = await pollImageTask(task.taskId, undefined, imageAbortRef.value?.signal)
+    if (imageCancelRequestedRef.value || result.status === "canceled") {
+      throw new ImageGenerationCancelledError()
+    }
+    if (result.status === "failed") {
+      const message = result.error || "任务执行失败"
+      working = working.map((item, itemIndex): DetailPromptItem =>
+        itemIndex === targetIndex
+          ? { ...item, status: "failed" as const, error: message, updatedAt: Date.now() }
+          : item,
+      )
+      historyItem = { ...historyItem, prompts: working }
+      prompts.value = working
+      history.value = history.value.map((item) => (item.id === historyItem.id ? historyItem : item))
+      await persistHistory(historyItem)
+      throw new Error(message)
+    }
+    updateSessionCredits(result)
+
+    working = working.map((item, itemIndex): DetailPromptItem =>
+      itemIndex === targetIndex
+        ? {
+            ...item,
+            status: "succeeded" as const,
+            imageId: undefined,
+            base64: result.base64,
+            model: result.model,
+            taskId: undefined,
+            error: undefined,
+            updatedAt: Date.now(),
+          }
+        : item,
+    )
+    historyItem = { ...historyItem, prompts: working }
+    prompts.value = working
+    currentImageTaskIdRef.value = null
+    history.value = history.value.map((item) => (item.id === historyItem.id ? historyItem : item))
+    await persistHistory(historyItem)
+  } catch (event) {
+    if (
+      event instanceof ImageGenerationCancelledError ||
+      (event instanceof DOMException && event.name === "AbortError")
+    ) {
+      historyItem = { ...historyItem, prompts: resetActiveGenerationPrompts(historyItem.prompts) }
+      prompts.value = historyItem.prompts
+      history.value = history.value.map((item) => (item.id === historyItem.id ? historyItem : item))
+      await persistHistory(historyItem)
+    } else {
+      error.value = event instanceof Error ? event.message : String(event)
+    }
+  } finally {
+    await cleanupImageGeneration()
+  }
+}
+
+function handleCancelImageGeneration() {
+  if (!imageBusy.value) return
+  imageCancelRequestedRef.value = true
+  const taskId = currentImageTaskIdRef.value
+  if (taskId) cancelImageTask(taskId).catch((event) => console.warn("取消图片任务失败:", event))
+  imageAbortRef.value?.abort()
+}
+
+function handleSelectHistory(idx: number) {
+  const item = history.value[idx]
+  if (!item) return
+  activeHistoryIdx.value = idx
+  productName.value = item.product.name
+  sellingPoints.value = item.product.sellingPoints
+  imageCount.value = Math.min(MAX_DETAIL_IMAGES, Math.max(1, item.product.imageCount))
+  productImageIds.value = item.product.productImageIds ?? []
+  productImages.value = item.product.productImages
+  if (item.product.productImageIds?.length) {
+    dbGetProductImages(item.product.productImageIds)
+      .then((images) => {
+        productImages.value = images.slice(0, 8)
+      })
+      .catch((event) => console.warn("产品参考图恢复失败:", event))
+  }
+  prompts.value = item.prompts.map(resetInterruptedPrompt)
+  if (item.generation?.aspectRatio && ASPECT_RATIO_VALUES.includes(item.generation.aspectRatio)) {
+    aspectRatio.value = item.generation.aspectRatio
+  }
+  if (item.generation?.quality && IMAGE_QUALITY_VALUES.includes(item.generation.quality)) {
+    quality.value = item.generation.quality
+  }
+  activePromptIdx.value = 0
+}
+
+function handleDeleteHistory(idx: number) {
+  const item = history.value[idx]
+  if (!item) return
+  if (item.id != null) dbDel(item.id).catch((event) => console.warn(event))
+  history.value = history.value.filter((_, index) => index !== idx)
+  if (activeHistoryIdx.value === idx) {
+    activeHistoryIdx.value = history.value.length ? Math.min(idx, history.value.length - 1) : -1
+  } else if (activeHistoryIdx.value > idx) {
+    activeHistoryIdx.value -= 1
+  }
+}
+
+async function handleClearHistory() {
+  if (!confirm("确定清空所有商品详情图历史？此操作不可撤销。")) return
+  try {
+    await dbClear()
+  } catch (event) {
+    console.warn(event)
+  }
+  history.value = []
+  activeHistoryIdx.value = -1
+}
+
+async function handleAccessLogin() {
+  const code = accessCode.value.trim()
+  if (!code) {
+    error.value = "请输入访问码。"
+    return
+  }
+  error.value = null
+  accessBusy.value = true
+  try {
+    const response = await fetch("/api/auth/login/access", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    })
+    const payload = (await response.json().catch(() => null)) as AuthSession | { error?: string } | null
+    if (!response.ok) {
+      throw new Error(
+        payload && "error" in payload && payload.error ? payload.error : `HTTP ${response.status}`,
+      )
+    }
+    session.value = payload as AuthSession
+    accessCode.value = ""
+    authPopoverOpen.value = false
+  } catch (event) {
+    error.value = event instanceof Error ? event.message : String(event)
+  } finally {
+    accessBusy.value = false
+  }
+}
+
+async function handleRedeemCode() {
+  const code = redeemCode.value.trim()
+  if (!code) {
+    redeemMessage.value = "请输入兑换码。"
+    return
+  }
+  error.value = null
+  redeemMessage.value = null
+  redeemBusy.value = true
+  try {
+    const payload = await redeemCredits(code)
+    session.value = session.value
+      ? { ...session.value, authenticated: true, user: payload.user }
+      : { authenticated: true, user: payload.user }
+    redeemCode.value = ""
+    redeemMessage.value = `已增加 ${payload.grantedCredits} 张图片生成机会。`
+  } catch (event) {
+    redeemMessage.value = event instanceof Error ? event.message : String(event)
+  } finally {
+    redeemBusy.value = false
+  }
+}
+
+function handleDownload(index: number) {
+  const imageSrc = getPromptImageSrc(prompts.value[index])
+  if (!imageSrc) return
+  const anchor = document.createElement("a")
+  anchor.href = imageSrc
+  anchor.download = `ecom-detail-${productName.value || "product"}-${index + 1}.png`
+  anchor.click()
+}
+
+function handleLocationChange() {
+  studioMode.value = readStudioModeFromUrl()
+}
+
+function handlePointerDownOutside(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (!authPopoverRef.value?.contains(target)) authPopoverOpen.value = false
+}
+
+function handleAuthEscape(event: KeyboardEvent) {
+  if (event.key === "Escape") authPopoverOpen.value = false
+}
+
+watch(
+  () => session.value?.user?.image,
+  () => {
+    avatarFailed.value = false
+  },
+)
+
+watch(authPopoverOpen, (open) => {
+    if (typeof window === "undefined") return
+  document.removeEventListener("mousedown", handlePointerDownOutside)
+  document.removeEventListener("keydown", handleAuthEscape)
+  if (open) {
+    document.addEventListener("mousedown", handlePointerDownOutside)
+    document.addEventListener("keydown", handleAuthEscape)
+  }
+})
+
+watch(
+  [draftLoaded, productName, sellingPoints, imageCount, prompts, aspectRatio, quality, productImageIds],
+  () => {
+    if (!draftLoaded.value || !import.meta.client) return
+    try {
+      const draft: DraftState = {
+        productName: productName.value,
+        sellingPoints: sellingPoints.value,
+        imageCount: imageCount.value,
+        prompts: prompts.value,
+        aspectRatio: aspectRatio.value,
+        quality: quality.value,
+        productImageIds: productImageIds.value,
+      }
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+    } catch {
+      // Ignore storage failures.
+    }
+  },
+  { deep: true },
+)
+
+onMounted(() => {
+  studioMode.value = readStudioModeFromUrl()
+  window.addEventListener("popstate", handleLocationChange)
+  window.addEventListener("hashchange", handleLocationChange)
+
+  try {
+    localStorage.removeItem(LEGACY_DRAFT_KEY)
+    const raw = localStorage.getItem(DRAFT_KEY)
+    if (raw) {
+      const draft = JSON.parse(raw) as DraftState
+      productName.value = draft.productName || ""
+      sellingPoints.value = draft.sellingPoints || ""
+      imageCount.value = Number.isFinite(draft.imageCount)
+        ? Math.min(MAX_DETAIL_IMAGES, Math.max(1, Math.round(draft.imageCount)))
+        : 5
+      prompts.value = Array.isArray(draft.prompts)
+        ? draft.prompts.map(resetInterruptedPrompt)
+        : []
+      if (draft.aspectRatio && ASPECT_RATIO_VALUES.includes(draft.aspectRatio)) {
+        aspectRatio.value = draft.aspectRatio
+      }
+      if (draft.quality && IMAGE_QUALITY_VALUES.includes(draft.quality)) {
+        quality.value = draft.quality
+      }
+      if (Array.isArray(draft.productImageIds) && draft.productImageIds.length) {
+        productImageIds.value = draft.productImageIds
+        dbGetProductImages(draft.productImageIds)
+          .then((images) => {
+            productImages.value = images.slice(0, 8)
+          })
+          .catch((event) => console.warn("产品参考图恢复失败:", event))
+      }
+    }
+  } catch {
+    // Ignore invalid local draft.
+  } finally {
+    draftLoaded.value = true
+  }
+
+  void (async () => {
+    try {
+      const items = (await dbAll()) ?? []
+      history.value = items
+      if (items.length) activeHistoryIdx.value = items.length - 1
+    } catch (event) {
+      console.warn("历史记录读取失败:", event)
+    }
+  })()
+
+  void (async () => {
+    try {
+      const response = await fetch("/api/auth/session", {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      session.value = (await response.json()) as AuthSession
+    } catch {
+      session.value = { authenticated: false, user: null }
+    } finally {
+      sessionLoading.value = false
+    }
+  })()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener("popstate", handleLocationChange)
+  window.removeEventListener("hashchange", handleLocationChange)
+  document.removeEventListener("mousedown", handlePointerDownOutside)
+  document.removeEventListener("keydown", handleAuthEscape)
+})
+</script>
+
+<template>
+  <main class="app-shell">
+    <header class="studio-topbar">
+      <div class="brand-block">
+        <span class="brand-mark" aria-hidden="true">
+          <Icon name="brand" />
+        </span>
+        <div>
+          <h1>EcomImgGen</h1>
+          <p class="tagline">Image Studio</p>
+        </div>
+      </div>
+
+      <nav class="creative-tabs" aria-label="创作类型">
+        <a href="/" class="creative-tab" @click="handleHomeLinkClick">
+          <Icon name="brand" />
+          <span>首页</span>
+        </a>
+        <button type="button" class="creative-tab" disabled>
+          <Icon name="image" />
+          <span>主图</span>
+        </button>
+        <a
+          href="/image/"
+          :class="['creative-tab', { 'is-active': studioMode === 'image' }]"
+          :aria-current="studioMode === 'image' ? 'page' : undefined"
+          @click="event => handleModuleLinkClick(event, 'image')"
+        >
+          <Icon name="spark" />
+          <span>详情图</span>
+        </a>
+        <a
+          href="/cutout/"
+          :class="['creative-tab', { 'is-active': studioMode === 'cutout' }]"
+          :aria-current="studioMode === 'cutout' ? 'page' : undefined"
+          @click="event => handleModuleLinkClick(event, 'cutout')"
+        >
+          <Icon name="cutout" />
+          <span>抠图</span>
+        </a>
+        <button type="button" class="creative-tab" disabled>
+          <Icon name="queue" />
+          <span>多视角</span>
+        </button>
+        <button type="button" class="creative-tab" disabled>
+          <Icon name="text" />
+          <span>分层</span>
+        </button>
+        <button type="button" class="creative-tab" disabled>
+          <Icon name="video" />
+          <span>视频</span>
+        </button>
+      </nav>
+
+      <div class="top-actions">
+        <div ref="authPopoverRef" class="auth-popover-wrap">
+          <button
+            type="button"
+            :class="[
+              'auth-toggle',
+              { 'is-open': authPopoverOpen, 'is-authenticated': authenticated, 'is-guest': !authenticated },
+            ]"
+            :aria-label="authLabel"
+            :aria-expanded="authPopoverOpen"
+            aria-haspopup="dialog"
+            :title="authenticated ? session?.user?.name || '账户' : '登录'"
+            @click="authPopoverOpen = !authPopoverOpen"
+          >
+            <img
+              v-if="showUserImage && session?.user?.image"
+              :src="session.user.image"
+              :alt="session.user.name"
+              class="auth-toggle-avatar"
+              @error="avatarFailed = true"
+            >
+            <Icon v-else name="user" class="auth-toggle-icon" />
+          </button>
+
+          <div v-if="authPopoverOpen" class="auth-popover" role="dialog" aria-label="登录菜单">
+            <p v-if="sessionLoading" class="auth-popover-note">正在检查登录状态...</p>
+
+            <template v-else-if="authenticated && session?.user">
+              <div class="auth-popover-user">
+                <img
+                  v-if="showUserImage && session.user.image"
+                  :src="session.user.image"
+                  :alt="session.user.name"
+                  class="auth-avatar"
+                  @error="avatarFailed = true"
+                >
+                <div v-else class="auth-avatar auth-avatar-fallback">
+                  {{ session.user.name.slice(0, 1).toUpperCase() }}
+                </div>
+                <div>
+                  <p class="auth-name">{{ session.user.name }}</p>
+                  <p class="auth-meta">
+                    {{ providerLabel }}{{ session.user.email ? ` · ${session.user.email}` : "" }}
+                  </p>
+                </div>
+              </div>
+              <div class="account-stats">
+                <span>{{ isSuperAdmin ? "不限次数" : `剩余 ${session.user.remainingCredits ?? 0} 张` }}</span>
+                <span>已用 {{ session.user.usedCredits ?? 0 }} 张</span>
+              </div>
+              <form v-if="!isSuperAdmin" class="redeem-form" @submit.prevent="handleRedeemCode">
+                <label for="redeem-code-popover">兑换码</label>
+                <div class="redeem-form-row">
+                  <input
+                    id="redeem-code-popover"
+                    v-model="redeemCode"
+                    name="redeemCode"
+                    type="text"
+                    placeholder="输入兑换码增加图片张数"
+                    aria-label="兑换码"
+                    autocomplete="one-time-code"
+                    :disabled="redeemBusy"
+                  >
+                  <button class="btn-ghost" type="submit" :disabled="redeemBusy">
+                    <span v-if="redeemBusy" class="btn-spinner" aria-hidden="true" />
+                    {{ redeemBusy ? "兑换中" : "兑换" }}
+                  </button>
+                </div>
+                <p v-if="redeemMessage" class="redeem-message">{{ redeemMessage }}</p>
+              </form>
+              <button
+                v-if="isAdmin"
+                class="btn-secondary auth-popover-link"
+                type="button"
+                @click="adminOpen = true; authPopoverOpen = false"
+              >
+                后台管理
+              </button>
+              <a
+                class="btn-ghost auth-link auth-popover-link"
+                :href="`/api/auth/logout?redirectTo=${encodeURIComponent(authRedirectPath)}`"
+              >
+                退出登录
+              </a>
+            </template>
+
+            <template v-else>
+              <p class="auth-popover-note">登录后才能生成详情图文案和商品详情图。</p>
+              <form class="access-form access-form-compact" @submit.prevent="handleAccessLogin">
+                <label class="sr-only" for="access-code-popover-username">用户名</label>
+                <input
+                  id="access-code-popover-username"
+                  class="sr-only"
+                  name="username"
+                  type="text"
+                  aria-label="用户名"
+                  value="access-code"
+                  readonly
+                  tabindex="-1"
+                  autocomplete="username"
+                >
+                <label class="sr-only" for="access-code-popover">访问码</label>
+                <input
+                  id="access-code-popover"
+                  v-model="accessCode"
+                  name="accessCode"
+                  type="password"
+                  placeholder="访问码"
+                  aria-label="访问码"
+                  autocomplete="current-password"
+                >
+                <button class="btn-primary" type="submit" :disabled="accessBusy">
+                  {{ accessBusy ? "登录中..." : "访问码登录" }}
+                </button>
+              </form>
+              <a
+                class="btn-ghost auth-link auth-popover-link"
+                :href="`/api/auth/login/github?redirectTo=${encodeURIComponent(authRedirectPath)}`"
+              >
+                使用 GitHub 登录
+              </a>
+              <a
+                class="btn-ghost auth-link auth-popover-link"
+                :href="`/api/auth/login/google?redirectTo=${encodeURIComponent(authRedirectPath)}`"
+              >
+                使用 Google 登录
+              </a>
+            </template>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <template v-if="studioMode === 'image'">
+      <div class="run-status" aria-label="当前任务状态">
+        <span>{{ prompts.length ? `${prompts.length} 条文案` : "文案未生成" }}</span>
+        <span>{{ productImages.length ? `${productImages.length} 张参考图` : "未上传参考图" }}</span>
+        <span>{{ creditLabel }}</span>
+        <span>{{ generationLabel }}</span>
+        <span>{{ imageBusy ? "生成中" : "待命" }}</span>
+      </div>
+
+      <div class="studio-grid">
+        <aside class="studio-panel input-rail">
+          <div class="panel-heading">
+            <h2>产品资料</h2>
+            <button
+              type="button"
+              class="inline-action panel-reset-action"
+              :disabled="promptBusy || imageBusy"
+              @click="handleResetProductInput"
+            >
+              重置
+            </button>
+          </div>
+
+          <div class="input-rail-body">
+            <div class="form-grid">
+              <div>
+                <label for="product-name">产品名称</label>
+                <input
+                  id="product-name"
+                  v-model="productName"
+                  type="text"
+                  :disabled="controlsDisabled"
+                  placeholder="例如：玻尿酸修护精华"
+                >
+              </div>
+            </div>
+
+            <label for="selling-points">核心卖点/功效</label>
+            <textarea
+              id="selling-points"
+              v-model="sellingPoints"
+              class="selling-points"
+              :disabled="controlsDisabled"
+              placeholder="输入核心卖点、适用人群、规格信息、购买理由"
+            />
+
+            <div class="field-row-head">
+              <label for="product-images">产品参考图</label>
+              <button
+                v-if="productImages.length > 0"
+                type="button"
+                class="inline-action"
+                :disabled="controlsDisabled"
+                @click="productImages = []; productImageIds = []"
+              >
+                清空
+              </button>
+            </div>
+            <div class="product-media">
+              <div
+                v-for="(src, index) in productImages"
+                :key="`${src.slice(0, 32)}-${index}`"
+                class="prompt-thumb"
+              >
+                <button
+                  type="button"
+                  class="prompt-thumb-preview"
+                  :aria-label="`查看产品图 ${index + 1}`"
+                  @click="lightboxSrc = src"
+                >
+                  <img :src="src" :alt="`产品图 ${index + 1}`">
+                </button>
+                <button
+                  type="button"
+                  class="prompt-thumb-del"
+                  :disabled="controlsDisabled"
+                  :aria-label="`移除产品图 ${index + 1}`"
+                  @click="productImages = productImages.filter((_, i) => i !== index); productImageIds = productImageIds.filter((_, i) => i !== index)"
+                >
+                  <Icon name="close" />
+                </button>
+              </div>
+              <button
+                type="button"
+                class="prompt-upload-tile"
+                :disabled="controlsDisabled"
+                @click="fileInputRef?.click()"
+              >
+                <Icon name="upload" />
+                <span>上传</span>
+              </button>
+            </div>
+            <input
+              id="product-images"
+              ref="fileInputRef"
+              name="productImages"
+              type="file"
+              aria-label="上传产品参考图"
+              accept="image/*"
+              multiple
+              hidden
+              @change="event => handleSelectFiles((event.target as HTMLInputElement).files)"
+            >
+
+            <div class="settings-row">
+              <div class="setting-block">
+                <div class="setting-head">
+                  <label>张数</label>
+                  <span>{{ imageCount }} 张</span>
+                </div>
+                <div class="param-controls" aria-label="详情图张数">
+                  <ImageCountSelector
+                    :value="imageCount"
+                    :disabled="controlsDisabled"
+                    @change="imageCount = $event"
+                  />
+                </div>
+              </div>
+              <div class="setting-block">
+                <div class="setting-head">
+                  <label>画面比例</label>
+                  <span>{{ aspectRatio === "auto" ? "Auto" : aspectRatio }}</span>
+                </div>
+                <div class="param-controls" aria-label="画面比例">
+                  <AspectRatioSelector
+                    :value="aspectRatio"
+                    :disabled="controlsDisabled"
+                    @change="aspectRatio = $event"
+                  />
+                </div>
+              </div>
+              <div class="setting-block">
+                <div class="setting-head">
+                  <label>清晰度</label>
+                  <span>{{ quality }}</span>
+                </div>
+                <div class="param-controls" aria-label="清晰度">
+                  <QualitySelector
+                    :value="quality"
+                    :disabled="controlsDisabled"
+                    @change="quality = $event"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="input-action-bar">
+            <button type="button" class="btn-primary" :disabled="controlsDisabled" @click="handleGeneratePrompts">
+              <span v-if="promptBusy" class="btn-spinner" aria-hidden="true" />
+              {{ promptBusy ? "正在生成文案..." : "生成详情图文案" }}
+            </button>
+            <div v-if="error" class="alert">{{ error }}</div>
+          </div>
+        </aside>
+
+        <aside class="studio-panel prompt-rail">
+          <div class="panel-heading">
+            <h2>详情图文案</h2>
+            <span class="panel-count">
+              {{ activePrompt ? `${activePromptIndex + 1} / ${prompts.length}` : `${prompts.length} 条` }}
+            </span>
+          </div>
+          <div class="prompt-editor-list">
+            <div v-if="promptBusy" class="busy-card">
+              <span class="busy-orbit" aria-hidden="true" />
+              <strong>正在生成详情图文案</strong>
+              <p>系统正在分析产品资料和参考图。</p>
+            </div>
+            <div v-else-if="!activePrompt" class="empty">生成详情图文案后可在这里逐条修改。</div>
+            <template v-else>
+              <div class="prompt-switcher" aria-label="详情图文案切换">
+                <button
+                  type="button"
+                  class="prompt-nav-btn"
+                  :disabled="activePromptIndex === 0"
+                  @click="activePromptIdx = Math.max(0, activePromptIndex - 1)"
+                >
+                  上一张
+                </button>
+                <div class="prompt-step-list" role="tablist" aria-label="切换详情图文案">
+                  <button
+                    v-for="(item, index) in prompts"
+                    :key="item.id"
+                    type="button"
+                    role="tab"
+                    :aria-selected="index === activePromptIndex"
+                    :class="['prompt-step', { 'is-active': index === activePromptIndex }]"
+                    @click="activePromptIdx = index"
+                  >
+                    <span>{{ index + 1 }}</span>
+                    <span :class="['prompt-step-status', `is-${item.status}`]" aria-hidden="true" />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="prompt-nav-btn"
+                  :disabled="activePromptIndex >= prompts.length - 1"
+                  @click="activePromptIdx = Math.min(prompts.length - 1, activePromptIndex + 1)"
+                >
+                  下一张
+                </button>
+              </div>
+
+              <div :key="activePrompt.id" class="prompt-editor prompt-editor-single is-active">
+                <div class="prompt-editor-head">
+                  <span class="prompt-index">{{ activePromptIndex + 1 }}</span>
+                  <input
+                    aria-label="详情图标题"
+                    type="text"
+                    :value="activePrompt.title"
+                    :disabled="imageBusy"
+                    @input="event => handleTitleChange(activePrompt!.id, (event.target as HTMLInputElement).value)"
+                  >
+                  <span :class="['status-pill', `is-${activePrompt.status}`]">
+                    {{ STATUS_LABEL[activePrompt.status] }}
+                  </span>
+                </div>
+                <textarea
+                  aria-label="详情图文案"
+                  :value="activePrompt.prompt"
+                  :disabled="imageBusy"
+                  @input="event => handlePromptChange(activePrompt!.id, (event.target as HTMLTextAreaElement).value)"
+                />
+              </div>
+            </template>
+          </div>
+          <div class="prompt-action-bar">
+            <div class="generation-action-row">
+              <button
+                type="button"
+                class="btn-secondary"
+                :disabled="controlsDisabled || !prompts.length"
+                @click="handleGenerateImages"
+              >
+                <span v-if="imageBusy" class="btn-spinner" aria-hidden="true" />
+                {{ imageBusy ? "正在逐张生成..." : "批量生成详情图" }}
+              </button>
+              <button
+                v-if="!imageBusy"
+                type="button"
+                class="btn-ghost"
+                :disabled="controlsDisabled || !activePrompt?.prompt.trim()"
+                @click="handleRegenerateActiveImage"
+              >
+                重新生成当前图
+              </button>
+              <button
+                v-if="imageBusy"
+                type="button"
+                class="btn-danger cancel-generation-btn"
+                @click="handleCancelImageGeneration"
+              >
+                中断生成
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <section class="studio-panel canvas-panel">
+          <div class="panel-heading">
+            <h2>详情图预览</h2>
+            <span class="panel-count">{{ generationLabel }}</span>
+          </div>
+          <Stage
+            :prompts="prompts"
+            :active-index="activePromptIndex"
+            :busy="imageBusy"
+            @select="activePromptIdx = $event"
+            @download="handleDownload"
+            @zoom="index => {
+              const imageSrc = getPromptImageSrc(prompts[index])
+              if (imageSrc) lightboxSrc = imageSrc
+            }"
+          />
+        </section>
+      </div>
+
+      <section class="studio-panel history-dock">
+        <HistoryGrid
+          :history="history"
+          :active-idx="activeHistoryIdx"
+          @select="handleSelectHistory"
+          @delete="handleDeleteHistory"
+          @clear-all="handleClearHistory"
+        />
+      </section>
+    </template>
+
+    <CutoutStudio
+      v-else
+      :authenticated="authenticated"
+      :session-loading="sessionLoading"
+      :session="session"
+      @update:session="session = $event"
+      @zoom="lightboxSrc = $event"
+    />
+
+    <footer>
+      EcomImgGen · 历史记录云端同步 · GitHub
+      <a
+        class="github-link"
+        href="https://github.com/dming519/ecom-img-gen"
+        target="_blank"
+        rel="noreferrer"
+        aria-label="查看 GitHub 仓库"
+        title="查看 GitHub 仓库"
+      >
+        GH
+      </a>
+    </footer>
+
+    <Lightbox :src="lightboxSrc" @close="lightboxSrc = null" />
+    <AdminPanel :open="adminOpen" @close="adminOpen = false" />
+  </main>
+</template>

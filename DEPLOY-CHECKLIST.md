@@ -25,7 +25,7 @@
 
 - [x] 已创建 Pages 项目 `ecom-img-gen`
 - [ ] Build command 是 `npm run build`
-- [ ] Output directory 是 `out`
+- [ ] Output directory 是 `dist`
 - [ ] 已绑定 `TASKS_KV`
 - [ ] 已绑定 `HISTORY_DB`
 - [ ] 已绑定 `HISTORY_BUCKET`
@@ -45,7 +45,7 @@
 ## 发布验证
 
 - [x] `npm run build` 通过
-- [x] `npx tsc -p worker/tsconfig.json --noEmit` 通过
+- [x] `npm run check` 通过
 - [x] Pages 发布成功
 - [ ] `https://eig.easyauto.app` 首页返回 200
 - [ ] 未登录时页面显示登录入口

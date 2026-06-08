@@ -14,11 +14,11 @@
 
 ## 技术栈
 
-- Next.js 15
-- React 19
+- Nuxt 4
+- Vue 3
 - TypeScript
 - Cloudflare Pages
-- Cloudflare Pages Functions
+- Nuxt Nitro server routes
 - Cloudflare KV
 - Cloudflare D1
 - Cloudflare R2
@@ -32,7 +32,7 @@ npm install
 npm run dev
 ```
 
-构建静态站点：
+构建 Cloudflare Pages 输出：
 
 ```bash
 npm run build
@@ -49,23 +49,23 @@ npm run preview
 Prompt 生成：
 
 1. 浏览器请求 `POST /api/prompt`
-2. Pages Function 校验登录态
-3. Pages Function 调用 OpenAI-compatible `chat/completions` 视觉模型
+2. Nuxt/Nitro API 校验登录态
+3. Nuxt/Nitro API 调用 OpenAI-compatible `chat/completions` 视觉模型
 4. 返回多条商品详情图 Prompt
 
 图片生成：
 
 1. 浏览器逐张请求 `POST /api/generate`
-2. Pages Function 创建任务并写入 KV
-3. Pages Function 分发任务到独立 Worker
+2. Nuxt/Nitro API 创建任务并写入 KV
+3. Nuxt/Nitro API 分发任务到独立 Worker
 4. Worker 通过 Durable Object 调用图片接口
 5. Worker 把任务状态和结果写回 KV
 6. 浏览器轮询 `GET /api/generate/status?taskId=...`
-7. 页面逐张展示生成结果，并通过 Pages Function 将历史写入 D1、图片写入 R2
+7. 页面逐张展示生成结果，并通过 Nuxt/Nitro API 将历史写入 D1、图片写入 R2
 
 ## 必要环境变量
 
-Pages Functions：
+Cloudflare Pages / Nuxt Nitro：
 
 - `AUTH_SECRET`
 - `AUTH_GITHUB_ID`
