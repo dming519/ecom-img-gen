@@ -94,6 +94,11 @@ const ANGLE_PRESETS: MultiViewAngle[] = [
     title: "结构细节",
     instruction: "close product-only detail view of the most useful structure, material, seam, opening, interface, cap, sole, clasp, or packaging side",
   },
+  {
+    id: "packaging-side",
+    title: "包装侧面",
+    instruction: "product-only packaging side or secondary structure view, show the most informative side panel while keeping the same product identity",
+  },
 ]
 
 const STATUS_LABEL: Record<MultiViewStatus, string> = {
@@ -148,7 +153,10 @@ function createViewItems(count: number): MultiViewItem[] {
                 ANGLE_PRESETS[3]!,
                 ANGLE_PRESETS[4]!,
                 ANGLE_PRESETS[1]!,
-                ...ANGLE_PRESETS.slice(5),
+                ANGLE_PRESETS[5]!,
+                ANGLE_PRESETS[6]!,
+                ANGLE_PRESETS[7]!,
+                ANGLE_PRESETS[8]!,
               ].slice(0, normalized)
 
   return selected.map((angle) => ({
@@ -468,7 +476,7 @@ function handleDownload(item: MultiViewItem) {
               清空
             </button>
           </div>
-          <div class="product-media">
+          <div class="product-media multi-view-media">
             <div
               v-for="(src, index) in productImages"
               :key="`${src.slice(0, 32)}-${index}`"
@@ -514,11 +522,12 @@ function handleDownload(item: MultiViewItem) {
           >
 
           <div class="multi-view-note">
-            <strong>白底产品图</strong>
-            <p>系统自动分配标准角度，只输出商品本体。参考图越多，背面、侧面和底部越稳定。</p>
+            <span>纯白底</span>
+            <span>无文案</span>
+            <span>自动角度</span>
           </div>
 
-          <div class="settings-row">
+          <div class="settings-row multi-view-settings">
             <div class="setting-block">
               <div class="setting-head">
                 <label>视角数量</label>
@@ -544,6 +553,7 @@ function handleDownload(item: MultiViewItem) {
                   :value="aspectRatio"
                   :options="MULTI_VIEW_ASPECT_RATIO_OPTIONS"
                   :disabled="controlsDisabled"
+                  class-name="multi-view-ratio-segments"
                   @change="aspectRatio = $event as AspectRatio"
                 />
               </div>
@@ -651,28 +661,54 @@ function handleDownload(item: MultiViewItem) {
 
 .multi-view-input-body {
   display: grid;
-  gap: 18px;
+  gap: 10px;
 }
 
 .multi-view-note {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
-  padding: 14px;
+  padding: 8px;
   border: 1px solid #dbe6f4;
   border-radius: 8px;
   background: #f8fbff;
 }
 
-.multi-view-note strong {
+.multi-view-note span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  border: 1px solid #d7e4f2;
+  border-radius: 6px;
+  background: #fff;
   color: #0f2446;
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 760;
 }
 
-.multi-view-note p {
-  margin: 0;
-  color: #5b6b84;
-  font-size: 12px;
-  line-height: 1.55;
+.multi-view-media {
+  min-height: 82px;
+  padding: 8px;
+}
+
+.multi-view-media .prompt-upload-tile,
+.multi-view-media .prompt-thumb {
+  width: 66px;
+  height: 66px;
+}
+
+.multi-view-settings {
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.multi-view-settings .setting-block {
+  padding: 8px;
+}
+
+.multi-view-settings .setting-head {
+  margin-bottom: 6px;
 }
 
 .multi-view-result-grid {
@@ -782,6 +818,17 @@ function handleDownload(item: MultiViewItem) {
 .multi-view-card-actions svg {
   width: 14px;
   height: 14px;
+}
+
+:deep(.multi-view-ratio-segments) {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding: 5px;
+}
+
+:deep(.multi-view-ratio-segments .segment-option) {
+  min-height: 34px;
+  font-size: 0.74rem;
 }
 
 @media (max-width: 1080px) {
