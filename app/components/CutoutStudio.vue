@@ -153,19 +153,18 @@ function clearToolFeedback() {
 }
 
 function drawToolFeedback(x: number, y: number, radius: number, paintMode: PaintMode) {
-  if (paintMode !== "eraser") return
   const canvas = feedbackCanvasRef.value
   const ctx = canvas?.getContext("2d")
   if (!canvas || !ctx) return
   ctx.save()
-  ctx.globalCompositeOperation = "source-over"
-  ctx.fillStyle = "rgba(239,68,68,0.34)"
-  ctx.strokeStyle = "rgba(185,28,28,0.88)"
-  ctx.lineWidth = Math.max(2, radius * 0.12)
+  ctx.globalCompositeOperation = paintMode === "eraser" ? "source-over" : "destination-out"
+  ctx.fillStyle = paintMode === "eraser" ? "rgba(239,68,68,0.42)" : "#000"
+  ctx.strokeStyle = paintMode === "eraser" ? "rgba(185,28,28,0.92)" : "#000"
+  ctx.lineWidth = Math.max(2, radius * 0.1)
   ctx.beginPath()
   ctx.arc(x, y, radius, 0, Math.PI * 2)
   ctx.fill()
-  ctx.stroke()
+  if (paintMode === "eraser") ctx.stroke()
   ctx.restore()
 }
 
@@ -395,7 +394,6 @@ function finishDrawing(event: PointerEvent) {
   }
   drawingRef.value = false
   lastPointRef.value = null
-  clearToolFeedback()
   if (wasDrawing) {
     persistCurrentDraft().catch((draftError) =>
       console.warn("抠图草稿保存失败:", draftError),
@@ -419,6 +417,7 @@ function handleUndo() {
     if (!ctx) return
     ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height)
     ctx.drawImage(image, 0, 0, maskCanvas.width, maskCanvas.height)
+    clearToolFeedback()
     maskDirty.value = hasMaskPixels(maskCanvas)
     persistCurrentDraft().catch((draftError) =>
       console.warn("抠图草稿保存失败:", draftError),
@@ -436,6 +435,7 @@ function handleClearMask() {
   if (!ctx) return
   pushMaskHistory()
   ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height)
+  clearToolFeedback()
   maskDirty.value = false
   persistCurrentDraft({ maskImageId: undefined }).catch((draftError) =>
     console.warn("抠图草稿保存失败:", draftError),
