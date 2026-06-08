@@ -5,7 +5,7 @@ import {
   createImageTask,
   pollImageTask,
 } from "@/lib/api"
-import { dbImageFileUrl } from "@/lib/db"
+import { dbImageFileUrl, dbPutProductImage } from "@/lib/db"
 import { resolveImageSize } from "@/lib/imageOptions"
 import type { AspectRatio, AuthSession, ImageQuality } from "@/lib/types"
 import Icon from "./Icon.vue"
@@ -116,6 +116,7 @@ const STATUS_LABEL: Record<MultiViewStatus, string> = {
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const productImages = ref<string[]>([])
+const productImageIds = ref<string[]>([])
 const selectedAngleIds = ref<MultiViewAngleId[]>(["front", "left-side", "right-side", "back"])
 const aspectRatio = shallowRef<AspectRatio>("1:1")
 const quality = shallowRef<ImageQuality>("1K")
@@ -176,6 +177,7 @@ function handleAngleToggle(angleId: MultiViewAngleId) {
 
 function handleResetInput() {
   productImages.value = []
+  productImageIds.value = []
   items.value = createViewItems(selectedAngleIds.value)
 }
 
@@ -236,19 +238,34 @@ async function handleSelectFiles(files: FileList | null) {
 function removeReferenceImage(index: number) {
   if (busy.value) return
   productImages.value = productImages.value.filter((_, imageIndex) => imageIndex !== index)
+  productImageIds.value = productImageIds.value.filter((_, imageIndex) => imageIndex !== index)
 }
 
-function getGenerationImages() {
-  const images = productImages.value
+async function getGenerationImageIds() {
+  const images = productImages.value.slice(0, 8)
+  const nextIds = productImageIds.value.slice(0, images.length)
+  const missing = images.map((image, index) => ({ image, index })).filter((item) => !nextIds[item.index])
+  const uploadImages = missing
+    .map((item) => item.image)
     .filter((image) => image.startsWith("data:image/"))
     .filter((image) => image.length <= MAX_REFERENCE_IMAGE_CHARS)
-    .slice(0, 8)
-  const total = images.reduce((sum, image) => sum + image.length, 0)
+  const total = uploadImages.reduce((sum, image) => sum + image.length, 0)
   if (!images.length) throw new Error("请至少上传一张产品参考图。")
+  if (missing.length && uploadImages.length !== missing.length) {
+    throw new Error("产品参考图过大或格式无效，请重新上传图片。")
+  }
   if (total > MAX_REFERENCE_IMAGE_TOTAL_CHARS) {
     throw new Error("产品参考图总大小过大，请减少图片数量或重新上传后再生成。")
   }
-  return images
+  const uploadedIds = await Promise.all(uploadImages.map((image) => dbPutProductImage(image)))
+  missing.forEach((item, index) => {
+    nextIds[item.index] = uploadedIds[index] ?? ""
+  })
+  const ids = nextIds.filter(Boolean).slice(0, images.length)
+  if (!ids.length) throw new Error("请至少上传一张产品参考图。")
+  if (ids.length !== images.length) throw new Error("产品参考图保存失败，请重新上传后再试。")
+  productImageIds.value = ids
+  return ids
 }
 
 function createMultiViewPrompt(item: MultiViewItem) {
@@ -292,7 +309,7 @@ function validateGeneration() {
   return true
 }
 
-async function generateView(index: number, generationImages: string[]) {
+async function generateView(index: number, generationImageIds: string[]) {
   const item = items.value[index]
   if (!item) return
 
@@ -317,7 +334,7 @@ async function generateView(index: number, generationImages: string[]) {
       size: resolveImageSize(aspectRatio.value),
       aspectRatio: aspectRatio.value,
       quality: quality.value,
-      inputImages: generationImages,
+      inputImageIds: generationImageIds,
     },
     abortRef.value?.signal,
   )
@@ -372,11 +389,11 @@ async function handleGenerateAll() {
   abortRef.value = new AbortController()
   items.value = createViewItems(selectedAngleIds.value)
   try {
-    const generationImages = getGenerationImages()
+    const generationImageIds = await getGenerationImageIds()
     for (let index = 0; index < items.value.length; index += 1) {
       if (cancelRequestedRef.value) break
       try {
-        await generateView(index, generationImages)
+        await generateView(index, generationImageIds)
       } catch (event) {
         if (event instanceof DOMException && event.name === "AbortError") break
         items.value = items.value.map((view, viewIndex) =>
@@ -410,7 +427,7 @@ async function handleRegenerate(index: number) {
   cancelRequestedRef.value = false
   abortRef.value = new AbortController()
   try {
-    await generateView(index, getGenerationImages())
+    await generateView(index, await getGenerationImageIds())
   } catch (event) {
     if (!(event instanceof DOMException && event.name === "AbortError")) {
       error.value = event instanceof Error ? event.message : String(event)
@@ -483,7 +500,7 @@ function handleDownload(item: MultiViewItem) {
             type="button"
             class="inline-action"
             :disabled="controlsDisabled"
-            @click="productImages = []"
+            @click="productImages = []; productImageIds = []"
           >
             清空
           </button>

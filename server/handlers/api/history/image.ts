@@ -1,7 +1,7 @@
 import {
   json,
   requireUserHistoryStorage,
-  storeProductImage,
+  storeProductImageFile,
   type HistoryStorageFunctionEnv,
 } from "../../_lib/historyStorage";
 
@@ -15,14 +15,16 @@ export async function handlePost(context: RequestContext) {
   if ("response" in auth) return auth.response;
 
   try {
-    const body = (await context.request.json().catch(() => null)) as {
-      dataUrl?: string;
-    } | null;
-    const dataUrl = body?.dataUrl;
-    if (!dataUrl || typeof dataUrl !== "string") {
-      return json({ error: "请求体缺少图片数据" }, { status: 400 });
+    const contentType = context.request.headers.get("content-type") ?? "";
+    if (!contentType.includes("multipart/form-data")) {
+      return json({ error: "请使用 multipart/form-data 上传图片文件" }, { status: 415 });
     }
-    return json({ id: await storeProductImage(auth.storage, auth.userKey, dataUrl) });
+    const form = await context.request.formData();
+    const file = form.get("image");
+    if (!(file instanceof File)) {
+      return json({ error: "表单缺少图片文件" }, { status: 400 });
+    }
+    return json({ id: await storeProductImageFile(auth.storage, auth.userKey, file) });
   } catch (error) {
     return json(
       { error: error instanceof Error ? error.message : String(error) },

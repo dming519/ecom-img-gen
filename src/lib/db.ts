@@ -25,12 +25,13 @@ function extractError(text: string) {
 // 带泛型的请求函数：调用方通过 `requestJson<{ item: HistoryItem }>()`
 // 告诉 TypeScript“我期望接口返回什么形状的数据”。
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const response = await fetch(path, {
     credentials: "same-origin",
     cache: "no-store",
     ...init,
     headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.body && !isFormData ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
     },
   });
@@ -39,6 +40,23 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
   }
   return (text ? JSON.parse(text) : {}) as T;
+}
+
+function dataUrlToBlob(dataUrl: string) {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(dataUrl.trim());
+  if (!match?.[2]) {
+    throw new Error("图片数据必须是 data:image base64 格式");
+  }
+  const mimeType = match[1] || "image/png";
+  if (!mimeType.startsWith("image/")) {
+    throw new Error("图片数据必须是 image/* 格式");
+  }
+  const binary = atob(match[2].replace(/\s/g, ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mimeType });
 }
 
 // 服务端保存后会返回规范化后的对象，这里把返回值合并回原对象，保持 Vue 页面引用不丢。
@@ -228,9 +246,12 @@ export async function dbPutCutoutDraft(
 
 // 把一张 data URL 图片存到服务端，返回 imageId。之后历史记录只保存 imageId。
 export async function dbPutProductImage(dataUrl: string): Promise<string> {
+  const blob = dataUrlToBlob(dataUrl);
+  const formData = new FormData();
+  formData.append("image", blob, blob.type === "image/jpeg" ? "image.jpg" : "image.png");
   const payload = await requestJson<{ id: string }>("/api/history/image", {
     method: "POST",
-    body: JSON.stringify({ dataUrl }),
+    body: formData,
   });
   return payload.id;
 }

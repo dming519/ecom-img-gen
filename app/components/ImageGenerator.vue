@@ -15,6 +15,7 @@ import {
   dbGetProductImages,
   dbImageFileUrl,
   dbPut,
+  dbPutProductImage,
 } from "@/lib/db"
 import { resolveImageSize } from "@/lib/imageOptions"
 import type {
@@ -286,19 +287,31 @@ async function imageSrcToDataUrl(src: string) {
   return blobToDataUrl(blob)
 }
 
-// 生成文案和图片前统一校验参考图数量/大小，避免服务端收到超大 JSON。
-async function getPromptReadyImages(images: string[]) {
-  const dataUrls = await Promise.all(images.slice(0, 8).map(imageSrcToDataUrl))
-  const next = dataUrls
+// 生成文案和图片前先把参考图存成 imageId，后续任务接口只传 id。
+async function ensureProductImageIds() {
+  const images = productImages.value.slice(0, 8)
+  const nextIds = productImageIds.value.slice(0, images.length)
+  const missing = images.map((image, index) => ({ image, index })).filter((item) => !nextIds[item.index])
+  const dataUrls = await Promise.all(missing.map((item) => imageSrcToDataUrl(item.image)))
+  const validDataUrls = dataUrls
     .filter((image) => image.startsWith("data:image/"))
     .filter((image) => image.length <= MAX_PROMPT_IMAGE_CHARS)
-    .slice(0, 8)
-  const total = next.reduce((sum, image) => sum + image.length, 0)
-  if (!next.length) throw new Error("产品参考图过大或格式无效，请重新上传图片。")
+  const total = validDataUrls.reduce((sum, image) => sum + image.length, 0)
+  if (missing.length && validDataUrls.length !== missing.length) {
+    throw new Error("产品参考图过大或格式无效，请重新上传图片。")
+  }
   if (total > MAX_PROMPT_IMAGE_TOTAL_CHARS) {
     throw new Error("产品参考图总大小过大，请减少图片数量或重新上传后再生成。")
   }
-  return next
+  const uploadedIds = await Promise.all(validDataUrls.map((image) => dbPutProductImage(image)))
+  missing.forEach((item, index) => {
+    nextIds[item.index] = uploadedIds[index] ?? ""
+  })
+  const ids = nextIds.filter(Boolean).slice(0, images.length)
+  if (!ids.length) throw new Error("请至少上传一张产品参考图。")
+  if (ids.length !== images.length) throw new Error("产品参考图保存失败，请重新上传后再试。")
+  productImageIds.value = ids
+  return ids
 }
 
 function getPromptImageSrc(item: DetailPromptItem | undefined) {
@@ -457,7 +470,8 @@ async function handleGeneratePrompts() {
   try {
     const result = await generateDetailPrompts({
       ...currentProduct.value,
-      productImages: await getPromptReadyImages(productImages.value),
+      productImages: [],
+      productImageIds: await ensureProductImageIds(),
     })
     prompts.value = result.prompts.map((item, index) =>
       createPromptItem(index, item.title, item.prompt),
@@ -540,7 +554,8 @@ async function handleGenerateImages() {
   }
 
   try {
-    const generationImages = await getPromptReadyImages(productImages.value)
+    const generationImageIds = await ensureProductImageIds()
+    historyItem = { ...historyItem, product: cloneProduct(currentProduct.value) }
     await requestWakeLock()
     await persistHistory(historyItem)
     history.value = [...history.value, historyItem]
@@ -566,7 +581,7 @@ async function handleGenerateImages() {
           size: resolvedSize.value,
           aspectRatio: aspectRatio.value,
           quality: quality.value,
-          inputImages: generationImages,
+          inputImageIds: generationImageIds,
         },
         imageAbortRef.value?.signal,
       )
@@ -679,7 +694,8 @@ async function handleRegenerateActiveImage() {
       }
 
   try {
-    const generationImages = await getPromptReadyImages(productImages.value)
+    const generationImageIds = await ensureProductImageIds()
+    historyItem = { ...historyItem, product: cloneProduct(currentProduct.value) }
     await requestWakeLock()
     await persistHistory(historyItem)
     const existingIndex = history.value.findIndex((item) => item.id === historyItem.id)
@@ -715,7 +731,7 @@ async function handleRegenerateActiveImage() {
         size: resolvedSize.value,
         aspectRatio: aspectRatio.value,
         quality: quality.value,
-        inputImages: generationImages,
+        inputImageIds: generationImageIds,
       },
       imageAbortRef.value?.signal,
     )

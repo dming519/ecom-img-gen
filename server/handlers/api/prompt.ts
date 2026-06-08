@@ -1,13 +1,16 @@
 import { DETAIL_PROMPT_TEMPLATE } from "../../../src/lib/promptTemplate";
 import { requireSession } from "../_lib/auth";
-import type { HistoryD1Database } from "../_lib/historyStorage";
-import type { UserKvNamespace } from "../_lib/users";
+import {
+  readProductImageDataUrls,
+  type HistoryStorageEnv,
+} from "../_lib/historyStorage";
+import { getUserKey, type UserKvNamespace } from "../_lib/users";
 
 interface PromptRequestBody {
   name?: string;
   sellingPoints?: string;
   imageCount?: number;
-  productImages?: string[];
+  productImageIds?: string[];
 }
 
 // Nuxt/Nitro 会把运行时环境变量、KV、D1 等都放进 context.env。
@@ -22,10 +25,9 @@ interface RequestContext {
     PROMPT_BASE_URL?: string;
     PROMPT_MODEL?: string;
     TASKS_KV?: UserKvNamespace;
-    HISTORY_DB?: HistoryD1Database;
     IMAGE_WORKER_URL?: string;
     IMAGE_WORKER_TOKEN?: string;
-  };
+  } & HistoryStorageEnv;
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
@@ -61,6 +63,12 @@ function normalizeProductImages(images: string[] | undefined) {
   return normalized;
 }
 
+function normalizeImageIds(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string" && !!id.trim()).slice(0, 8)
+    : [];
+}
+
 // 任务状态先写进 KV，前端之后通过 `/api/prompt/status?taskId=...` 查询。
 async function writePromptTask(
   kv: UserKvNamespace,
@@ -90,7 +98,25 @@ export async function handlePost(context: RequestContext) {
   const name = body.name?.trim() ?? "";
   const sellingPoints = body.sellingPoints?.trim() ?? "";
   const imageCount = normalizeCount(body.imageCount);
-  const productImages = normalizeProductImages(body.productImages);
+  const userKey = getUserKey(session.user);
+  const productImageIds = normalizeImageIds(body.productImageIds);
+  let storedImages: Array<string | null> = [];
+  if (productImageIds.length) {
+    try {
+      storedImages = await readProductImageDataUrls(context.env, userKey, productImageIds);
+    } catch (error) {
+      return json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 500 },
+      );
+    }
+  }
+  if (storedImages.some((image) => !image)) {
+    return json({ error: "产品参考图不存在或无权访问" }, { status: 400 });
+  }
+  const productImages = normalizeProductImages(
+    storedImages.filter((image): image is string => !!image),
+  );
 
   // 这些校验直接返回 400，属于用户输入问题，不需要派发到 Worker。
   if (!name) {

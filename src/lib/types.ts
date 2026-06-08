@@ -144,7 +144,7 @@ export interface CreateImageTaskOptions {
   size: ImageSize;
   aspectRatio?: AspectRatio;
   quality?: ImageQuality;
-  inputImages: string[];
+  inputImageIds: string[];
 }
 
 // 图片生成任务状态。成功时优先返回 `imageId`，前端通过图片文件接口加载。
@@ -173,8 +173,8 @@ type CutoutStatus =
 
 // 创建抠图任务需要原图和 mask 图。mask 图白色区域表示要保留的主体。
 export interface CreateCutoutTaskOptions {
-  sourceImage: string;
-  maskImage: string;
+  sourceImageId: string;
+  maskImageId: string;
 }
 
 // 抠图任务状态。成功时优先返回 `imageId`，前端通过图片文件接口加载白底结果图。

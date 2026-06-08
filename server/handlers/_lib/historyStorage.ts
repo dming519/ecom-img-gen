@@ -205,6 +205,15 @@ async function writeImage(
   defaultMime = DEFAULT_IMAGE_MIME,
 ) {
   const { bytes, mimeType } = parseImagePayload(value, defaultMime);
+  return writeImageBytes(env, userKey, bytes, mimeType);
+}
+
+async function writeImageBytes(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  bytes: Uint8Array,
+  mimeType = DEFAULT_IMAGE_MIME,
+) {
   const id = crypto.randomUUID();
   const now = Date.now();
   const extension = mimeToExtension(mimeType);
@@ -222,6 +231,15 @@ async function writeImage(
     .run();
 
   return id;
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+  return btoa(binary);
 }
 
 async function readImageRow(db: HistoryD1Database, userKey: string, id: string) {
@@ -249,6 +267,17 @@ export async function readStoredImageFile(
     object,
     mimeType: row.mime_type || object.httpMetadata?.contentType || DEFAULT_IMAGE_MIME,
   };
+}
+
+export async function readStoredImageDataUrl(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  id: string,
+) {
+  const file = await readStoredImageFile(env, userKey, id);
+  if (!file) return null;
+  const buffer = await file.object.arrayBuffer();
+  return `data:${file.mimeType};base64,${bytesToBase64(new Uint8Array(buffer))}`;
 }
 
 export async function storeHistoryImage(
@@ -643,6 +672,19 @@ export async function storeProductImage(
   return writeImage(env, userKey, dataUrl);
 }
 
+export async function storeProductImageFile(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  file: File,
+) {
+  await ensureHistorySchema(env.HISTORY_DB);
+  const mimeType = file.type || DEFAULT_IMAGE_MIME;
+  if (!mimeType.startsWith("image/")) {
+    throw new Error("图片文件必须是 image/* 格式");
+  }
+  return writeImageBytes(env, userKey, new Uint8Array(await file.arrayBuffer()), mimeType);
+}
+
 export async function readProductImages(
   env: Required<HistoryStorageEnv>,
   userKey: string,
@@ -656,4 +698,14 @@ export async function readProductImages(
     }),
   );
   return images;
+}
+
+export async function readProductImageDataUrls(
+  env: HistoryStorageEnv,
+  userKey: string,
+  ids: string[],
+) {
+  const storage = requireHistoryBindings(env);
+  await ensureHistorySchema(storage.HISTORY_DB);
+  return Promise.all(ids.map((id) => readStoredImageDataUrl(storage, userKey, id)));
 }

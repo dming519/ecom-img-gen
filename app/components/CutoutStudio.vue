@@ -133,6 +133,16 @@ async function ensureDataImage(value: string) {
   return dataUrl
 }
 
+async function ensureCutoutSourceImageId() {
+  if (sourceImageId.value) return sourceImageId.value
+  if (!sourceImage.value) throw new Error("请先上传一张包含产品的图片。")
+  const dataUrl = await ensureDataImage(sourceImage.value)
+  const id = await dbPutProductImage(dataUrl)
+  sourceImageId.value = id
+  await persistCurrentDraft({ sourceImageId: id })
+  return id
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
@@ -492,10 +502,10 @@ async function handleGenerate() {
     error.value = "请先上传一张包含产品的图片。"
     return
   }
-  let apiSourceImage: string
   let apiMaskImage: string
+  let apiSourceImageId: string
   try {
-    apiSourceImage = await ensureDataImage(sourceImage.value)
+    apiSourceImageId = await ensureCutoutSourceImageId()
     apiMaskImage = exportMaskImage()
   } catch (maskError) {
     error.value = maskError instanceof Error ? maskError.message : String(maskError)
@@ -515,6 +525,7 @@ async function handleGenerate() {
   try {
     const editorMaskImage = maskCanvasRef.value?.toDataURL("image/png")
     const maskImageId = editorMaskImage ? await dbPutProductImage(editorMaskImage) : undefined
+    const taskMaskImageId = await dbPutProductImage(apiMaskImage)
     item = { ...item, maskImageId, maskImage: editorMaskImage }
     await persistCurrentDraft({ maskImageId })
     await persistCutout(item)
@@ -523,7 +534,7 @@ async function handleGenerate() {
 
     // createCutoutTask 只负责派发任务，真正结果要通过 pollCutoutTask 查询。
     const created = await createCutoutTask(
-      { sourceImage: apiSourceImage, maskImage: apiMaskImage },
+      { sourceImageId: apiSourceImageId, maskImageId: taskMaskImageId },
       abortRef.value.signal,
     )
     taskIdRef.value = created.taskId

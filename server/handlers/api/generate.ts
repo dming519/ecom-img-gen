@@ -1,6 +1,9 @@
 import type { AspectRatio, ImageQuality, ImageSize } from "../../../src/lib/types";
 import { requireSession } from "../_lib/auth";
-import type { HistoryD1Database } from "../_lib/historyStorage";
+import {
+  readProductImageDataUrls,
+  type HistoryStorageEnv,
+} from "../_lib/historyStorage";
 import { getUserKey, requireImageCredit, type UserKvNamespace } from "../_lib/users";
 
 interface GenerateRequestBody {
@@ -8,7 +11,7 @@ interface GenerateRequestBody {
   size?: ImageSize;
   aspectRatio?: AspectRatio;
   quality?: ImageQuality;
-  inputImages?: string[];
+  inputImageIds?: string[];
 }
 
 // 图片生成接口只创建任务，不直接等待模型返回，避免请求长时间占用 Pages。
@@ -25,8 +28,7 @@ interface RequestContext {
     IMAGE_WORKER_URL?: string;
     IMAGE_WORKER_TOKEN?: string;
     AUTH_SECRET?: string;
-    HISTORY_DB?: HistoryD1Database;
-  };
+  } & HistoryStorageEnv;
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
@@ -72,6 +74,12 @@ function resolveImageSize(aspectRatio: AspectRatio): ImageSize {
   return "1024x1536";
 }
 
+function normalizeImageIds(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string" && !!id.trim()).slice(0, 8)
+    : [];
+}
+
 // POST /api/generate：创建单张详情图生成任务。
 export async function handlePost(context: RequestContext) {
   const session = await requireSession(context.request, context.env);
@@ -100,9 +108,23 @@ export async function handlePost(context: RequestContext) {
   }
 
   const prompt = body.prompt?.trim() ?? "";
-  const images = (body.inputImages ?? [])
-    .filter((image) => typeof image === "string" && image.startsWith("data:image/"))
-    .slice(0, 8);
+  const userKey = getUserKey(session.user);
+  const imageIds = normalizeImageIds(body.inputImageIds);
+  let storedImages: Array<string | null> = [];
+  if (imageIds.length) {
+    try {
+      storedImages = await readProductImageDataUrls(context.env, userKey, imageIds);
+    } catch (error) {
+      return json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 500 },
+      );
+    }
+  }
+  if (storedImages.some((image) => !image)) {
+    return json({ error: "产品参考图不存在或无权访问" }, { status: 400 });
+  }
+  const images = storedImages.filter((image): image is string => !!image).slice(0, 8);
   const aspectRatio = normalizeAspectRatio(body.aspectRatio);
   const quality = normalizeQuality(body.quality);
   const size = normalizeSize(body.size) ?? resolveImageSize(aspectRatio);
@@ -130,7 +152,6 @@ export async function handlePost(context: RequestContext) {
 
   const taskId = crypto.randomUUID();
   const now = Date.now();
-  const userKey = getUserKey(session.user);
   // KV 里先放 pending 状态，前端随后通过 `/api/generate/status` 轮询。
   await kv.put(
     `task:${taskId}`,

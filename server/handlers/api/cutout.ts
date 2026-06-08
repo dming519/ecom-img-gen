@@ -1,10 +1,13 @@
 import { requireSession } from "../_lib/auth";
-import type { HistoryD1Database } from "../_lib/historyStorage";
+import {
+  readProductImageDataUrls,
+  type HistoryStorageEnv,
+} from "../_lib/historyStorage";
 import { getUserKey, requireImageCredit, type UserKvNamespace } from "../_lib/users";
 
 interface CutoutRequestBody {
-  sourceImage?: string;
-  maskImage?: string;
+  sourceImageId?: string;
+  maskImageId?: string;
 }
 
 // 抠图接口同样采用“创建任务 + 前端轮询”的异步模式。
@@ -21,8 +24,7 @@ interface RequestContext {
     IMAGE_WORKER_URL?: string;
     IMAGE_WORKER_TOKEN?: string;
     AUTH_SECRET?: string;
-    HISTORY_DB?: HistoryD1Database;
-  };
+  } & HistoryStorageEnv;
 }
 
 // 统一 JSON 响应格式。
@@ -36,9 +38,13 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
-// 抠图只接受浏览器上传后的 data URL，避免服务端主动抓取不可信远程图片。
+// Worker 仍需要 data URL 调模型；公开接口只接收 imageId。
 function isDataImage(value: unknown) {
   return typeof value === "string" && value.startsWith("data:image/");
+}
+
+function normalizeImageId(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 // POST /api/cutout：创建白底抠图任务。
@@ -67,11 +73,40 @@ export async function handlePost(context: RequestContext) {
   if (!workerToken) {
     return json({ error: "服务端未配置 IMAGE_WORKER_TOKEN" }, { status: 500 });
   }
-  // sourceImage 是原图，maskImage 是黑白选择区，二者缺一不可。
-  if (!isDataImage(body.sourceImage)) {
+  const userKey = getUserKey(session.user);
+  const sourceImageId = normalizeImageId(body.sourceImageId);
+  const maskImageId = normalizeImageId(body.maskImageId);
+  if (!sourceImageId) {
     return json({ error: "请上传需要抠图的产品图片" }, { status: 400 });
   }
-  if (!isDataImage(body.maskImage)) {
+  if (!maskImageId) {
+    return json({ error: "请先涂抹需要抠出的产品区域" }, { status: 400 });
+  }
+  let storedImages: Array<string | null>;
+  try {
+    storedImages = await readProductImageDataUrls(context.env, userKey, [
+      sourceImageId,
+      maskImageId,
+    ]);
+  } catch (error) {
+    return json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 500 },
+    );
+  }
+  const [sourceImage, maskImage] = storedImages;
+  if (!sourceImage) {
+    return json({ error: "产品原图不存在或无权访问" }, { status: 400 });
+  }
+  if (!maskImage) {
+    return json({ error: "涂抹区域不存在或无权访问" }, { status: 400 });
+  }
+
+  // sourceImage 是原图，maskImage 是黑白选择区，二者缺一不可。
+  if (!isDataImage(sourceImage)) {
+    return json({ error: "请上传需要抠图的产品图片" }, { status: 400 });
+  }
+  if (!isDataImage(maskImage)) {
     return json({ error: "请先涂抹需要抠出的产品区域" }, { status: 400 });
   }
 
@@ -88,7 +123,6 @@ export async function handlePost(context: RequestContext) {
 
   const taskId = crypto.randomUUID();
   const now = Date.now();
-  const userKey = getUserKey(session.user);
   // 写入 pending 状态，让前端立刻拿到 taskId 并开始轮询。
   await kv.put(
     `cutout-task:${taskId}`,
@@ -111,8 +145,8 @@ export async function handlePost(context: RequestContext) {
       },
       body: JSON.stringify({
         taskId,
-        sourceImage: body.sourceImage,
-        maskImage: body.maskImage,
+        sourceImage,
+        maskImage,
         userKey,
       }),
     });
