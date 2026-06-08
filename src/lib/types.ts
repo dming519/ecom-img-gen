@@ -3,6 +3,15 @@
 export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 export type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 export type ImageQuality = "1K" | "2K" | "4K";
+export type MultiViewAngleId =
+  | "front"
+  | "left-side"
+  | "right-side"
+  | "back"
+  | "oblique-45"
+  | "top"
+  | "bottom-up"
+  | "detail";
 
 type AuthProvider = "github" | "google" | "access";
 export type UserRole = "super_admin" | "admin" | "user";
@@ -144,14 +153,25 @@ export interface PromptTaskStatus {
   updatedAt?: number;
 }
 
-// 创建图片生成任务时提交给 `/api/generate` 的参数。
-export interface CreateImageTaskOptions {
+export interface CreateDetailImageTaskOptions {
   prompt: string;
   size: ImageSize;
   aspectRatio?: AspectRatio;
   quality?: ImageQuality;
   inputImageIds: string[];
 }
+
+export interface CreateMultiViewTaskOptions {
+  mode: "multi-view";
+  angleId: MultiViewAngleId;
+  size: ImageSize;
+  aspectRatio?: AspectRatio;
+  quality?: ImageQuality;
+  inputImageIds: string[];
+}
+
+// 创建图片生成任务时提交给 `/api/generate` 的参数。
+export type CreateImageTaskOptions = CreateDetailImageTaskOptions | CreateMultiViewTaskOptions;
 
 // 图片生成任务状态。成功时优先返回 `imageId`，前端通过图片文件接口加载。
 export interface ImageTaskStatus {
@@ -183,6 +203,13 @@ export interface CreateCutoutTaskOptions {
   maskImageId: string;
 }
 
+// 创建局部改图任务需要原图、涂抹区域和用户输入的修改内容。
+export interface CreateEditTaskOptions {
+  sourceImageId: string;
+  maskImageId: string;
+  instruction: string;
+}
+
 // 抠图任务状态。成功时优先返回 `imageId`，前端通过图片文件接口加载白底结果图。
 export interface CutoutTaskStatus {
   status: "pending" | "running" | "succeeded" | "failed" | "canceled";
@@ -196,12 +223,32 @@ export interface CutoutTaskStatus {
   billedAt?: number;
 }
 
+export type EditTaskStatus = CutoutTaskStatus;
+
 // 一条抠图历史记录。
 export interface CutoutHistoryItem {
   id?: number;
   sourceImageId?: string;
   maskImageId?: string;
   resultImageId?: string;
+  sourceImage?: string;
+  maskImage?: string;
+  resultBase64?: string;
+  status: CutoutStatus;
+  error?: string;
+  taskId?: string;
+  model?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// 一条局部改图历史记录。
+export interface EditHistoryItem {
+  id?: number;
+  sourceImageId?: string;
+  maskImageId?: string;
+  resultImageId?: string;
+  instruction: string;
   sourceImage?: string;
   maskImage?: string;
   resultBase64?: string;

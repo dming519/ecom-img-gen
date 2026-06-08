@@ -1,5 +1,6 @@
 import {
   DEFAULT_CUTOUT_PATH,
+  DEFAULT_EDIT_PATH,
   DEFAULT_GENERATE_PATH,
   DEFAULT_PROMPT_PATH,
 } from "./config";
@@ -15,7 +16,9 @@ import type {
   PromptTaskStatus,
   RedeemCodeRow,
   AuthUser,
+  CreateEditTaskOptions,
   UserRole,
+  EditTaskStatus,
 } from "./types";
 
 interface ErrorPayload {
@@ -296,6 +299,46 @@ export async function createCutoutTask(
   };
 }
 
+// 局部改图流程：提交原图、mask 和用户修改内容，创建异步改图任务。
+export async function createEditTask(
+  options: CreateEditTaskOptions,
+  signal?: AbortSignal,
+): Promise<{
+  taskId: string;
+  remainingCredits?: number;
+  usedCredits?: number;
+  unlimitedCredits?: boolean;
+}> {
+  const response = await fetchWithRetry(DEFAULT_EDIT_PATH, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sourceImageId: options.sourceImageId,
+      maskImageId: options.maskImageId,
+      instruction: options.instruction,
+    }),
+    signal,
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
+  }
+
+  const payload = JSON.parse(text) as CreateTaskPayload;
+  if (!payload.taskId) {
+    throw new Error(
+      typeof payload.error === "string" ? payload.error : "创建改图任务失败",
+    );
+  }
+  return {
+    taskId: payload.taskId,
+    remainingCredits: payload.remainingCredits,
+    usedCredits: payload.usedCredits,
+    unlimitedCredits: payload.unlimitedCredits,
+  };
+}
+
 // 取消抠图任务，逻辑和详情图取消一致。
 export async function cancelCutoutTask(taskId: string): Promise<void> {
   const response = await fetchWithRetry(`${DEFAULT_CUTOUT_PATH}/cancel`, {
@@ -306,6 +349,18 @@ export async function cancelCutoutTask(taskId: string): Promise<void> {
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`取消抠图任务失败: HTTP ${response.status}: ${extractError(text)}`);
+  }
+}
+
+export async function cancelEditTask(taskId: string): Promise<void> {
+  const response = await fetchWithRetry(`${DEFAULT_EDIT_PATH}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ taskId }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`取消改图任务失败: HTTP ${response.status}: ${extractError(text)}`);
   }
 }
 
@@ -350,6 +405,49 @@ export async function pollCutoutTask(
   }
 
   throw new Error("抠图任务超时，请重试");
+}
+
+// 查询改图任务结果。成功时返回 imageId，前端通过图片文件接口展示。
+export async function pollEditTask(
+  taskId: string,
+  timeoutMs = 8 * 60 * 1000,
+  signal?: AbortSignal,
+): Promise<EditTaskStatus> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (signal?.aborted) {
+      throw new DOMException("改图任务已中断", "AbortError");
+    }
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, 2000);
+      signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(new DOMException("改图任务已中断", "AbortError"));
+        },
+        { once: true },
+      );
+    });
+    const response = await fetch(
+      `${DEFAULT_EDIT_PATH}/status?taskId=${encodeURIComponent(taskId)}`,
+      { method: "GET", signal, cache: "no-store" },
+    );
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`查询改图任务失败: HTTP ${response.status}: ${extractError(text)}`);
+    }
+    const payload = JSON.parse(text) as EditTaskStatus;
+    if (
+      payload.status === "succeeded" ||
+      payload.status === "failed" ||
+      payload.status === "canceled"
+    ) {
+      return payload;
+    }
+  }
+
+  throw new Error("改图任务超时，请重试");
 }
 
 // 以下是管理后台接口：只有 admin/super_admin 能正常调用。

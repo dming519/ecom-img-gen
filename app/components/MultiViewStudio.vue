@@ -7,26 +7,16 @@ import {
 } from "@/lib/api"
 import { dbImageFileUrl, dbPutProductImage } from "@/lib/db"
 import { resolveImageSize } from "@/lib/imageOptions"
-import type { AspectRatio, AuthSession, ImageQuality } from "@/lib/types"
+import type { AspectRatio, AuthSession, ImageQuality, MultiViewAngleId } from "@/lib/types"
 import Icon from "./Icon.vue"
 import QualitySelector from "./QualitySelector.vue"
 import SegmentedControl from "./SegmentedControl.vue"
 
 type MultiViewStatus = "draft" | "queued" | "running" | "succeeded" | "failed"
-type MultiViewAngleId =
-  | "front"
-  | "left-side"
-  | "right-side"
-  | "back"
-  | "oblique-45"
-  | "top"
-  | "bottom-up"
-  | "detail"
 
 interface MultiViewAngle {
   id: MultiViewAngleId
   title: string
-  instruction: string
 }
 
 interface MultiViewItem extends MultiViewAngle {
@@ -67,42 +57,34 @@ const ANGLE_PRESETS: MultiViewAngle[] = [
   {
     id: "front",
     title: "正面",
-    instruction: "front view, product facing camera directly, key visual identity clearly visible",
   },
   {
     id: "left-side",
     title: "左侧",
-    instruction: "left side profile view, product body complete and vertically aligned",
   },
   {
     id: "right-side",
     title: "右侧",
-    instruction: "right side profile view, product body complete and vertically aligned",
   },
   {
     id: "back",
     title: "背面",
-    instruction: "back view, same product turned around, infer only from visible structure and do not redesign",
   },
   {
     id: "oblique-45",
     title: "45°斜侧",
-    instruction: "45-degree three-quarter oblique side view, product rotated naturally with full body visible",
   },
   {
     id: "top",
     title: "俯视",
-    instruction: "top view, show top structure only when meaningful for this product shape",
   },
   {
     id: "bottom-up",
     title: "仰视",
-    instruction: "low angle upward view, show underside or base structure only when meaningful and infer conservatively",
   },
   {
     id: "detail",
     title: "局部特写",
-    instruction: "close product-only detail view of the most useful structure, material, seam, opening, interface, cap, sole, clasp, or packaging side",
   },
 ]
 
@@ -268,18 +250,6 @@ async function getGenerationImageIds() {
   return ids
 }
 
-function createMultiViewPrompt(item: MultiViewItem) {
-  return [
-    "Generate one clean ecommerce product packshot on a pure white background.",
-    "Output only the product body. No marketing copy, no angle labels, no text overlays, no icons, no badges, no cards, no borders, no decorative elements, no hands, no people, no table, no shelf, no lifestyle scene, no props.",
-    "The product must match the uploaded reference images for color, material, structure, packaging shape, visible logo, label layout, proportions, transparency, seams, interfaces and all visible product identity.",
-    "Only change the camera/view angle. Do not redesign, replace, simplify, or invent a different product.",
-    "If this exact angle is not fully visible in the references, infer conservatively from visible structure and keep the same product design.",
-    `Required angle: ${item.title} (${item.instruction}).`,
-    "The full product should be centered, complete, sharp, evenly lit, isolated on pure #ffffff background, with natural minimal contact shadow only if needed to ground the object.",
-  ].join("\n")
-}
-
 function updateSessionCredits(result: {
   remainingCredits?: number
   usedCredits?: number
@@ -330,7 +300,8 @@ async function generateView(index: number, generationImageIds: string[]) {
 
   const task = await createImageTask(
     {
-      prompt: createMultiViewPrompt(item),
+      mode: "multi-view",
+      angleId: item.id,
       size: resolveImageSize(aspectRatio.value),
       aspectRatio: aspectRatio.value,
       quality: quality.value,

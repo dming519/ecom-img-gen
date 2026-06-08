@@ -1,4 +1,9 @@
-import type { CutoutDraft, CutoutHistoryItem, HistoryItem } from "./types";
+import type {
+  CutoutDraft,
+  CutoutHistoryItem,
+  EditHistoryItem,
+  HistoryItem,
+} from "./types";
 
 interface ErrorPayload {
   error?: string | { message?: string };
@@ -128,6 +133,22 @@ function toCutoutRequestItem(item: CutoutHistoryItem): CutoutHistoryItem {
       };
 }
 
+// 改图历史同样只保留图片 ID，避免把原图、mask 和结果 base64 写进历史 JSON。
+function toEditRequestItem(item: EditHistoryItem): EditHistoryItem {
+  const {
+    sourceImage: _sourceImage,
+    maskImage: _maskImage,
+    resultBase64: _resultBase64,
+    ...rest
+  } = item;
+  return item.resultImageId
+    ? rest
+    : {
+        ...rest,
+        resultBase64: item.resultBase64,
+      };
+}
+
 // 草稿如果已经有 resultImageId，就不需要重复带上 resultBase64。
 function toCutoutDraftRequest(
   draft: Omit<CutoutDraft, "id"> & { id?: "active" },
@@ -220,6 +241,46 @@ export async function dbDelCutout(id: number) {
 
 export async function dbClearCutouts() {
   await requestJson<{ ok: boolean }>("/api/history/cutout", { method: "DELETE" });
+}
+
+export async function dbAddEdit(item: EditHistoryItem) {
+  const payload = await requestJson<{ item: EditHistoryItem }>("/api/history/edit", {
+    method: "POST",
+    body: JSON.stringify({ item: toEditRequestItem(item) }),
+  });
+  const saved = assignSaved(item, payload.item);
+  if (saved.id == null) {
+    throw new Error("服务端未返回改图历史 ID");
+  }
+  return saved.id;
+}
+
+export async function dbPutEdit(item: EditHistoryItem) {
+  const payload = await requestJson<{ item: EditHistoryItem }>("/api/history/edit", {
+    method: "PUT",
+    body: JSON.stringify({ item: toEditRequestItem(item) }),
+  });
+  const saved = assignSaved(item, payload.item);
+  if (saved.id == null) {
+    throw new Error("服务端未返回改图历史 ID");
+  }
+  return saved.id;
+}
+
+export async function dbAllEdits() {
+  const payload = await requestJson<{ items: EditHistoryItem[] }>("/api/history/edit");
+  return payload.items;
+}
+
+export async function dbDelEdit(id: number) {
+  await requestJson<{ ok: boolean }>(
+    `/api/history/edit?id=${encodeURIComponent(String(id))}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function dbClearEdits() {
+  await requestJson<{ ok: boolean }>("/api/history/edit", { method: "DELETE" });
 }
 
 export async function dbGetCutoutDraft() {

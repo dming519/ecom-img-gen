@@ -1,4 +1,9 @@
-import type { AspectRatio, ImageQuality, ImageSize } from "../../../src/lib/types";
+import type {
+  AspectRatio,
+  ImageQuality,
+  ImageSize,
+  MultiViewAngleId,
+} from "../../../src/lib/types";
 import { requireSession } from "../_lib/auth";
 import {
   readProductImageDataUrls,
@@ -7,7 +12,9 @@ import {
 import { getUserKey, requireImageCredit, type UserKvNamespace } from "../_lib/users";
 
 interface GenerateRequestBody {
+  mode?: "multi-view";
   prompt?: string;
+  angleId?: MultiViewAngleId;
   size?: ImageSize;
   aspectRatio?: AspectRatio;
   quality?: ImageQuality;
@@ -46,6 +53,40 @@ function json(data: unknown, init?: ResponseInit) {
 const ASPECT_RATIOS: AspectRatio[] = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16"];
 const IMAGE_QUALITIES: ImageQuality[] = ["1K", "2K", "4K"];
 const IMAGE_SIZES: ImageSize[] = ["1024x1024", "1024x1536", "1536x1024", "auto"];
+const MULTI_VIEW_ANGLE_INSTRUCTIONS: Record<MultiViewAngleId, { title: string; instruction: string }> = {
+  front: {
+    title: "正面",
+    instruction: "front view, product facing camera directly, key visual identity clearly visible",
+  },
+  "left-side": {
+    title: "左侧",
+    instruction: "left side profile view, product body complete and vertically aligned",
+  },
+  "right-side": {
+    title: "右侧",
+    instruction: "right side profile view, product body complete and vertically aligned",
+  },
+  back: {
+    title: "背面",
+    instruction: "back view, same product turned around, infer only from visible structure and do not redesign",
+  },
+  "oblique-45": {
+    title: "45°斜侧",
+    instruction: "45-degree three-quarter oblique side view, product rotated naturally with full body visible",
+  },
+  top: {
+    title: "俯视",
+    instruction: "top view, show top structure only when meaningful for this product shape",
+  },
+  "bottom-up": {
+    title: "仰视",
+    instruction: "low angle upward view, show underside or base structure only when meaningful and infer conservatively",
+  },
+  detail: {
+    title: "局部特写",
+    instruction: "close product-only detail view of the most useful structure, material, seam, opening, interface, cap, sole, clasp, or packaging side",
+  },
+};
 
 // 所有 normalizeXxx 函数都在做同一件事：把不可信的请求参数转成安全默认值。
 function normalizeAspectRatio(value: unknown): AspectRatio {
@@ -80,6 +121,25 @@ function normalizeImageIds(value: unknown) {
     : [];
 }
 
+function normalizeMultiViewAngleId(value: unknown): MultiViewAngleId | null {
+  return typeof value === "string" && value in MULTI_VIEW_ANGLE_INSTRUCTIONS
+    ? (value as MultiViewAngleId)
+    : null;
+}
+
+function createMultiViewPrompt(angleId: MultiViewAngleId) {
+  const angle = MULTI_VIEW_ANGLE_INSTRUCTIONS[angleId];
+  return [
+    "Generate one clean ecommerce product packshot on a pure white background.",
+    "Output only the product body. No marketing copy, no angle labels, no text overlays, no icons, no badges, no cards, no borders, no decorative elements, no hands, no people, no table, no shelf, no lifestyle scene, no props.",
+    "The product must match the uploaded reference images for color, material, structure, packaging shape, visible logo, label layout, proportions, transparency, seams, interfaces and all visible product identity.",
+    "Only change the camera/view angle. Do not redesign, replace, simplify, or invent a different product.",
+    "If this exact angle is not fully visible in the references, infer conservatively from visible structure and keep the same product design.",
+    `Required angle: ${angle.title} (${angle.instruction}).`,
+    "The full product should be centered, complete, sharp, evenly lit, isolated on pure #ffffff background, with natural minimal contact shadow only if needed to ground the object.",
+  ].join("\n");
+}
+
 // POST /api/generate：创建单张详情图生成任务。
 export async function handlePost(context: RequestContext) {
   const session = await requireSession(context.request, context.env);
@@ -107,7 +167,16 @@ export async function handlePost(context: RequestContext) {
     return json({ error: "服务端未配置 IMAGE_WORKER_TOKEN" }, { status: 500 });
   }
 
-  const prompt = body.prompt?.trim() ?? "";
+  const mode = body.mode === "multi-view" ? "multi-view" : "detail";
+  const angleId = mode === "multi-view" ? normalizeMultiViewAngleId(body.angleId) : null;
+  if (mode === "multi-view" && body.prompt) {
+    return json({ error: "多视角生成不接收前端 prompt" }, { status: 400 });
+  }
+  const prompt = mode === "multi-view"
+    ? angleId
+      ? createMultiViewPrompt(angleId)
+      : ""
+    : body.prompt?.trim() ?? "";
   const userKey = getUserKey(session.user);
   const imageIds = normalizeImageIds(body.inputImageIds);
   let storedImages: Array<string | null> = [];
@@ -129,12 +198,23 @@ export async function handlePost(context: RequestContext) {
   const quality = normalizeQuality(body.quality);
   const size = normalizeSize(body.size) ?? resolveImageSize(aspectRatio);
   // 纯文案生成被禁用，强制要求参考图，保证商品外观一致。
+  if (mode === "multi-view" && !angleId) {
+    return json({ error: "请选择有效的多视角角度" }, { status: 400 });
+  }
   if (!prompt) {
-    return json({ error: "请输入详情图文案" }, { status: 400 });
+    return json(
+      { error: mode === "multi-view" ? "请选择有效的多视角角度" : "请输入详情图文案" },
+      { status: 400 },
+    );
   }
   if (!images.length) {
     return json(
-      { error: "请上传产品参考图后再生成详情图。系统已禁止纯文案生成，以保证产品外观一致。" },
+      {
+        error:
+          mode === "multi-view"
+            ? "请上传产品参考图后再生成多视角产品图。"
+            : "请上传产品参考图后再生成详情图。系统已禁止纯文案生成，以保证产品外观一致。",
+      },
       { status: 400 },
     );
   }

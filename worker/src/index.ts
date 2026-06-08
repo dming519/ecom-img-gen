@@ -30,6 +30,8 @@ interface CutoutRequestBody {
   taskId?: string;
   sourceImage?: string;
   maskImage?: string;
+  editInstruction?: string;
+  taskType?: "cutout" | "edit";
   userKey?: string;
 }
 
@@ -424,6 +426,17 @@ function createCutoutPrompt() {
   ].join("\n\n");
 }
 
+function createEditPrompt(instruction: string) {
+  return [
+    "你正在执行电商商品局部改图任务。第一张图片是用户上传的原始商品图，第二张图片是用户涂抹的选择区域 mask：mask 中白色/亮色区域表示允许修改的区域。",
+    "只修改 mask 覆盖区域，未涂抹区域必须尽量保持原图不变，包括商品轮廓、包装形状、Logo、标签版式、背景、光影、材质、透视和边缘关系。",
+    "严格根据用户输入的修改内容调整涂抹区域；如果用户要求更换颜色、材质、图案、瑕疵、局部结构或文字，只在涂抹区域内执行，保持整体商品仍像同一个真实商品。",
+    "不要添加营销文案、促销标签、水印、边框、图标、装饰元素、手、人物、道具或额外场景。除非用户明确要求修改文字，否则不要新增或改写任何文字。",
+    "输出完整商品图片，不要只输出局部区域。画面需要自然、清晰、电商可用，修改边缘与周围图像融合干净。",
+    `用户修改内容：${instruction}`,
+  ].join("\n\n");
+}
+
 function normalizeAspectRatio(value: unknown): AspectRatio {
   return value === "auto" ||
     value === "1:1" ||
@@ -686,7 +699,8 @@ export class CutoutTasksDO {
 
     const taskId = body.taskId?.trim();
     const userKey = body.userKey?.trim();
-    const taskKey = `cutout-task:${taskId}`;
+    const taskType = new URL(request.url).pathname.includes("edit-task") ? "edit" : "cutout";
+    const taskKey = `${taskType}-task:${taskId}`;
     const now = Date.now();
     if (!taskId) {
       return json({ error: "缺少 taskId" }, { status: 400 });
@@ -718,7 +732,23 @@ export class CutoutTasksDO {
           userKey,
           createdAt: now,
           updatedAt: now,
-          error: "抠图任务缺少原图或涂抹区域",
+          error: taskType === "edit" ? "改图任务缺少原图或涂抹区域" : "抠图任务缺少原图或涂抹区域",
+        }),
+        { expirationTtl: 3600 },
+      );
+      return json({ ok: false }, { status: 400 });
+    }
+
+    const editInstruction = body.editInstruction?.trim().replace(/\s+/g, " ").slice(0, 600) ?? "";
+    if (taskType === "edit" && !editInstruction) {
+      await this.env.TASKS_KV.put(
+        taskKey,
+        JSON.stringify({
+          status: "failed",
+          userKey,
+          createdAt: now,
+          updatedAt: now,
+          error: "改图任务缺少修改内容",
         }),
         { expirationTtl: 3600 },
       );
@@ -728,6 +758,8 @@ export class CutoutTasksDO {
     await this.state.storage.put("task", {
       ...body,
       taskId,
+      taskType,
+      editInstruction,
       userKey,
     } satisfies CutoutRequestBody);
     await this.state.storage.setAlarm(Date.now() + 1);
@@ -745,7 +777,9 @@ export class CutoutTasksDO {
     const model = this.env.OPENAI_MODEL?.trim();
     const sourceImage = body.sourceImage ?? "";
     const maskImage = body.maskImage ?? "";
-    const taskKey = `cutout-task:${taskId}`;
+    const taskType = body.taskType === "edit" ? "edit" : "cutout";
+    const taskKey = `${taskType}-task:${taskId}`;
+    const editInstruction = body.editInstruction?.trim().replace(/\s+/g, " ").slice(0, 600) ?? "";
     const now = Date.now();
 
     await this.env.TASKS_KV.put(
@@ -759,16 +793,19 @@ export class CutoutTasksDO {
         throw new Error("服务端缺少 OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL 配置");
       }
       if (!sourceImage.startsWith("data:image/") || !maskImage.startsWith("data:image/")) {
-        throw new Error("抠图任务缺少原图或涂抹区域");
+        throw new Error(taskType === "edit" ? "改图任务缺少原图或涂抹区域" : "抠图任务缺少原图或涂抹区域");
+      }
+      if (taskType === "edit" && !editInstruction) {
+        throw new Error("改图任务缺少修改内容");
       }
 
-      // 抠图和详情图共用取消检查逻辑。
+      // 抠图、改图和详情图共用取消检查逻辑。
       const shouldStop = () => isImageTaskCanceled(this.env, taskKey);
       const attemptResult = await createImageRequestWithRetry(
         baseUrl,
         apiKey,
         model,
-        createCutoutPrompt(),
+        taskType === "edit" ? createEditPrompt(editInstruction) : createCutoutPrompt(),
         "1024x1024",
         [sourceImage, maskImage],
         shouldStop,
@@ -783,7 +820,7 @@ export class CutoutTasksDO {
             userKey,
             createdAt: now,
             updatedAt: Date.now(),
-            error: formatImageAttemptFailure("抠图", attemptResult),
+            error: formatImageAttemptFailure(taskType === "edit" ? "改图" : "抠图", attemptResult),
           }),
           { expirationTtl: 3600 },
         );
@@ -819,7 +856,7 @@ export class CutoutTasksDO {
             userKey,
             createdAt: now,
             updatedAt: Date.now(),
-            error: "API 返回成功但未包含抠图结果",
+            error: taskType === "edit" ? "API 返回成功但未包含改图结果" : "API 返回成功但未包含抠图结果",
           }),
           { expirationTtl: 3600 },
         );
@@ -1120,6 +1157,24 @@ export default {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+      });
+    }
+    if (url.pathname === "/edit-task" && request.method === "POST") {
+      // 改图任务入口：复用 CutoutTasksDO，同样使用原图 + mask 调图像编辑接口。
+      const token = env.IMAGE_WORKER_TOKEN?.trim();
+      const auth = request.headers.get("Authorization")?.trim();
+      if (!token || auth !== `Bearer ${token}`) {
+        return json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const body = (await request.json()) as CutoutRequestBody & {
+        taskId: string;
+      };
+      const id = env.CUTOUT_TASKS.idFromName(`edit:${body.taskId}`);
+      const stub = env.CUTOUT_TASKS.get(id);
+      return stub.fetch("https://do/edit-task", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, taskType: "edit" }),
       });
     }
     return json({ ok: true });

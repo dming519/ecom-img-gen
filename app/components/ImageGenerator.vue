@@ -29,6 +29,7 @@ import type {
 import AdminPanel from "./AdminPanel.vue"
 import AspectRatioSelector from "./AspectRatioSelector.vue"
 import CutoutStudio from "./CutoutStudio.vue"
+import EditStudio from "./EditStudio.vue"
 import HistoryGrid from "./HistoryGrid.vue"
 import Icon from "./Icon.vue"
 import ImageCountSelector from "./ImageCountSelector.vue"
@@ -37,7 +38,7 @@ import MultiViewStudio from "./MultiViewStudio.vue"
 import QualitySelector from "./QualitySelector.vue"
 import Stage from "./Stage.vue"
 
-type StudioMode = "image" | "cutout" | "multi-view"
+type StudioMode = "image" | "cutout" | "multi-view" | "edit"
 type WakeLockSentinelLike = { release: () => Promise<void> }
 
 const props = withDefaults(defineProps<{
@@ -156,7 +157,9 @@ const authRedirectPath = computed(() =>
     ? "/cutout/"
     : studioMode.value === "multi-view"
       ? "/multi-view/"
-      : "/image/",
+      : studioMode.value === "edit"
+        ? "/edit/"
+        : "/image/",
 )
 const isAdmin = computed(
   () => session.value?.user?.role === "admin" || session.value?.user?.role === "super_admin",
@@ -321,20 +324,23 @@ function getPromptImageSrc(item: DetailPromptItem | undefined) {
   return null
 }
 
-// 支持 `/image/`、`/cutout/`、`/multi-view/` 以及旧版 hash/query 写法，统一判断当前模块。
+// 支持 `/image/`、`/cutout/`、`/multi-view/`、`/edit/` 以及旧版 hash/query 写法，统一判断当前模块。
 function readStudioModeFromUrl(): StudioMode {
   if (typeof window === "undefined") return props.initialMode
   const pathname = window.location.pathname.replace(/\/+$/, "")
   if (pathname.endsWith("/cutout")) return "cutout"
   if (pathname.endsWith("/multi-view")) return "multi-view"
+  if (pathname.endsWith("/edit")) return "edit"
   if (pathname.endsWith("/image")) return "image"
   const hashMode = window.location.hash.replace(/^#/, "")
   if (hashMode === "cutout") return "cutout"
   if (hashMode === "multi-view") return "multi-view"
+  if (hashMode === "edit") return "edit"
   if (hashMode === "image") return "image"
   const module = new URL(window.location.href).searchParams.get("module")
   if (module === "cutout") return "cutout"
   if (module === "multi-view") return "multi-view"
+  if (module === "edit") return "edit"
   return "image"
 }
 
@@ -354,7 +360,13 @@ async function handleModuleLinkClick(event: MouseEvent, mode: StudioMode) {
   event.preventDefault()
   await flushCutoutDraftIfNeeded()
   window.location.assign(
-    mode === "cutout" ? "/cutout/" : mode === "multi-view" ? "/multi-view/" : "/image/",
+    mode === "cutout"
+      ? "/cutout/"
+      : mode === "multi-view"
+        ? "/multi-view/"
+        : mode === "edit"
+          ? "/edit/"
+          : "/image/",
   )
 }
 
@@ -1115,6 +1127,15 @@ onBeforeUnmount(() => {
           <Icon name="queue" />
           <span>多视角</span>
         </a>
+        <a
+          href="/edit/"
+          :class="['creative-tab', { 'is-active': studioMode === 'edit' }]"
+          :aria-current="studioMode === 'edit' ? 'page' : undefined"
+          @click="event => handleModuleLinkClick(event, 'edit')"
+        >
+          <Icon name="brush" />
+          <span>改图</span>
+        </a>
         <button type="button" class="creative-tab" disabled>
           <Icon name="text" />
           <span>分层</span>
@@ -1557,6 +1578,15 @@ onBeforeUnmount(() => {
     />
 
     <MultiViewStudio
+      v-else-if="studioMode === 'multi-view'"
+      :authenticated="authenticated"
+      :session-loading="sessionLoading"
+      :session="session"
+      @update:session="session = $event"
+      @zoom="lightboxSrc = $event"
+    />
+
+    <EditStudio
       v-else
       :authenticated="authenticated"
       :session-loading="sessionLoading"

@@ -1,6 +1,7 @@
 import type {
   CutoutDraft,
   CutoutHistoryItem,
+  EditHistoryItem,
   HistoryItem,
 } from "@/lib/types";
 import { requireSession } from "./auth";
@@ -57,7 +58,7 @@ export interface HistoryStorageFunctionEnv extends HistoryStorageEnv {
   TASKS_KV?: UserKvNamespace;
 }
 
-type HistoryKind = "detail" | "cutout";
+type HistoryKind = "detail" | "cutout" | "edit";
 
 interface HistoryRow {
   id: number;
@@ -365,6 +366,37 @@ async function serializeCutoutItem(
   };
 }
 
+async function serializeEditItem(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  item: EditHistoryItem,
+) {
+  const sourceImageId =
+    item.sourceImage && !item.sourceImageId
+      ? await writeImage(env, userKey, item.sourceImage, DEFAULT_IMAGE_MIME)
+      : item.sourceImageId;
+  const maskImageId =
+    item.maskImage && !item.maskImageId
+      ? await writeImage(env, userKey, item.maskImage, DEFAULT_IMAGE_MIME)
+      : item.maskImageId;
+  const resultImageId =
+    item.resultBase64 && !item.resultImageId
+      ? await writeImage(env, userKey, item.resultBase64, DEFAULT_IMAGE_MIME)
+      : item.resultImageId;
+  const {
+    sourceImage: _sourceImage,
+    maskImage: _maskImage,
+    resultBase64: _resultBase64,
+    ...rest
+  } = item;
+  return {
+    ...rest,
+    sourceImageId,
+    maskImageId,
+    resultImageId,
+  };
+}
+
 async function serializeCutoutDraft(
   env: Required<HistoryStorageEnv>,
   userKey: string,
@@ -451,6 +483,14 @@ function hasInlineCutoutImages(item: CutoutHistoryItem) {
   );
 }
 
+function hasInlineEditImages(item: EditHistoryItem) {
+  return !!(
+    item.sourceImage ||
+    item.maskImage ||
+    item.resultBase64
+  );
+}
+
 function hasInlineCutoutDraftImages(draft: CutoutDraft) {
   return typeof draft.resultBase64 === "string" && !!draft.resultBase64;
 }
@@ -480,6 +520,20 @@ async function normalizeStoredCutoutItem(
 
   const payload = await serializeCutoutItem(env, userKey, item);
   await updateHistoryRecord(env.HISTORY_DB, userKey, "cutout", row.id, payload, Date.now());
+  return { ...payload, id: row.id };
+}
+
+async function normalizeStoredEditItem(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  row: HistoryRow,
+) {
+  const item = parseJson<EditHistoryItem>(row.payload);
+  if (!item) return null;
+  if (!hasInlineEditImages(item)) return { ...item, id: row.id };
+
+  const payload = await serializeEditItem(env, userKey, item);
+  await updateHistoryRecord(env.HISTORY_DB, userKey, "edit", row.id, payload, Date.now());
   return { ...payload, id: row.id };
 }
 
@@ -603,6 +657,60 @@ export async function deleteCutoutHistory(
   await env.HISTORY_DB.prepare(
     `DELETE FROM history_records
      WHERE id = ? AND user_key = ? AND kind = 'cutout'`,
+  )
+    .bind(id, userKey)
+    .run();
+}
+
+export async function saveEditHistory(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  item: EditHistoryItem,
+) {
+  await ensureHistorySchema(env.HISTORY_DB);
+  const now = Date.now();
+  const payload = await serializeEditItem(env, userKey, item);
+  let id = item.id;
+  if (id == null) {
+    id = await insertHistoryRecord(env.HISTORY_DB, userKey, "edit", payload, now);
+  } else {
+    await updateHistoryRecord(env.HISTORY_DB, userKey, "edit", id, payload, now);
+  }
+  return { ...payload, id };
+}
+
+export async function listEditHistory(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+) {
+  await ensureHistorySchema(env.HISTORY_DB);
+  const rows = await listHistoryRows(env.HISTORY_DB, userKey, "edit");
+  const items: EditHistoryItem[] = [];
+  for (const row of rows) {
+    const item = await normalizeStoredEditItem(env, userKey, row);
+    if (item) items.push(item);
+  }
+  return items;
+}
+
+export async function deleteEditHistory(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  id?: number,
+) {
+  await ensureHistorySchema(env.HISTORY_DB);
+  if (id == null) {
+    await env.HISTORY_DB.prepare(
+      `DELETE FROM history_records
+       WHERE user_key = ? AND kind = 'edit'`,
+    )
+      .bind(userKey)
+      .run();
+    return;
+  }
+  await env.HISTORY_DB.prepare(
+    `DELETE FROM history_records
+     WHERE id = ? AND user_key = ? AND kind = 'edit'`,
   )
     .bind(id, userKey)
     .run();
