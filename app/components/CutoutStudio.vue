@@ -104,6 +104,35 @@ function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function ensureDataImage(value: string) {
+  if (value.startsWith("data:image/")) return value
+  const response = await fetch(value, {
+    credentials: "same-origin",
+    cache: "no-store",
+  })
+  if (!response.ok) {
+    throw new Error(`原图读取失败: HTTP ${response.status}`)
+  }
+  const blob = await response.blob()
+  if (!blob.type.startsWith("image/")) {
+    throw new Error("原图文件不是有效图片。")
+  }
+  const dataUrl = await blobToDataUrl(blob)
+  if (!dataUrl.startsWith("data:image/")) {
+    throw new Error("原图转换失败，请重新上传图片。")
+  }
+  return dataUrl
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
@@ -463,8 +492,10 @@ async function handleGenerate() {
     error.value = "请先上传一张包含产品的图片。"
     return
   }
+  let apiSourceImage: string
   let apiMaskImage: string
   try {
+    apiSourceImage = await ensureDataImage(sourceImage.value)
     apiMaskImage = exportMaskImage()
   } catch (maskError) {
     error.value = maskError instanceof Error ? maskError.message : String(maskError)
@@ -492,7 +523,7 @@ async function handleGenerate() {
 
     // createCutoutTask 只负责派发任务，真正结果要通过 pollCutoutTask 查询。
     const created = await createCutoutTask(
-      { sourceImage: sourceImage.value, maskImage: apiMaskImage },
+      { sourceImage: apiSourceImage, maskImage: apiMaskImage },
       abortRef.value.signal,
     )
     taskIdRef.value = created.taskId
