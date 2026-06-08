@@ -8,11 +8,11 @@ import {
 import { resolveImageSize } from "@/lib/imageOptions"
 import type { AspectRatio, AuthSession, ImageQuality } from "@/lib/types"
 import Icon from "./Icon.vue"
-import ImageCountSelector from "./ImageCountSelector.vue"
 import QualitySelector from "./QualitySelector.vue"
 import SegmentedControl from "./SegmentedControl.vue"
 
 type MultiViewStatus = "draft" | "queued" | "running" | "succeeded" | "failed"
+type MultiViewCountValue = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8"
 
 interface MultiViewAngle {
   id: string
@@ -46,6 +46,16 @@ const PRODUCT_IMAGE_QUALITY = 0.82
 const MAX_REFERENCE_IMAGE_CHARS = 1_500_000
 const MAX_REFERENCE_IMAGE_TOTAL_CHARS = 6_000_000
 const MAX_MULTI_VIEW_IMAGES = 8
+const MULTI_VIEW_COUNT_OPTIONS: Array<{ label: string; value: MultiViewCountValue }> = [
+  { label: "正面", value: "1" },
+  { label: "左侧", value: "2" },
+  { label: "右侧", value: "3" },
+  { label: "背面", value: "4" },
+  { label: "45°斜侧", value: "5" },
+  { label: "俯视", value: "6" },
+  { label: "仰视", value: "7" },
+  { label: "局部特写", value: "8" },
+]
 const MULTI_VIEW_ASPECT_RATIO_OPTIONS: Array<{ label: string; value: AspectRatio }> = [
   { label: "Auto", value: "auto" },
   { label: "1:1", value: "1:1" },
@@ -60,16 +70,6 @@ const ANGLE_PRESETS: MultiViewAngle[] = [
     instruction: "front view, product facing camera directly, key visual identity clearly visible",
   },
   {
-    id: "back",
-    title: "背面",
-    instruction: "back view, same product turned around, infer only from visible structure and do not redesign",
-  },
-  {
-    id: "left-45",
-    title: "左 45 度",
-    instruction: "left 45-degree three-quarter view, product rotated naturally with full body visible",
-  },
-  {
     id: "left-side",
     title: "左侧",
     instruction: "left side profile view, product body complete and vertically aligned",
@@ -80,24 +80,29 @@ const ANGLE_PRESETS: MultiViewAngle[] = [
     instruction: "right side profile view, product body complete and vertically aligned",
   },
   {
+    id: "back",
+    title: "背面",
+    instruction: "back view, same product turned around, infer only from visible structure and do not redesign",
+  },
+  {
+    id: "oblique-45",
+    title: "45°斜侧",
+    instruction: "45-degree three-quarter oblique side view, product rotated naturally with full body visible",
+  },
+  {
     id: "top",
     title: "俯视",
     instruction: "top view, show top structure only when meaningful for this product shape",
   },
   {
-    id: "bottom",
-    title: "底部",
-    instruction: "bottom view, show base or underside only when meaningful and infer conservatively",
+    id: "bottom-up",
+    title: "仰视",
+    instruction: "low angle upward view, show underside or base structure only when meaningful and infer conservatively",
   },
   {
     id: "detail",
-    title: "结构细节",
+    title: "局部特写",
     instruction: "close product-only detail view of the most useful structure, material, seam, opening, interface, cap, sole, clasp, or packaging side",
-  },
-  {
-    id: "packaging-side",
-    title: "包装侧面",
-    instruction: "product-only packaging side or secondary structure view, show the most informative side panel while keeping the same product identity",
   },
 ]
 
@@ -139,30 +144,17 @@ const runningLabel = computed(() =>
 
 function createViewItems(count: number): MultiViewItem[] {
   const normalized = Math.min(MAX_MULTI_VIEW_IMAGES, Math.max(1, Math.round(count)))
-  const selected =
-    normalized === 1
-      ? [ANGLE_PRESETS[0]!]
-      : normalized === 2
-        ? [ANGLE_PRESETS[0]!, ANGLE_PRESETS[1]!]
-        : normalized === 3
-          ? [ANGLE_PRESETS[0]!, ANGLE_PRESETS[2]!, ANGLE_PRESETS[1]!]
-          : normalized === 4
-            ? [ANGLE_PRESETS[0]!, ANGLE_PRESETS[3]!, ANGLE_PRESETS[4]!, ANGLE_PRESETS[1]!]
-            : [
-                ANGLE_PRESETS[0]!,
-                ANGLE_PRESETS[3]!,
-                ANGLE_PRESETS[4]!,
-                ANGLE_PRESETS[1]!,
-                ANGLE_PRESETS[5]!,
-                ANGLE_PRESETS[6]!,
-                ANGLE_PRESETS[7]!,
-                ANGLE_PRESETS[8]!,
-              ].slice(0, normalized)
+  const selected = ANGLE_PRESETS.slice(0, normalized)
 
   return selected.map((angle) => ({
     ...angle,
     status: "draft",
   }))
+}
+
+function toMultiViewCountValue(value: number): MultiViewCountValue {
+  const normalized = Math.min(MAX_MULTI_VIEW_IMAGES, Math.max(1, Math.round(value)))
+  return String(normalized) as MultiViewCountValue
 }
 
 function handleCountChange(value: number) {
@@ -451,211 +443,217 @@ function handleDownload(item: MultiViewItem) {
 
   <div class="multi-view-grid">
     <aside class="studio-panel input-rail multi-view-input">
-        <div class="panel-heading">
-          <h2>产品资料</h2>
+      <div class="panel-heading">
+        <h2>产品资料</h2>
+        <button
+          type="button"
+          class="inline-action panel-reset-action"
+          :disabled="busy"
+          @click="productImages = []; items = createViewItems(imageCount)"
+        >
+          重置
+        </button>
+      </div>
+
+      <div class="input-rail-body multi-view-input-body">
+        <div class="field-row-head">
+          <label for="multi-view-images">产品参考图</label>
           <button
+            v-if="productImages.length > 0"
             type="button"
-            class="inline-action panel-reset-action"
-            :disabled="busy"
-            @click="productImages = []; items = createViewItems(imageCount)"
-          >
-            重置
-          </button>
-        </div>
-
-        <div class="input-rail-body multi-view-input-body">
-          <div class="field-row-head">
-            <label for="multi-view-images">产品参考图</label>
-            <button
-              v-if="productImages.length > 0"
-              type="button"
-              class="inline-action"
-              :disabled="controlsDisabled"
-              @click="productImages = []"
-            >
-              清空
-            </button>
-          </div>
-          <div class="product-media multi-view-media">
-            <div
-              v-for="(src, index) in productImages"
-              :key="`${src.slice(0, 32)}-${index}`"
-              class="prompt-thumb"
-            >
-              <button
-                type="button"
-                class="prompt-thumb-preview"
-                :aria-label="`查看产品参考图 ${index + 1}`"
-                @click="emit('zoom', src)"
-              >
-                <img :src="src" :alt="`产品参考图 ${index + 1}`">
-              </button>
-              <button
-                type="button"
-                class="prompt-thumb-del"
-                :disabled="controlsDisabled"
-                :aria-label="`移除产品参考图 ${index + 1}`"
-                @click="removeReferenceImage(index)"
-              >
-                <Icon name="close" />
-              </button>
-            </div>
-            <button
-              type="button"
-              class="prompt-upload-tile"
-              :disabled="controlsDisabled"
-              @click="fileInputRef?.click()"
-            >
-              <Icon name="upload" />
-              <span>上传</span>
-            </button>
-          </div>
-          <input
-            id="multi-view-images"
-            ref="fileInputRef"
-            type="file"
-            aria-label="上传产品参考图"
-            accept="image/*"
-            multiple
-            hidden
-            @change="event => handleSelectFiles((event.target as HTMLInputElement).files)"
-          >
-
-          <div class="multi-view-note">
-            <strong>白底产品图</strong>
-            <p>系统自动分配标准角度，只输出商品本体。参考图越多，背面、侧面和底部越稳定。</p>
-          </div>
-
-          <div class="settings-row multi-view-settings">
-            <div class="setting-block">
-              <div class="setting-head">
-                <label>视角数量</label>
-                <span>{{ imageCount }} 张</span>
-              </div>
-              <div class="param-controls" aria-label="多视角张数">
-                <ImageCountSelector
-                  :value="imageCount"
-                  :disabled="controlsDisabled"
-                  @change="handleCountChange"
-                />
-              </div>
-            </div>
-            <div class="setting-block">
-              <div class="setting-head">
-                <label>画面比例</label>
-                <span>{{ aspectRatio === "auto" ? "Auto" : aspectRatio }}</span>
-              </div>
-              <div class="param-controls" aria-label="画面比例">
-                <SegmentedControl
-                  aria-label="画面比例"
-                  ariaLabel="画面比例"
-                  :value="aspectRatio"
-                  :options="MULTI_VIEW_ASPECT_RATIO_OPTIONS"
-                  :disabled="controlsDisabled"
-                  class-name="multi-view-ratio-segments"
-                  @change="aspectRatio = $event as AspectRatio"
-                />
-              </div>
-            </div>
-            <div class="setting-block">
-              <div class="setting-head">
-                <label>清晰度</label>
-                <span>{{ quality }}</span>
-              </div>
-              <div class="param-controls" aria-label="清晰度">
-                <QualitySelector
-                  :value="quality"
-                  :disabled="controlsDisabled"
-                  @change="quality = $event"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="input-action-bar">
-          <button
-            v-if="!busy"
-            type="button"
-            class="btn-primary"
+            class="inline-action"
             :disabled="controlsDisabled"
-            @click="handleGenerateAll"
+            @click="productImages = []"
           >
-            生成多视角白底图
+            清空
           </button>
-          <button v-else type="button" class="btn-danger" @click="handleCancelGeneration">
-            中断生成
-          </button>
-          <div v-if="error" class="alert">{{ error }}</div>
         </div>
-      </aside>
-
-      <section class="studio-panel multi-view-results">
-        <div class="panel-heading">
-          <h2>视角结果</h2>
-          <span class="panel-count">{{ completedCount }} / {{ items.length }}</span>
-        </div>
-        <div class="multi-view-result-grid">
-          <article
-            v-for="(item, index) in items"
-            :key="item.id"
-            :class="['multi-view-card', `is-${item.status}`]"
+        <div class="product-media multi-view-media">
+          <div
+            v-for="(src, index) in productImages"
+            :key="`${src.slice(0, 32)}-${index}`"
+            class="prompt-thumb"
           >
-            <div class="multi-view-card-head">
-              <span>{{ index + 1 }}</span>
-              <strong>{{ item.title }}</strong>
-              <em>{{ STATUS_LABEL[item.status] }}</em>
-            </div>
             <button
               type="button"
-              class="multi-view-preview"
-              :disabled="!getResultSrc(item)"
-              @click="() => {
-                const src = getResultSrc(item)
-                if (src) emit('zoom', src)
-              }"
+              class="prompt-thumb-preview"
+              :aria-label="`查看产品参考图 ${index + 1}`"
+              @click="emit('zoom', src)"
             >
-              <img v-if="getResultSrc(item)" :src="getResultSrc(item)!" :alt="`${item.title}白底图`">
-              <span v-else-if="item.status === 'running' || item.status === 'queued'" class="busy-orbit" aria-hidden="true" />
-              <Icon v-else name="queue" />
+              <img :src="src" :alt="`产品参考图 ${index + 1}`">
             </button>
-            <p v-if="item.error" class="multi-view-error">{{ item.error }}</p>
-            <div class="multi-view-card-actions">
-              <button
-                type="button"
-                class="btn-ghost"
-                :disabled="busy || !getResultSrc(item)"
-                @click="handleDownload(item)"
-              >
-                <Icon name="download" />
-                下载
-              </button>
-              <button
-                type="button"
-                class="btn-ghost"
-                :disabled="controlsDisabled || !productImages.length"
-                @click="handleRegenerate(index)"
-              >
-                重新生成
-              </button>
-            </div>
-          </article>
+            <button
+              type="button"
+              class="prompt-thumb-del"
+              :disabled="controlsDisabled"
+              :aria-label="`移除产品参考图 ${index + 1}`"
+              @click="removeReferenceImage(index)"
+            >
+              <Icon name="close" />
+            </button>
+          </div>
+          <button
+            type="button"
+            class="prompt-upload-tile"
+            :disabled="controlsDisabled"
+            @click="fileInputRef?.click()"
+          >
+            <Icon name="upload" />
+            <span>上传</span>
+          </button>
         </div>
-      </section>
-    </div>
+        <input
+          id="multi-view-images"
+          ref="fileInputRef"
+          type="file"
+          aria-label="上传产品参考图"
+          accept="image/*"
+          multiple
+          hidden
+          @change="event => handleSelectFiles((event.target as HTMLInputElement).files)"
+        >
+
+        <div class="multi-view-note">
+          <strong>白底产品图</strong>
+          <p>系统自动分配标准角度，只输出商品本体。参考图越多，背面、侧面和底部越稳定。</p>
+        </div>
+
+        <div class="settings-row multi-view-settings">
+          <div class="setting-block">
+            <div class="setting-head">
+              <label>视角</label>
+              <span>{{ imageCount }} 张</span>
+            </div>
+            <div class="param-controls" aria-label="视角">
+              <SegmentedControl
+                aria-label="视角"
+                ariaLabel="视角"
+                :value="toMultiViewCountValue(imageCount)"
+                :options="MULTI_VIEW_COUNT_OPTIONS"
+                :disabled="controlsDisabled"
+                class-name="multi-view-count-segments"
+                @change="handleCountChange(Number($event))"
+              />
+            </div>
+          </div>
+          <div class="setting-block">
+            <div class="setting-head">
+              <label>画面比例</label>
+              <span>{{ aspectRatio === "auto" ? "Auto" : aspectRatio }}</span>
+            </div>
+            <div class="param-controls" aria-label="画面比例">
+              <SegmentedControl
+                aria-label="画面比例"
+                ariaLabel="画面比例"
+                :value="aspectRatio"
+                :options="MULTI_VIEW_ASPECT_RATIO_OPTIONS"
+                :disabled="controlsDisabled"
+                class-name="multi-view-ratio-segments"
+                @change="aspectRatio = $event as AspectRatio"
+              />
+            </div>
+          </div>
+          <div class="setting-block">
+            <div class="setting-head">
+              <label>清晰度</label>
+              <span>{{ quality }}</span>
+            </div>
+            <div class="param-controls" aria-label="清晰度">
+              <QualitySelector
+                :value="quality"
+                :disabled="controlsDisabled"
+                @change="quality = $event"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="input-action-bar">
+        <button
+          v-if="!busy"
+          type="button"
+          class="btn-primary"
+          :disabled="controlsDisabled"
+          @click="handleGenerateAll"
+        >
+          生成多视角白底图
+        </button>
+        <button v-else type="button" class="btn-danger" @click="handleCancelGeneration">
+          中断生成
+        </button>
+        <div v-if="error" class="alert">{{ error }}</div>
+      </div>
+    </aside>
+
+    <section class="studio-panel canvas-panel multi-view-results">
+      <div class="panel-heading">
+        <h2>视角结果</h2>
+        <span class="panel-count">{{ completedCount }} / {{ items.length }}</span>
+      </div>
+      <div class="multi-view-result-grid">
+        <article
+          v-for="(item, index) in items"
+          :key="item.id"
+          :class="['multi-view-card', `is-${item.status}`]"
+        >
+          <div class="multi-view-card-head">
+            <span>{{ index + 1 }}</span>
+            <strong>{{ item.title }}</strong>
+            <em>{{ STATUS_LABEL[item.status] }}</em>
+          </div>
+          <button
+            type="button"
+            class="multi-view-preview"
+            :disabled="!getResultSrc(item)"
+            @click="() => {
+              const src = getResultSrc(item)
+              if (src) emit('zoom', src)
+            }"
+          >
+            <img v-if="getResultSrc(item)" :src="getResultSrc(item)!" :alt="`${item.title}白底图`">
+            <span v-else-if="item.status === 'running' || item.status === 'queued'" class="busy-orbit" aria-hidden="true" />
+            <Icon v-else name="queue" />
+          </button>
+          <p v-if="item.error" class="multi-view-error">{{ item.error }}</p>
+          <div class="multi-view-card-actions">
+            <button
+              type="button"
+              class="btn-ghost"
+              :disabled="busy || !getResultSrc(item)"
+              @click="handleDownload(item)"
+            >
+              <Icon name="download" />
+              下载
+            </button>
+            <button
+              type="button"
+              class="btn-ghost"
+              :disabled="controlsDisabled || !productImages.length"
+              @click="handleRegenerate(index)"
+            >
+              重新生成
+            </button>
+          </div>
+        </article>
+      </div>
+    </section>
+  </div>
 </template>
 
 <style scoped>
 .multi-view-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
+  grid-template-columns: minmax(292px, 348px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  margin-top: 12px;
 }
 
 .multi-view-input,
 .multi-view-results {
-  min-height: 100%;
+  height: var(--workbench-h);
+  min-height: var(--workbench-h);
 }
 
 .multi-view-input-body {
@@ -666,22 +664,23 @@ function handleDownload(item: MultiViewItem) {
 .multi-view-note {
   display: grid;
   gap: 6px;
-  padding: 14px;
-  border: 1px solid #dbe6f4;
-  border-radius: 8px;
-  background: #f8fbff;
+  padding: 12px;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  border-radius: var(--radius-control);
+  background: var(--teal-soft);
 }
 
 .multi-view-note strong {
-  color: #0f2446;
-  font-size: 13px;
+  color: var(--teal);
+  font-size: 0.8rem;
 }
 
 .multi-view-note p {
   margin: 0;
-  color: #5b6b84;
-  font-size: 12px;
+  color: var(--text-sub);
+  font-size: 0.78rem;
   line-height: 1.55;
+  text-wrap: pretty;
 }
 
 .multi-view-media {
@@ -696,40 +695,47 @@ function handleDownload(item: MultiViewItem) {
 }
 
 .multi-view-settings {
-  gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 
-.multi-view-settings .setting-block {
-  padding: 8px;
-}
-
-.multi-view-settings .setting-head {
-  margin-bottom: 6px;
+.multi-view-results {
+  overflow: hidden;
 }
 
 .multi-view-result-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  align-content: start;
+  align-items: start;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
 }
 
 .multi-view-card {
   display: grid;
-  gap: 12px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
   min-width: 0;
-  padding: 12px;
-  border: 1px solid #dbe6f4;
-  border-radius: 8px;
-  background: #f9fbff;
+  padding: 10px;
+  border: 1px solid rgba(211, 219, 231, 0.82);
+  border-radius: var(--radius-control);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.24)),
+    var(--bg-soft);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.68) inset;
 }
 
 .multi-view-card.is-succeeded {
-  border-color: #8fd7aa;
+  border-color: rgba(15, 118, 110, 0.3);
+  box-shadow:
+    0 0 0 3px rgba(15, 118, 110, 0.08),
+    0 1px 0 rgba(255, 255, 255, 0.68) inset;
 }
 
 .multi-view-card.is-failed {
-  border-color: #f2a7a7;
+  border-color: rgba(200, 50, 43, 0.3);
 }
 
 .multi-view-card-head {
@@ -744,24 +750,26 @@ function handleDownload(item: MultiViewItem) {
   place-items: center;
   width: 28px;
   height: 28px;
-  border: 1px solid #cfdded;
+  border: 1px solid var(--accent);
   border-radius: 7px;
-  color: #48607f;
-  font-size: 12px;
-  background: #eef5ff;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 820;
+  background: var(--accent);
 }
 
 .multi-view-card-head strong {
   overflow: hidden;
-  color: #10213a;
-  font-size: 13px;
+  color: var(--text);
+  font-size: 0.8rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .multi-view-card-head em {
-  color: #6b7c95;
-  font-size: 12px;
+  color: var(--text-sub);
+  font-size: 0.72rem;
+  font-weight: 720;
   font-style: normal;
 }
 
@@ -771,10 +779,14 @@ function handleDownload(item: MultiViewItem) {
   width: 100%;
   aspect-ratio: 1;
   overflow: hidden;
-  border: 1px solid #d7e2f0;
-  border-radius: 8px;
-  background: #fff;
-  color: #b2bfce;
+  border: 1px solid rgba(174, 184, 199, 0.62);
+  border-radius: 6px;
+  background:
+    linear-gradient(rgba(17, 24, 39, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(17, 24, 39, 0.024) 1px, transparent 1px),
+    #fff;
+  background-size: 24px 24px;
+  color: var(--muted);
   cursor: zoom-in;
 }
 
@@ -786,6 +798,7 @@ function handleDownload(item: MultiViewItem) {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  background: #fff;
 }
 
 .multi-view-preview svg {
@@ -795,7 +808,7 @@ function handleDownload(item: MultiViewItem) {
 
 .multi-view-error {
   margin: 0;
-  color: #fca5a5;
+  color: var(--danger);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -817,6 +830,19 @@ function handleDownload(item: MultiViewItem) {
   height: 14px;
 }
 
+:deep(.multi-view-count-segments) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 5px;
+}
+
+:deep(.multi-view-count-segments .segment-option) {
+  min-height: 34px;
+  padding: 0 8px;
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
 :deep(.multi-view-ratio-segments) {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
@@ -831,6 +857,18 @@ function handleDownload(item: MultiViewItem) {
 @media (max-width: 1080px) {
   .multi-view-grid {
     grid-template-columns: 1fr;
+  }
+
+  .multi-view-input,
+  .multi-view-results {
+    position: static;
+    height: auto;
+    max-height: none;
+    min-height: 0;
+  }
+
+  .multi-view-result-grid {
+    max-height: none;
   }
 }
 </style>
