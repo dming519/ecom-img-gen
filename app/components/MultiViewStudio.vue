@@ -522,9 +522,8 @@ function handleDownload(item: MultiViewItem) {
           >
 
           <div class="multi-view-note">
-            <span>纯白底</span>
-            <span>无文案</span>
-            <span>自动角度</span>
+            <strong>白底产品图</strong>
+            <p>系统自动分配标准角度，只输出商品本体。参考图越多，背面、侧面和底部越稳定。</p>
           </div>
 
           <div class="settings-row multi-view-settings">
@@ -666,25 +665,23 @@ function handleDownload(item: MultiViewItem) {
 
 .multi-view-note {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
-  padding: 8px;
+  padding: 14px;
   border: 1px solid #dbe6f4;
   border-radius: 8px;
   background: #f8fbff;
 }
 
-.multi-view-note span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 28px;
-  border: 1px solid #d7e4f2;
-  border-radius: 6px;
-  background: #fff;
+.multi-view-note strong {
   color: #0f2446;
+  font-size: 13px;
+}
+
+.multi-view-note p {
+  margin: 0;
+  color: #5b6b84;
   font-size: 12px;
-  font-weight: 760;
+  line-height: 1.55;
 }
 
 .multi-view-media {
