@@ -214,13 +214,18 @@ function fileToCompressedDataURL(file: File): Promise<string> {
   })
 }
 
-// 服务端只返回 title/prompt，这里补上前端需要跟踪的 id、index 和状态。
-function createPromptItem(index: number, title: string, prompt: string): DetailPromptItem {
+function stripLegacyPrompt(item: DetailPromptItem): DetailPromptItem {
+  const { prompt: _prompt, ...clean } = item as DetailPromptItem & { prompt?: unknown }
+  return clean
+}
+
+// 服务端只返回 title/promptId，这里补上前端需要跟踪的 id、index 和状态。
+function createPromptItem(index: number, title: string, promptId: string): DetailPromptItem {
   return {
     id: crypto.randomUUID(),
     index,
     title,
-    prompt,
+    promptId,
     status: "draft",
   }
 }
@@ -231,11 +236,12 @@ function hasPromptImage(item: DetailPromptItem) {
 
 // 页面刷新或中断后，把未完成的 queued/running 状态恢复成可继续操作的状态。
 function resetInterruptedPrompt(item: DetailPromptItem): DetailPromptItem {
-  if (item.status !== "queued" && item.status !== "running") return item
+  const clean = stripLegacyPrompt(item)
+  if (clean.status !== "queued" && clean.status !== "running") return clean
   return {
-    ...item,
-    status: hasPromptImage(item) ? "succeeded" : "draft",
-    taskId: hasPromptImage(item) ? item.taskId : undefined,
+    ...clean,
+    status: hasPromptImage(clean) ? "succeeded" : "draft",
+    taskId: hasPromptImage(clean) ? clean.taskId : undefined,
     error: undefined,
     updatedAt: Date.now(),
   }
@@ -246,13 +252,13 @@ function resetActiveGenerationPrompts(items: DetailPromptItem[]): DetailPromptIt
   return items.map((item) =>
     item.status === "queued" || item.status === "running"
       ? {
-          ...item,
+          ...stripLegacyPrompt(item),
           status: hasPromptImage(item) ? "succeeded" : "draft",
           taskId: hasPromptImage(item) ? item.taskId : undefined,
           error: undefined,
           updatedAt: Date.now(),
         }
-      : item,
+      : stripLegacyPrompt(item),
   )
 }
 
@@ -487,7 +493,7 @@ async function handleGeneratePrompts() {
       productImageIds: await ensureProductImageIds(),
     })
     prompts.value = result.prompts.map((item, index) =>
-      createPromptItem(index, item.title, item.prompt),
+      createPromptItem(index, item.title, item.promptId),
     )
     activePromptIdx.value = 0
   } catch (event) {
@@ -495,14 +501,6 @@ async function handleGeneratePrompts() {
   } finally {
     promptBusy.value = false
   }
-}
-
-function handlePromptChange(id: string, value: string) {
-  prompts.value = prompts.value.map((item) =>
-    item.id === id
-      ? { ...item, prompt: value, status: hasPromptImage(item) ? item.status : "draft" }
-      : item,
-  )
 }
 
 function handleTitleChange(id: string, value: string) {
@@ -539,11 +537,11 @@ async function handleGenerateImages() {
   error.value = null
   if (!validateProduct()) return
   if (!prompts.value.length) {
-    error.value = "请先生成详情图文案。"
+    error.value = "请先生成详情图方案。"
     return
   }
-  if (prompts.value.some((item) => !item.prompt.trim())) {
-    error.value = "详情图文案不能为空，请检查后再生成。"
+  if (prompts.value.some((item) => !item.promptId)) {
+    error.value = "详情图方案缺少后端引用，请重新生成详情图方案。"
     return
   }
 
@@ -553,7 +551,7 @@ async function handleGenerateImages() {
   let historyItem: HistoryItem = {
     product: cloneProduct(currentProduct.value),
     prompts: prompts.value.map((item) => ({
-      ...item,
+      ...stripLegacyPrompt(item),
       status: "draft",
       imageId: undefined,
       base64: undefined,
@@ -590,7 +588,7 @@ async function handleGenerateImages() {
 
       const task = await createImageTask(
         {
-          prompt: working[index]?.prompt ?? "",
+          promptId: working[index]?.promptId ?? "",
           size: resolvedSize.value,
           aspectRatio: aspectRatio.value,
           quality: quality.value,
@@ -670,13 +668,13 @@ async function handleRegenerateActiveImage() {
   error.value = null
   if (!validateProduct()) return
   if (!prompts.value.length) {
-    error.value = "请先生成详情图文案。"
+    error.value = "请先生成详情图方案。"
     return
   }
   const targetIndex = Math.min(Math.max(activePromptIdx.value, 0), prompts.value.length - 1)
   const target = prompts.value[targetIndex]
-  if (!target?.prompt.trim()) {
-    error.value = "当前详情图文案不能为空，请检查后再重新生成。"
+  if (!target?.promptId) {
+    error.value = "当前详情图方案缺少后端引用，请重新生成详情图方案。"
     return
   }
 
@@ -740,7 +738,7 @@ async function handleRegenerateActiveImage() {
 
     const task = await createImageTask(
       {
-        prompt: working[targetIndex]?.prompt ?? "",
+        promptId: working[targetIndex]?.promptId ?? "",
         size: resolvedSize.value,
         aspectRatio: aspectRatio.value,
         quality: quality.value,
@@ -983,7 +981,7 @@ watch(
         productName: productName.value,
         sellingPoints: sellingPoints.value,
         imageCount: imageCount.value,
-        prompts: prompts.value,
+        prompts: prompts.value.map(stripLegacyPrompt),
         aspectRatio: aspectRatio.value,
         quality: quality.value,
         productImageIds: productImageIds.value,
@@ -1281,7 +1279,7 @@ onBeforeUnmount(() => {
 
     <template v-if="studioMode === 'image'">
       <div class="run-status" aria-label="当前任务状态">
-        <span>{{ prompts.length ? `${prompts.length} 条文案` : "文案未生成" }}</span>
+        <span>{{ prompts.length ? `${prompts.length} 个方案` : "方案未生成" }}</span>
         <span>{{ productImages.length ? `${productImages.length} 张参考图` : "未上传参考图" }}</span>
         <span>{{ creditLabel }}</span>
         <span>{{ generationLabel }}</span>
@@ -1429,7 +1427,7 @@ onBeforeUnmount(() => {
           <div class="input-action-bar">
             <button type="button" class="btn-primary" :disabled="controlsDisabled" @click="handleGeneratePrompts">
               <span v-if="promptBusy" class="btn-spinner" aria-hidden="true" />
-              {{ promptBusy ? "正在生成文案..." : "生成详情图文案" }}
+              {{ promptBusy ? "正在生成方案..." : "生成详情图方案" }}
             </button>
             <div v-if="error" class="alert">{{ error }}</div>
           </div>
@@ -1437,20 +1435,20 @@ onBeforeUnmount(() => {
 
         <aside class="studio-panel prompt-rail">
           <div class="panel-heading">
-            <h2>详情图文案</h2>
+            <h2>详情图方案</h2>
             <span class="panel-count">
-              {{ activePrompt ? `${activePromptIndex + 1} / ${prompts.length}` : `${prompts.length} 条` }}
+              {{ activePrompt ? `${activePromptIndex + 1} / ${prompts.length}` : `${prompts.length} 个` }}
             </span>
           </div>
           <div class="prompt-editor-list">
             <div v-if="promptBusy" class="busy-card">
               <span class="busy-orbit" aria-hidden="true" />
-              <strong>正在生成详情图文案</strong>
+              <strong>正在生成详情图方案</strong>
               <p>系统正在分析产品资料和参考图。</p>
             </div>
-            <div v-else-if="!activePrompt" class="empty">生成详情图文案后可在这里逐条修改。</div>
+            <div v-else-if="!activePrompt" class="empty">生成详情图方案后可在这里逐张生成图片。</div>
             <template v-else>
-              <div class="prompt-switcher" aria-label="详情图文案切换">
+              <div class="prompt-switcher" aria-label="详情图方案切换">
                 <button
                   type="button"
                   class="prompt-nav-btn"
@@ -1459,7 +1457,7 @@ onBeforeUnmount(() => {
                 >
                   上一张
                 </button>
-                <div class="prompt-step-list" role="tablist" aria-label="切换详情图文案">
+                <div class="prompt-step-list" role="tablist" aria-label="切换详情图方案">
                   <button
                     v-for="(item, index) in prompts"
                     :key="item.id"
@@ -1487,7 +1485,7 @@ onBeforeUnmount(() => {
                 <div class="prompt-editor-head">
                   <span class="prompt-index">{{ activePromptIndex + 1 }}</span>
                   <input
-                    aria-label="详情图标题"
+                    aria-label="详情图方案标题"
                     type="text"
                     :value="activePrompt.title"
                     :disabled="imageBusy"
@@ -1497,12 +1495,10 @@ onBeforeUnmount(() => {
                     {{ STATUS_LABEL[activePrompt.status] }}
                   </span>
                 </div>
-                <textarea
-                  aria-label="详情图文案"
-                  :value="activePrompt.prompt"
-                  :disabled="imageBusy"
-                  @input="event => handlePromptChange(activePrompt!.id, (event.target as HTMLTextAreaElement).value)"
-                />
+                <div class="prompt-plan-summary">
+                  <strong>{{ activePrompt.title || `第${activePromptIndex + 1}张详情图` }}</strong>
+                  <span>方案内容由系统在后端保存。</span>
+                </div>
               </div>
             </template>
           </div>
@@ -1521,7 +1517,7 @@ onBeforeUnmount(() => {
                 v-if="!imageBusy"
                 type="button"
                 class="btn-ghost"
-                :disabled="controlsDisabled || !activePrompt?.prompt.trim()"
+                :disabled="controlsDisabled || !activePrompt?.promptId"
                 @click="handleRegenerateActiveImage"
               >
                 重新生成当前图

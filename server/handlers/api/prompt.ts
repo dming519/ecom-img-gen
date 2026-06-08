@@ -183,6 +183,7 @@ export async function handlePost(context: RequestContext) {
   const now = Date.now();
   await writePromptTask(kv, taskId, {
     status: "pending",
+    userKey,
     createdAt: now,
     updatedAt: now,
   });
@@ -197,6 +198,7 @@ export async function handlePost(context: RequestContext) {
       },
       body: JSON.stringify({
         taskId,
+        userKey,
         imageCount,
         productImages,
         userText,
@@ -213,6 +215,7 @@ export async function handlePost(context: RequestContext) {
   } catch (error) {
     await writePromptTask(kv, taskId, {
       status: "failed",
+      userKey,
       createdAt: now,
       updatedAt: Date.now(),
       error:

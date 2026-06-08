@@ -71,6 +71,14 @@ interface ImageRow {
   mime_type: string | null;
 }
 
+interface DetailPromptRecordInput {
+  id?: string;
+  title?: string;
+  prompt: string;
+  taskId?: string;
+  index?: number;
+}
+
 const DEFAULT_IMAGE_MIME = "image/png";
 
 export function json(data: unknown, init?: ResponseInit) {
@@ -147,6 +155,18 @@ async function ensureHistorySchema(db: HistoryD1Database) {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_stored_images_user
       ON stored_images(user_key, created_at)`,
+    `CREATE TABLE IF NOT EXISTS detail_prompts (
+      id TEXT PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      source_task_id TEXT,
+      prompt_index INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_detail_prompts_user
+      ON detail_prompts(user_key, created_at)`,
   ];
 
   for (const statement of statements) {
@@ -270,6 +290,13 @@ export async function readStoredImageFile(
   };
 }
 
+function requireHistoryDb(env: HistoryStorageEnv) {
+  if (!env.HISTORY_DB) {
+    throw new Error("服务端未配置 HISTORY_DB D1 数据库");
+  }
+  return env.HISTORY_DB;
+}
+
 export async function readStoredImageDataUrl(
   env: Required<HistoryStorageEnv>,
   userKey: string,
@@ -290,6 +317,60 @@ export async function storeHistoryImage(
   const storage = requireHistoryBindings(env);
   await ensureHistorySchema(storage.HISTORY_DB);
   return writeImage(storage, userKey, value, defaultMime);
+}
+
+export async function storeDetailPrompt(
+  env: HistoryStorageEnv,
+  userKey: string,
+  input: DetailPromptRecordInput,
+) {
+  const db = requireHistoryDb(env);
+  await ensureHistorySchema(db);
+
+  const prompt = input.prompt.trim();
+  if (!prompt) {
+    throw new Error("详情图 prompt 为空");
+  }
+
+  const id = input.id?.trim() || crypto.randomUUID();
+  const title = input.title?.trim() || "商品详情图";
+  const index = Number.isFinite(input.index) ? Number(input.index) : null;
+  const taskId = input.taskId?.trim() || null;
+  const now = Date.now();
+
+  await db.prepare(
+    `INSERT INTO detail_prompts
+      (id, user_key, title, prompt, source_task_id, prompt_index, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id)
+      DO UPDATE SET
+        title = excluded.title,
+        prompt = excluded.prompt,
+        source_task_id = excluded.source_task_id,
+        prompt_index = excluded.prompt_index,
+        updated_at = excluded.updated_at`,
+  )
+    .bind(id, userKey, title, prompt, taskId, index, now, now)
+    .run();
+
+  return id;
+}
+
+export async function readDetailPrompt(
+  env: HistoryStorageEnv,
+  userKey: string,
+  id: string,
+) {
+  const db = requireHistoryDb(env);
+  await ensureHistorySchema(db);
+  const row = await db.prepare(
+    `SELECT id, title, prompt
+     FROM detail_prompts
+     WHERE id = ? AND user_key = ?`,
+  )
+    .bind(id, userKey)
+    .first<{ id: string; title: string; prompt: string }>();
+  return row ?? null;
 }
 
 async function serializeDetailItem(
@@ -318,13 +399,25 @@ async function serializeDetailItem(
   };
   const prompts = await Promise.all(
     clean.prompts.map(async (prompt) => {
+      const legacyPrompt = (prompt as typeof prompt & { prompt?: unknown }).prompt;
+      const promptId =
+        typeof legacyPrompt === "string" && legacyPrompt.trim()
+          ? await storeDetailPrompt(env, userKey, {
+              id: prompt.promptId,
+              title: prompt.title,
+              prompt: legacyPrompt,
+              index: prompt.index,
+            })
+          : prompt.promptId;
       const imageId =
         prompt.base64 && !prompt.imageId
           ? await writeImage(env, userKey, prompt.base64, DEFAULT_IMAGE_MIME)
           : prompt.imageId;
-      const { base64: _base64, ...rest } = prompt;
+      const { base64: _base64, prompt: _prompt, ...rest } =
+        prompt as typeof prompt & { prompt?: unknown };
       return {
         ...rest,
+        promptId,
         imageId,
       };
     }),
@@ -471,7 +564,10 @@ async function updateHistoryRecord(
 function hasInlineDetailImages(item: HistoryItem) {
   return (
     item.product.productImages.some((image) => image.startsWith("data:image/")) ||
-    item.prompts.some((prompt) => !!prompt.base64)
+    item.prompts.some((prompt) => {
+      const legacyPrompt = (prompt as typeof prompt & { prompt?: unknown }).prompt;
+      return !!prompt.base64 || (typeof legacyPrompt === "string" && !!legacyPrompt.trim());
+    })
   );
 }
 

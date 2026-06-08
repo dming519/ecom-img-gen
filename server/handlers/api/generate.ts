@@ -6,6 +6,7 @@ import type {
 } from "../../../src/lib/types";
 import { requireSession } from "../_lib/auth";
 import {
+  readDetailPrompt,
   readProductImageDataUrls,
   type HistoryStorageEnv,
 } from "../_lib/historyStorage";
@@ -14,6 +15,7 @@ import { getUserKey, requireImageCredit, type UserKvNamespace } from "../_lib/us
 interface GenerateRequestBody {
   mode?: "multi-view";
   prompt?: string;
+  promptId?: string;
   angleId?: MultiViewAngleId;
   size?: ImageSize;
   aspectRatio?: AspectRatio;
@@ -127,6 +129,10 @@ function normalizeMultiViewAngleId(value: unknown): MultiViewAngleId | null {
     : null;
 }
 
+function normalizePromptId(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
 function createMultiViewPrompt(angleId: MultiViewAngleId) {
   const angle = MULTI_VIEW_ANGLE_INSTRUCTIONS[angleId];
   return [
@@ -168,16 +174,35 @@ export async function handlePost(context: RequestContext) {
   }
 
   const mode = body.mode === "multi-view" ? "multi-view" : "detail";
-  const angleId = mode === "multi-view" ? normalizeMultiViewAngleId(body.angleId) : null;
-  if (mode === "multi-view" && body.prompt) {
-    return json({ error: "多视角生成不接收前端 prompt" }, { status: 400 });
-  }
-  const prompt = mode === "multi-view"
-    ? angleId
-      ? createMultiViewPrompt(angleId)
-      : ""
-    : body.prompt?.trim() ?? "";
   const userKey = getUserKey(session.user);
+  const angleId = mode === "multi-view" ? normalizeMultiViewAngleId(body.angleId) : null;
+  if (typeof body.prompt === "string" && body.prompt.trim()) {
+    return json(
+      { error: mode === "multi-view" ? "多视角生成不接收前端 prompt" : "详情图生成不接收前端 prompt" },
+      { status: 400 },
+    );
+  }
+  let prompt = "";
+  if (mode === "multi-view") {
+    prompt = angleId ? createMultiViewPrompt(angleId) : "";
+  } else {
+    const promptId = normalizePromptId(body.promptId);
+    if (!promptId) {
+      return json({ error: "缺少详情图方案引用，请重新生成详情图方案" }, { status: 400 });
+    }
+    try {
+      const record = await readDetailPrompt(context.env, userKey, promptId);
+      if (!record?.prompt) {
+        return json({ error: "详情图方案不存在或无权访问，请重新生成详情图方案" }, { status: 400 });
+      }
+      prompt = record.prompt;
+    } catch (error) {
+      return json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 500 },
+      );
+    }
+  }
   const imageIds = normalizeImageIds(body.inputImageIds);
   let storedImages: Array<string | null> = [];
   if (imageIds.length) {
@@ -203,7 +228,7 @@ export async function handlePost(context: RequestContext) {
   }
   if (!prompt) {
     return json(
-      { error: mode === "multi-view" ? "请选择有效的多视角角度" : "请输入详情图文案" },
+      { error: mode === "multi-view" ? "请选择有效的多视角角度" : "详情图方案为空，请重新生成" },
       { status: 400 },
     );
   }

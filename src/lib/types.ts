@@ -96,12 +96,12 @@ type DetailImageStatus =
   | "succeeded"
   | "failed";
 
-// 一条详情图文案，以及它对应的生成状态和结果图。
+// 一条详情图方案引用，以及它对应的生成状态和结果图。真正 prompt 只保存在后端。
 export interface DetailPromptItem {
   id: string;
   index: number;
   title: string;
-  prompt: string;
+  promptId?: string;
   status: DetailImageStatus;
   taskId?: string;
   imageId?: string;
@@ -137,8 +137,9 @@ export interface GeneratePromptOptions {
 // `/api/prompt/status` 成功后返回的文案列表。
 export interface GeneratePromptResult {
   prompts: Array<{
+    promptId: string;
     title: string;
-    prompt: string;
+    index: number;
   }>;
   model: string;
 }
@@ -154,7 +155,7 @@ export interface PromptTaskStatus {
 }
 
 export interface CreateDetailImageTaskOptions {
-  prompt: string;
+  promptId: string;
   size: ImageSize;
   aspectRatio?: AspectRatio;
   quality?: ImageQuality;

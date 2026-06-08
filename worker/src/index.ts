@@ -59,6 +59,7 @@ const IMAGE_RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504, 
 
 interface PromptRequestBody {
   taskId?: string;
+  userKey?: string;
   userText?: string;
   imageCount?: number;
   productImages?: string[];
@@ -926,6 +927,7 @@ export class PromptTasksDO {
 
     const taskId = body.taskId?.trim();
     const taskKey = `prompt-task:${taskId}`;
+    const userKey = body.userKey?.trim();
     const createdAt = Date.now();
     if (!taskId) {
       return json({ error: "缺少 taskId" }, { status: 400 });
@@ -948,6 +950,7 @@ export class PromptTasksDO {
         taskKey,
         JSON.stringify({
           status: "failed",
+          userKey,
           createdAt,
           updatedAt: Date.now(),
           error: "服务端缺少 PROMPT_API_KEY / PROMPT_BASE_URL / PROMPT_MODEL 配置",
@@ -966,6 +969,7 @@ export class PromptTasksDO {
         taskKey,
         JSON.stringify({
           status: "failed",
+          userKey,
           createdAt,
           updatedAt: Date.now(),
           error: "详情图文案任务参数不完整",
@@ -982,6 +986,7 @@ export class PromptTasksDO {
       baseUrl,
       model,
       imageCount,
+      userKey,
       productImages,
       userText,
       systemTemplate,
@@ -997,6 +1002,7 @@ export class PromptTasksDO {
     if (!taskId) return;
     const taskKey = `prompt-task:${taskId}`;
     const createdAt = Date.now();
+    const userKey = body.userKey?.trim();
     const apiKey =
       body.apiKey?.trim() ||
       this.env.PROMPT_API_KEY?.trim() ||
@@ -1016,7 +1022,7 @@ export class PromptTasksDO {
 
     await this.env.TASKS_KV.put(
       taskKey,
-      JSON.stringify({ status: "running", createdAt, updatedAt: createdAt }),
+      JSON.stringify({ status: "running", userKey, createdAt, updatedAt: createdAt }),
       { expirationTtl: 3600 },
     );
 
@@ -1057,6 +1063,7 @@ export class PromptTasksDO {
       const prompts = (parsed.prompts ?? [])
         .map((item, index) => ({
           title: item.title?.trim() || `第${index + 1}张商品详情图`,
+          promptId: crypto.randomUUID(),
           prompt: normalizeGeneratedPromptText(item.prompt ?? ""),
         }))
         .filter((item) => item.prompt);
@@ -1072,6 +1079,7 @@ export class PromptTasksDO {
         taskKey,
         JSON.stringify({
           status: "succeeded",
+          userKey,
           prompts,
           model,
           createdAt,
@@ -1087,6 +1095,7 @@ export class PromptTasksDO {
         taskKey,
         JSON.stringify({
           status: "failed",
+          userKey,
           createdAt,
           updatedAt: Date.now(),
           error:

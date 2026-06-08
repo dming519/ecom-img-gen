@@ -1589,6 +1589,26 @@ button:disabled {
   line-height: 1.6;
 }
 
+.prompt-plan-summary {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 120px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.prompt-plan-summary strong {
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
 .status-pill.is-succeeded {
   border-color: rgba(17, 128, 90, 0.24);
   background: rgba(17, 128, 90, 0.1);

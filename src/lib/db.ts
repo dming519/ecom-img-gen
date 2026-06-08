@@ -82,12 +82,15 @@ function mergeSavedDetail(target: HistoryItem, saved: HistoryItem) {
   };
   target.prompts = target.prompts.map((prompt) => {
     const savedPrompt = savedPromptById.get(prompt.id);
+    const { prompt: _prompt, ...cleanPrompt } =
+      prompt as typeof prompt & { prompt?: unknown };
     return savedPrompt
       ? {
-          ...prompt,
-          imageId: savedPrompt.imageId ?? prompt.imageId,
+          ...cleanPrompt,
+          promptId: savedPrompt.promptId ?? cleanPrompt.promptId,
+          imageId: savedPrompt.imageId ?? cleanPrompt.imageId,
         }
-      : prompt;
+      : cleanPrompt;
   });
   target.timestamp = saved.timestamp;
   target.generation = saved.generation;
@@ -110,8 +113,10 @@ function toDetailRequestItem(item: HistoryItem): HistoryItem {
       productImages,
     },
     prompts: item.prompts.map((prompt) => {
-      if (!prompt.imageId) return prompt;
-      const { base64: _base64, ...rest } = prompt;
+      const { prompt: _prompt, ...withoutPrompt } =
+        prompt as typeof prompt & { prompt?: unknown };
+      if (!prompt.imageId) return withoutPrompt;
+      const { base64: _base64, ...rest } = withoutPrompt;
       return rest;
     }),
   };
