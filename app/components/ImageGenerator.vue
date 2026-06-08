@@ -50,7 +50,7 @@ const PRODUCT_IMAGE_QUALITY = 0.82
 const MAX_PROMPT_IMAGE_CHARS = 1_500_000
 const MAX_PROMPT_IMAGE_TOTAL_CHARS = 6_000_000
 const MAX_DETAIL_IMAGES = 8
-const LEGACY_DRAFT_KEY = "ecomimggen_draft"
+const PREVIOUS_DRAFT_KEY = "ecomimggen_draft"
 const DRAFT_KEY = "ecomimggen_draft_v2"
 const ASPECT_RATIO_VALUES: AspectRatio[] = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16"]
 const IMAGE_QUALITY_VALUES: ImageQuality[] = ["1K", "2K", "4K"]
@@ -924,7 +924,7 @@ onMounted(() => {
   window.addEventListener("hashchange", handleLocationChange)
 
   try {
-    localStorage.removeItem(LEGACY_DRAFT_KEY)
+    localStorage.removeItem(PREVIOUS_DRAFT_KEY)
     const raw = localStorage.getItem(DRAFT_KEY)
     if (raw) {
       const draft = JSON.parse(raw) as DraftState

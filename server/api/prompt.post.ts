@@ -1,5 +1,5 @@
 import { defineEventHandler } from "h3"
-import { onRequestPost } from "../legacy/api/prompt"
-import { runLegacyHandler } from "../utils/pagesAdapter"
+import { handlePost } from "../handlers/api/prompt"
+import { runServerHandler } from "../utils/nitroEventHandler"
 
-export default defineEventHandler((event) => runLegacyHandler(event, onRequestPost))
+export default defineEventHandler((event) => runServerHandler(event, handlePost))

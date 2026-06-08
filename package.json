@@ -11,6 +11,7 @@
     "deploy": "nuxt build --preset=cloudflare_pages && wrangler pages deploy dist --project-name ecom-img-gen"
   },
   "dependencies": {
+    "h3": "^1.15.11",
     "nuxt": "^4.4.7",
     "vue": "^3.5.35"
   },

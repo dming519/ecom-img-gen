@@ -1,5 +1,5 @@
 import { defineEventHandler } from "h3"
-import { onRequestGet } from "../../legacy/api/cutout/status"
-import { runLegacyHandler } from "../../utils/pagesAdapter"
+import { handleGet } from "../../handlers/api/cutout/status"
+import { runServerHandler } from "../../utils/nitroEventHandler"
 
-export default defineEventHandler((event) => runLegacyHandler(event, onRequestGet))
+export default defineEventHandler((event) => runServerHandler(event, handleGet))

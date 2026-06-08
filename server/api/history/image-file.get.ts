@@ -1,5 +1,5 @@
 import { defineEventHandler } from "h3"
-import { onRequestGet } from "../../legacy/api/history/image-file"
-import { runLegacyHandler } from "../../utils/pagesAdapter"
+import { handleGet } from "../../handlers/api/history/image-file"
+import { runServerHandler } from "../../utils/nitroEventHandler"
 
-export default defineEventHandler((event) => runLegacyHandler(event, onRequestGet))
+export default defineEventHandler((event) => runServerHandler(event, handleGet))

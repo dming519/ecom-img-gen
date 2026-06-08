@@ -1,9 +1,9 @@
 import { defineEventHandler } from "h3"
-import { onRequestGet, onRequestPost } from "../../legacy/api/admin/users"
-import { runLegacyHandler } from "../../utils/pagesAdapter"
+import { handleGet, handlePost } from "../../handlers/api/admin/users"
+import { runServerHandler } from "../../utils/nitroEventHandler"
 
 export default defineEventHandler((event) => {
-  if (event.method === "GET") return runLegacyHandler(event, onRequestGet)
-  if (event.method === "POST") return runLegacyHandler(event, onRequestPost)
+  if (event.method === "GET") return runServerHandler(event, handleGet)
+  if (event.method === "POST") return runServerHandler(event, handlePost)
   return new Response("Method Not Allowed", { status: 405 })
 })
