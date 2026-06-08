@@ -5,6 +5,7 @@ import {
   createImageTask,
   pollImageTask,
 } from "@/lib/api"
+import { dbImageFileUrl } from "@/lib/db"
 import { resolveImageSize } from "@/lib/imageOptions"
 import type { AspectRatio, AuthSession, ImageQuality } from "@/lib/types"
 import Icon from "./Icon.vue"
@@ -31,6 +32,7 @@ interface MultiViewAngle {
 interface MultiViewItem extends MultiViewAngle {
   status: MultiViewStatus
   taskId?: string
+  imageId?: string
   base64?: string
   model?: string
   error?: string
@@ -300,6 +302,7 @@ async function generateView(index: number, generationImages: string[]) {
           ...view,
           status: "queued",
           taskId: undefined,
+          imageId: undefined,
           base64: undefined,
           model: undefined,
           error: undefined,
@@ -350,6 +353,7 @@ async function generateView(index: number, generationImages: string[]) {
           ...view,
           status: "succeeded",
           taskId: undefined,
+          imageId: result.imageId,
           base64: result.base64,
           model: result.model,
           error: undefined,
@@ -427,13 +431,15 @@ function handleCancelGeneration() {
   abortRef.value?.abort()
   items.value = items.value.map((item) =>
     item.status === "queued" || item.status === "running"
-      ? { ...item, status: item.base64 ? "succeeded" : "draft", taskId: undefined }
+      ? { ...item, status: item.base64 || item.imageId ? "succeeded" : "draft", taskId: undefined }
       : item,
   )
 }
 
 function getResultSrc(item: MultiViewItem) {
-  return item.base64 ? `data:image/png;base64,${item.base64}` : null
+  if (item.base64) return `data:image/png;base64,${item.base64}`
+  if (item.imageId) return dbImageFileUrl(item.imageId)
+  return null
 }
 
 function handleDownload(item: MultiViewItem) {
@@ -859,8 +865,9 @@ function handleDownload(item: MultiViewItem) {
 }
 
 .multi-view-angle-option {
+  position: relative;
   min-height: 34px;
-  padding: 0 8px;
+  padding: 0 20px 0 8px;
   border: 1px solid rgba(203, 215, 230, 0.86);
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.6);
@@ -883,12 +890,25 @@ function handleDownload(item: MultiViewItem) {
 }
 
 .multi-view-angle-option.is-selected {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
+  border-color: rgba(23, 105, 255, 0.62);
+  background: linear-gradient(180deg, #fff 0%, #f4f8ff 100%);
+  color: var(--accent-ink);
   box-shadow:
-    0 0 0 3px var(--accent-soft),
-    0 8px 18px rgba(23, 105, 255, 0.18);
+    inset 0 0 0 1px rgba(23, 105, 255, 0.1),
+    0 4px 12px rgba(23, 105, 255, 0.1);
+}
+
+.multi-view-angle-option.is-selected::after {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  content: "";
+  transform: translateY(-50%);
 }
 
 .multi-view-angle-option:disabled {

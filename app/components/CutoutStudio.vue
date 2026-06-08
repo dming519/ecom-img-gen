@@ -12,6 +12,7 @@ import {
   dbDelCutout,
   dbGetCutoutDraft,
   dbGetProductImages,
+  dbImageFileUrl,
   dbPutCutout,
   dbPutCutoutDraft,
   dbPutProductImage,
@@ -71,7 +72,11 @@ const remainingCredits = computed(() => props.session?.user?.remainingCredits ??
 const isSuperAdmin = computed(() => props.session?.user?.role === "super_admin")
 const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
 const resultSrc = computed(() =>
-  resultBase64.value ? `data:image/png;base64,${resultBase64.value}` : null,
+  resultBase64.value
+    ? `data:image/png;base64,${resultBase64.value}`
+    : resultImageId.value
+      ? dbImageFileUrl(resultImageId.value)
+      : null,
 )
 const canvasStyle = computed(() =>
   canvasSize.value.width && canvasSize.value.height
@@ -212,12 +217,12 @@ async function persistCurrentDraft(
   const nextSourceImageId = overrides.sourceImageId ?? sourceImageId.value
   const nextResultBase64 = hasResultOverride ? overrides.resultBase64 : resultBase64.value
   const nextResultImageId = hasResultImageOverride ? overrides.resultImageId : resultImageId.value
-  if (!nextSourceImageId && !maskImageId && !nextResultBase64) return
+  if (!nextSourceImageId && !maskImageId && !nextResultBase64 && !nextResultImageId) return
   try {
     const draft = {
       sourceImageId: nextSourceImageId,
       maskImageId,
-      resultImageId: nextResultBase64 ? nextResultImageId : undefined,
+      resultImageId: nextResultImageId,
       resultBase64: nextResultBase64,
       brushSize: overrides.brushSize ?? brushSize.value,
       mode: overrides.mode ?? mode.value,
@@ -518,17 +523,18 @@ async function handleGenerate() {
       return
     }
     updateSessionCredits(result)
-    // 成功结果先存在 resultBase64；persistCutout 会让服务端决定是否转存为图片文件。
+    // 成功结果优先使用服务端返回的 imageId；旧任务返回 base64 时仍兼容保存。
     item = {
       ...item,
       status: "succeeded",
       taskId: undefined,
       error: undefined,
       model: result.model,
-      resultImageId: undefined,
+      resultImageId: result.imageId,
       resultBase64: result.base64,
       updatedAt: Date.now(),
     }
+    resultImageId.value = result.imageId
     resultBase64.value = result.base64 ?? null
     await persistCutout(item)
     resultImageId.value = item.resultImageId
@@ -621,11 +627,17 @@ async function handleClearHistory() {
 }
 
 function handleDownload() {
-  if (!resultBase64.value) return
+  if (!resultSrc.value) return
   const anchor = document.createElement("a")
-  anchor.href = `data:image/png;base64,${resultBase64.value}`
+  anchor.href = resultSrc.value
   anchor.download = `ecom-cutout-${Date.now()}.png`
   anchor.click()
+}
+
+function getCutoutResultSrc(item: CutoutHistoryItem) {
+  if (item.resultBase64) return `data:image/png;base64,${item.resultBase64}`
+  if (item.resultImageId) return dbImageFileUrl(item.resultImageId)
+  return null
 }
 
 // 初始化时恢复云端历史和上次未完成的草稿。
@@ -829,7 +841,7 @@ watch(sourceImage, (next) => {
     <section class="studio-panel cutout-panel cutout-result-panel">
       <div class="panel-heading">
         <h2>白底结果</h2>
-        <span class="panel-count">{{ resultBase64 ? "已生成" : "预览" }}</span>
+        <span class="panel-count">{{ resultSrc ? "已生成" : "预览" }}</span>
       </div>
       <div class="cutout-result-stage">
         <template v-if="resultSrc">
@@ -870,7 +882,7 @@ watch(sourceImage, (next) => {
       >
         <button type="button" class="cutout-history-main" @click="handleSelectHistory(index)">
           <div class="cutout-history-image">
-            <img v-if="item.resultBase64" :src="`data:image/png;base64,${item.resultBase64}`" alt="抠图历史结果">
+            <img v-if="getCutoutResultSrc(item)" :src="getCutoutResultSrc(item)!" alt="抠图历史结果">
             <span v-else>{{ item.status === "failed" ? "失败" : "处理中" }}</span>
           </div>
           <div>

@@ -147,9 +147,10 @@ export interface CreateImageTaskOptions {
   inputImages: string[];
 }
 
-// 图片生成任务状态。成功时 `base64` 就是生成后的图片内容。
+// 图片生成任务状态。成功时优先返回 `imageId`，前端通过图片文件接口加载。
 export interface ImageTaskStatus {
   status: "pending" | "running" | "succeeded" | "failed" | "canceled";
+  imageId?: string;
   base64?: string;
   model?: string;
   error?: string;
@@ -176,9 +177,10 @@ export interface CreateCutoutTaskOptions {
   maskImage: string;
 }
 
-// 抠图任务状态。成功时 `base64` 是白底结果图。
+// 抠图任务状态。成功时优先返回 `imageId`，前端通过图片文件接口加载白底结果图。
 export interface CutoutTaskStatus {
   status: "pending" | "running" | "succeeded" | "failed" | "canceled";
+  imageId?: string;
   base64?: string;
   model?: string;
   error?: string;

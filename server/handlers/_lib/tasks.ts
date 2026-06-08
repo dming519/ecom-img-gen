@@ -1,5 +1,8 @@
 import { requireSession } from "./auth";
-import type { HistoryD1Database } from "./historyStorage";
+import {
+  storeHistoryImage,
+  type HistoryStorageFunctionEnv,
+} from "./historyStorage";
 import {
   consumeImageCreditByUserKey,
   getUserKey,
@@ -19,10 +22,8 @@ export interface TaskKvNamespace extends UserKvNamespace {
 
 interface TaskRequestContext {
   request: Request;
-  env: {
+  env: HistoryStorageFunctionEnv & {
     TASKS_KV?: TaskKvNamespace;
-    AUTH_SECRET?: string;
-    HISTORY_DB?: HistoryD1Database;
   };
 }
 
@@ -45,6 +46,8 @@ interface TaskCancelOptions extends TaskRouteOptions {
 interface TaskRecord {
   status?: string;
   userKey?: string;
+  imageId?: string;
+  base64?: unknown;
   // billedAt 存在时说明这条成功任务已经扣过费，防止前端多次轮询重复扣费。
   billedAt?: number;
   createdAt?: number;
@@ -82,6 +85,37 @@ function parseTaskRecord(raw: string) {
 
 function isTerminalStatus(status: string | undefined) {
   return status === "succeeded" || status === "failed" || status === "canceled";
+}
+
+function stripTaskBase64(task: TaskRecord) {
+  const { base64: _base64, ...rest } = task;
+  return rest;
+}
+
+async function ensureTaskImageId(
+  context: TaskRequestContext,
+  kv: TaskKvNamespace,
+  key: string,
+  task: TaskRecord,
+) {
+  if (task.status !== "succeeded" || typeof task.base64 !== "string") {
+    return stripTaskBase64(task);
+  }
+  if (!task.userKey) {
+    return stripTaskBase64(task);
+  }
+
+  const imageId =
+    typeof task.imageId === "string" && task.imageId
+      ? task.imageId
+      : await storeHistoryImage(context.env, task.userKey, task.base64);
+  const nextTask = stripTaskBase64({
+    ...task,
+    imageId,
+    updatedAt: Date.now(),
+  });
+  await kv.put(key, JSON.stringify(nextTask), { expirationTtl: 3600 });
+  return nextTask;
 }
 
 // 超过指定时间还在 pending/running，就把任务视为失败，避免前端无限等待。
@@ -151,28 +185,43 @@ export async function handleTaskStatusRequest(
     return json({ error: "无权访问该任务" }, { status: 403 });
   }
 
+  let responseTask: TaskRecord;
+  try {
+    responseTask = await ensureTaskImageId(context, access.kv, key, normalized);
+  } catch (error) {
+    return json(
+      {
+        ...stripTaskBase64(normalized),
+        status: "failed",
+        error: `图片结果转存失败：${error instanceof Error ? error.message : String(error)}`,
+        updatedAt: Date.now(),
+      },
+      { status: 500 },
+    );
+  }
+
   // 图片/抠图任务只有成功后才扣费；文案任务不扣费，所以不传 billOnSuccess。
   if (
     options.billOnSuccess &&
-    normalized.status === "succeeded" &&
-    !normalized.billedAt &&
-    normalized.userKey
+    responseTask.status === "succeeded" &&
+    !responseTask.billedAt &&
+    responseTask.userKey
   ) {
     try {
-      const billed = await consumeImageCreditByUserKey(context.env, normalized.userKey);
+      const billed = await consumeImageCreditByUserKey(context.env, responseTask.userKey);
       const nextTask = {
-        ...normalized,
+        ...responseTask,
         billedAt: Date.now(),
         remainingCredits: billed.user.remainingCredits,
         usedCredits: billed.user.usedCredits,
         unlimitedCredits: billed.unlimited,
       };
-      await access.kv.put(key, JSON.stringify(nextTask), { expirationTtl: 3600 });
-      return json(nextTask);
+      await access.kv.put(key, JSON.stringify(stripTaskBase64(nextTask)), { expirationTtl: 3600 });
+      return json(stripTaskBase64(nextTask));
     } catch (error) {
       return json(
         {
-          ...normalized,
+          ...responseTask,
           status: "failed",
           error: error instanceof Error ? error.message : String(error),
           updatedAt: Date.now(),
@@ -182,7 +231,7 @@ export async function handleTaskStatusRequest(
     }
   }
 
-  return json(normalized);
+  return json(stripTaskBase64(responseTask));
 }
 
 // 通用取消接口：把 KV 状态标记为 canceled，让前端停止等待。

@@ -221,13 +221,17 @@ function createPromptItem(index: number, title: string, prompt: string): DetailP
   }
 }
 
+function hasPromptImage(item: DetailPromptItem) {
+  return !!(item.base64 || item.imageId)
+}
+
 // 页面刷新或中断后，把未完成的 queued/running 状态恢复成可继续操作的状态。
 function resetInterruptedPrompt(item: DetailPromptItem): DetailPromptItem {
   if (item.status !== "queued" && item.status !== "running") return item
   return {
     ...item,
-    status: item.base64 ? "succeeded" : "draft",
-    taskId: item.base64 ? item.taskId : undefined,
+    status: hasPromptImage(item) ? "succeeded" : "draft",
+    taskId: hasPromptImage(item) ? item.taskId : undefined,
     error: undefined,
     updatedAt: Date.now(),
   }
@@ -239,8 +243,8 @@ function resetActiveGenerationPrompts(items: DetailPromptItem[]): DetailPromptIt
     item.status === "queued" || item.status === "running"
       ? {
           ...item,
-          status: item.base64 ? "succeeded" : "draft",
-          taskId: item.base64 ? item.taskId : undefined,
+          status: hasPromptImage(item) ? "succeeded" : "draft",
+          taskId: hasPromptImage(item) ? item.taskId : undefined,
           error: undefined,
           updatedAt: Date.now(),
         }
@@ -469,7 +473,7 @@ async function handleGeneratePrompts() {
 function handlePromptChange(id: string, value: string) {
   prompts.value = prompts.value.map((item) =>
     item.id === id
-      ? { ...item, prompt: value, status: item.base64 ? item.status : "draft" }
+      ? { ...item, prompt: value, status: hasPromptImage(item) ? item.status : "draft" }
       : item,
   )
 }
@@ -597,13 +601,13 @@ async function handleGenerateImages() {
       }
       updateSessionCredits(result)
 
-      // 生成成功后先把 base64 放到前端状态；persistHistory 会再交给服务端转存。
+      // 成功结果优先使用服务端返回的 imageId；旧任务返回 base64 时仍兼容保存。
       working = working.map((item, itemIndex) =>
         itemIndex === index
           ? {
               ...item,
               status: "succeeded",
-              imageId: undefined,
+              imageId: result.imageId,
               base64: result.base64,
               model: result.model,
               updatedAt: Date.now(),
@@ -751,7 +755,7 @@ async function handleRegenerateActiveImage() {
         ? {
             ...item,
             status: "succeeded" as const,
-            imageId: undefined,
+            imageId: result.imageId,
             base64: result.base64,
             model: result.model,
             taskId: undefined,

@@ -212,7 +212,7 @@ export async function cancelImageTask(taskId: string): Promise<void> {
   }
 }
 
-// 查询图片生成结果。成功时返回 base64，前端再把它转成 data URL 展示。
+// 查询图片生成结果。成功时返回 imageId，前端通过图片文件接口展示。
 export async function pollImageTask(
   taskId: string,
   timeoutMs = 8 * 60 * 1000,
@@ -304,7 +304,7 @@ export async function cancelCutoutTask(taskId: string): Promise<void> {
   }
 }
 
-// 查询抠图任务结果。成功时返回 base64 格式的白底图片。
+// 查询抠图任务结果。成功时返回 imageId，前端通过图片文件接口展示。
 export async function pollCutoutTask(
   taskId: string,
   timeoutMs = 8 * 60 * 1000,

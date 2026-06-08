@@ -2,14 +2,12 @@ import {
   handleTaskStatusRequest,
   type TaskKvNamespace,
 } from "../../_lib/tasks";
-import type { HistoryD1Database } from "../../_lib/historyStorage";
+import type { HistoryStorageFunctionEnv } from "../../_lib/historyStorage";
 
 interface RequestContext {
   request: Request;
-  env: {
+  env: HistoryStorageFunctionEnv & {
     TASKS_KV?: TaskKvNamespace;
-    AUTH_SECRET?: string;
-    HISTORY_DB?: HistoryD1Database;
   };
 }
 

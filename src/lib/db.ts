@@ -175,7 +175,7 @@ export async function dbAddCutout(item: CutoutHistoryItem) {
   return saved.id;
 }
 
-// 更新抠图历史，例如任务完成后把结果 base64 写回。
+// 更新抠图历史，例如任务完成后把结果 imageId 或兼容旧任务的 base64 写回。
 export async function dbPutCutout(item: CutoutHistoryItem) {
   const payload = await requestJson<{ item: CutoutHistoryItem }>("/api/history/cutout", {
     method: "PUT",
@@ -235,7 +235,7 @@ export async function dbPutProductImage(dataUrl: string): Promise<string> {
   return payload.id;
 }
 
-// 根据多个 imageId 批量取回 data URL，主要用于恢复草稿里的参考图。
+// 根据多个 imageId 批量取回可直接放进 <img> 的图片文件 URL。
 export async function dbGetProductImages(ids: string[]): Promise<string[]> {
   if (!ids.length) return [];
   const payload = await requestJson<{ images: Array<string | null> }>(

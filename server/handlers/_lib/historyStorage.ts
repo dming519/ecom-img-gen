@@ -170,15 +170,6 @@ function mimeToExtension(mimeType: string) {
   return "png";
 }
 
-function bytesToBase64(bytes: Uint8Array) {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-  }
-  return btoa(binary);
-}
-
 function base64ToBytes(value: string) {
   const binary = atob(value.replace(/\s/g, ""));
   const bytes = new Uint8Array(binary.length);
@@ -244,25 +235,6 @@ async function readImageRow(db: HistoryD1Database, userKey: string, id: string) 
     .first<ImageRow>();
 }
 
-async function readStoredImage(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  id: string,
-) {
-  const row = await readImageRow(env.HISTORY_DB, userKey, id);
-  if (!row) return null;
-  const object = await env.HISTORY_BUCKET.get(row.r2_key);
-  if (!object) return null;
-  const bytes = new Uint8Array(await object.arrayBuffer());
-  const mimeType =
-    row.mime_type || object.httpMetadata?.contentType || DEFAULT_IMAGE_MIME;
-  const base64 = bytesToBase64(bytes);
-  return {
-    base64,
-    dataUrl: `data:${mimeType};base64,${base64}`,
-  };
-}
-
 export async function readStoredImageFile(
   env: Required<HistoryStorageEnv>,
   userKey: string,
@@ -277,6 +249,17 @@ export async function readStoredImageFile(
     object,
     mimeType: row.mime_type || object.httpMetadata?.contentType || DEFAULT_IMAGE_MIME,
   };
+}
+
+export async function storeHistoryImage(
+  env: HistoryStorageEnv,
+  userKey: string,
+  value: string,
+  defaultMime = DEFAULT_IMAGE_MIME,
+) {
+  const storage = requireHistoryBindings(env);
+  await ensureHistorySchema(storage.HISTORY_DB);
+  return writeImage(storage, userKey, value, defaultMime);
 }
 
 async function serializeDetailItem(
@@ -327,6 +310,14 @@ async function serializeCutoutItem(
   userKey: string,
   item: CutoutHistoryItem,
 ) {
+  const sourceImageId =
+    item.sourceImage && !item.sourceImageId
+      ? await writeImage(env, userKey, item.sourceImage, DEFAULT_IMAGE_MIME)
+      : item.sourceImageId;
+  const maskImageId =
+    item.maskImage && !item.maskImageId
+      ? await writeImage(env, userKey, item.maskImage, DEFAULT_IMAGE_MIME)
+      : item.maskImageId;
   const resultImageId =
     item.resultBase64 && !item.resultImageId
       ? await writeImage(env, userKey, item.resultBase64, DEFAULT_IMAGE_MIME)
@@ -339,18 +330,10 @@ async function serializeCutoutItem(
   } = item;
   return {
     ...rest,
+    sourceImageId,
+    maskImageId,
     resultImageId,
   };
-}
-
-async function hydrateCutoutItem(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  item: CutoutHistoryItem,
-) {
-  if (!item.resultImageId) return item;
-  const image = await readStoredImage(env, userKey, item.resultImageId);
-  return image ? { ...item, resultBase64: image.base64 } : item;
 }
 
 async function serializeCutoutDraft(
@@ -370,18 +353,8 @@ async function serializeCutoutDraft(
   return {
     ...rest,
     id: "active" as const,
-    resultImageId: resultBase64 ? resultImageId : undefined,
+    resultImageId: resultImageId || undefined,
   };
-}
-
-async function hydrateCutoutDraft(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  draft: CutoutDraft,
-) {
-  if (!draft.resultImageId) return draft;
-  const image = await readStoredImage(env, userKey, draft.resultImageId);
-  return image ? { ...draft, resultBase64: image.base64 } : draft;
 }
 
 async function insertHistoryRecord(
@@ -434,6 +407,53 @@ async function updateHistoryRecord(
     .run();
 }
 
+function hasInlineDetailImages(item: HistoryItem) {
+  return (
+    item.product.productImages.some((image) => image.startsWith("data:image/")) ||
+    item.prompts.some((prompt) => !!prompt.base64)
+  );
+}
+
+function hasInlineCutoutImages(item: CutoutHistoryItem) {
+  return !!(
+    item.sourceImage ||
+    item.maskImage ||
+    item.resultBase64
+  );
+}
+
+function hasInlineCutoutDraftImages(draft: CutoutDraft) {
+  return typeof draft.resultBase64 === "string" && !!draft.resultBase64;
+}
+
+async function normalizeStoredDetailItem(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  row: HistoryRow,
+) {
+  const item = parseJson<HistoryItem>(row.payload);
+  if (!item) return null;
+  if (!hasInlineDetailImages(item)) return { ...item, id: row.id };
+
+  const payload = await serializeDetailItem(env, userKey, item);
+  await updateHistoryRecord(env.HISTORY_DB, userKey, "detail", row.id, payload, Date.now());
+  return { ...payload, id: row.id };
+}
+
+async function normalizeStoredCutoutItem(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  row: HistoryRow,
+) {
+  const item = parseJson<CutoutHistoryItem>(row.payload);
+  if (!item) return null;
+  if (!hasInlineCutoutImages(item)) return { ...item, id: row.id };
+
+  const payload = await serializeCutoutItem(env, userKey, item);
+  await updateHistoryRecord(env.HISTORY_DB, userKey, "cutout", row.id, payload, Date.now());
+  return { ...payload, id: row.id };
+}
+
 async function listHistoryRows(
   db: HistoryD1Database,
   userKey: string,
@@ -476,8 +496,8 @@ export async function listDetailHistory(
   const rows = await listHistoryRows(env.HISTORY_DB, userKey, "detail");
   const items: HistoryItem[] = [];
   for (const row of rows) {
-    const item = parseJson<HistoryItem>(row.payload);
-    if (item) items.push({ ...item, id: row.id });
+    const item = await normalizeStoredDetailItem(env, userKey, row);
+    if (item) items.push(item);
   }
   return items;
 }
@@ -519,7 +539,7 @@ export async function saveCutoutHistory(
   } else {
     await updateHistoryRecord(env.HISTORY_DB, userKey, "cutout", id, payload, now);
   }
-  return hydrateCutoutItem(env, userKey, { ...payload, id });
+  return { ...payload, id };
 }
 
 export async function listCutoutHistory(
@@ -530,10 +550,10 @@ export async function listCutoutHistory(
   const rows = await listHistoryRows(env.HISTORY_DB, userKey, "cutout");
   const items: CutoutHistoryItem[] = [];
   for (const row of rows) {
-    const item = parseJson<CutoutHistoryItem>(row.payload);
-    if (item) items.push({ ...item, id: row.id });
+    const item = await normalizeStoredCutoutItem(env, userKey, row);
+    if (item) items.push(item);
   }
-  return Promise.all(items.map((item) => hydrateCutoutItem(env, userKey, item)));
+  return items;
 }
 
 export async function deleteCutoutHistory(
@@ -570,7 +590,16 @@ export async function getCutoutDraft(
     .bind(userKey)
     .first<{ payload: string }>();
   const draft = parseJson<CutoutDraft>(row?.payload);
-  return draft ? hydrateCutoutDraft(env, userKey, draft) : null;
+  if (draft && hasInlineCutoutDraftImages(draft)) {
+    const payload = await serializeCutoutDraft(env, userKey, draft);
+    await env.HISTORY_DB.prepare(
+      `UPDATE cutout_drafts SET payload = ?, updated_at = ? WHERE user_key = ?`,
+    )
+      .bind(JSON.stringify(payload), Date.now(), userKey)
+      .run();
+    return payload;
+  }
+  return draft ?? null;
 }
 
 export async function saveCutoutDraft(
@@ -589,7 +618,7 @@ export async function saveCutoutDraft(
   )
     .bind(userKey, JSON.stringify(payload), now)
     .run();
-  return hydrateCutoutDraft(env, userKey, payload);
+  return payload;
 }
 
 export async function deleteCutoutDraft(
