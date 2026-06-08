@@ -11,6 +11,7 @@ interface GenerateRequestBody {
   inputImages?: string[];
 }
 
+// 图片生成接口只创建任务，不直接等待模型返回，避免请求长时间占用 Pages。
 interface RequestContext {
   request: Request;
   env: {
@@ -29,6 +30,7 @@ interface RequestContext {
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
+// 统一 JSON 响应格式。
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
     ...init,
@@ -43,6 +45,7 @@ const ASPECT_RATIOS: AspectRatio[] = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16
 const IMAGE_QUALITIES: ImageQuality[] = ["1K", "2K", "4K"];
 const IMAGE_SIZES: ImageSize[] = ["1024x1024", "1024x1536", "1536x1024", "auto"];
 
+// 所有 normalizeXxx 函数都在做同一件事：把不可信的请求参数转成安全默认值。
 function normalizeAspectRatio(value: unknown): AspectRatio {
   return typeof value === "string" && ASPECT_RATIOS.includes(value as AspectRatio)
     ? (value as AspectRatio)
@@ -61,6 +64,7 @@ function normalizeSize(value: unknown): ImageSize | null {
     : null;
 }
 
+// 用户没有显式传 size 时，根据比例推导模型需要的尺寸。
 function resolveImageSize(aspectRatio: AspectRatio): ImageSize {
   if (aspectRatio === "auto") return "auto";
   if (aspectRatio === "1:1") return "1024x1024";
@@ -68,6 +72,7 @@ function resolveImageSize(aspectRatio: AspectRatio): ImageSize {
   return "1024x1536";
 }
 
+// POST /api/generate：创建单张详情图生成任务。
 export async function handlePost(context: RequestContext) {
   const session = await requireSession(context.request, context.env);
   if (!session) {
@@ -101,6 +106,7 @@ export async function handlePost(context: RequestContext) {
   const aspectRatio = normalizeAspectRatio(body.aspectRatio);
   const quality = normalizeQuality(body.quality);
   const size = normalizeSize(body.size) ?? resolveImageSize(aspectRatio);
+  // 纯文案生成被禁用，强制要求参考图，保证商品外观一致。
   if (!prompt) {
     return json({ error: "请输入详情图文案" }, { status: 400 });
   }
@@ -113,6 +119,7 @@ export async function handlePost(context: RequestContext) {
 
   let creditResult: Awaited<ReturnType<typeof requireImageCredit>>;
   try {
+    // 这里只检查是否有额度；真正扣费在任务成功后由 status 接口完成。
     creditResult = await requireImageCredit(context.env, session.user);
   } catch (error) {
     return json(
@@ -124,6 +131,7 @@ export async function handlePost(context: RequestContext) {
   const taskId = crypto.randomUUID();
   const now = Date.now();
   const userKey = getUserKey(session.user);
+  // KV 里先放 pending 状态，前端随后通过 `/api/generate/status` 轮询。
   await kv.put(
     `task:${taskId}`,
     JSON.stringify({
@@ -136,6 +144,7 @@ export async function handlePost(context: RequestContext) {
   );
 
   try {
+    // Worker 负责调用图像模型，Pages API 负责鉴权、参数校验和任务派发。
     const dispatch = await fetch(`${workerUrl.replace(/\/+$/, "")}/task`, {
       method: "POST",
       headers: {

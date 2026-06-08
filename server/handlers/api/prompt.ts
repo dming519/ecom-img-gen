@@ -10,6 +10,7 @@ interface PromptRequestBody {
   productImages?: string[];
 }
 
+// Nuxt/Nitro 会把运行时环境变量、KV、D1 等都放进 context.env。
 interface RequestContext {
   request: Request;
   env: {
@@ -28,9 +29,11 @@ interface RequestContext {
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
+// 文案接口会携带参考图，限制单张和总大小，避免 Worker 请求体过大。
 const MAX_PROMPT_IMAGE_CHARS = 1_500_000;
 const MAX_PROMPT_IMAGE_TOTAL_CHARS = 6_000_000;
 
+// 小项目里直接用这个 helper 返回 JSON，避免每个分支重复写 headers。
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
     ...init,
@@ -41,11 +44,13 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
+// 用户可以选 1-8 张详情图；非法值统一回落到默认 5 张。
 function normalizeCount(value: number | undefined) {
   if (!Number.isFinite(value)) return 5;
   return Math.min(8, Math.max(1, Math.round(value ?? 5)));
 }
 
+// 只接受 data URL 或 http(s) 图片，并过滤超大图片。
 function normalizeProductImages(images: string[] | undefined) {
   const normalized = (images ?? [])
     .filter((image) => image.startsWith("data:image/") || /^https?:\/\//i.test(image))
@@ -56,6 +61,7 @@ function normalizeProductImages(images: string[] | undefined) {
   return normalized;
 }
 
+// 任务状态先写进 KV，前端之后通过 `/api/prompt/status?taskId=...` 查询。
 async function writePromptTask(
   kv: UserKvNamespace,
   taskId: string,
@@ -66,7 +72,9 @@ async function writePromptTask(
   });
 }
 
+// POST /api/prompt：创建“详情图文案生成”任务。
 export async function handlePost(context: RequestContext) {
+  // 所有生成类接口都要求登录，避免匿名用户消耗模型额度。
   const session = await requireSession(context.request, context.env);
   if (!session) {
     return json({ error: "请先登录后再生成详情图文案" }, { status: 401 });
@@ -84,6 +92,7 @@ export async function handlePost(context: RequestContext) {
   const imageCount = normalizeCount(body.imageCount);
   const productImages = normalizeProductImages(body.productImages);
 
+  // 这些校验直接返回 400，属于用户输入问题，不需要派发到 Worker。
   if (!name) {
     return json({ error: "请输入产品名称" }, { status: 400 });
   }
@@ -107,6 +116,7 @@ export async function handlePost(context: RequestContext) {
   const model =
     context.env.PROMPT_MODEL?.trim() || context.env.OPENAI_MODEL?.trim();
 
+  // 下面这些配置缺失属于部署问题，返回 500 方便排查 Cloudflare 环境变量。
   if (!kv) {
     return json({ error: "服务端未配置 TASKS_KV" }, { status: 500 });
   }
@@ -126,6 +136,7 @@ export async function handlePost(context: RequestContext) {
     );
   }
 
+  // userText 是本次商品资料；DETAIL_PROMPT_TEMPLATE 是稳定的系统模板。
   const userText = [
     "请严格根据系统模板和上传产品图生成商品详情图文案。",
     "",
@@ -149,6 +160,7 @@ export async function handlePost(context: RequestContext) {
   });
 
   try {
+    // Worker 负责真正调用模型；Pages API 只做鉴权、校验和任务派发。
     const response = await fetch(`${workerUrl.replace(/\/+$/, "")}/prompt-task`, {
       method: "POST",
       headers: {

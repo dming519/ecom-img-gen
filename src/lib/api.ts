@@ -35,9 +35,11 @@ interface CreatePromptTaskPayload extends ErrorPayload {
   status?: string;
 }
 
+// 浏览器偶发网络断开时重试一次，避免长任务刚开始就因为瞬时网络失败中断。
 const RETRYABLE_FETCH_ERRORS = ["Failed to fetch", "NetworkError"];
 const MAX_PROMPT_PAYLOAD_CHARS = 7_000_000;
 
+// 服务端错误有时是 JSON，有时是纯文本；这里统一提取给用户看的错误信息。
 function extractError(text: string) {
   let detail = text.slice(0, 300);
   try {
@@ -53,6 +55,7 @@ function extractError(text: string) {
   return detail;
 }
 
+// 所有任务接口都经过这里，保证网络抖动时有一致的重试行为。
 async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit) {
   let response: Response;
   try {
@@ -72,6 +75,7 @@ async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit) {
   return response;
 }
 
+// 详情图流程第一步：根据商品资料和参考图生成多条“可用于生图”的 prompt。
 export async function generateDetailPrompts(
   options: GeneratePromptOptions,
 ): Promise<GeneratePromptResult> {
@@ -112,6 +116,7 @@ export async function generateDetailPrompts(
   };
 }
 
+// 文案生成是异步任务：先创建 taskId，再每 2 秒查一次状态直到成功或失败。
 async function pollPromptTask(
   taskId: string,
   timeoutMs = 6 * 60 * 1000,
@@ -158,6 +163,7 @@ async function pollPromptTask(
   );
 }
 
+// 详情图流程第二步：提交单条 prompt 和参考图，创建图片生成任务。
 export async function createImageTask(
   options: CreateImageTaskOptions,
   signal?: AbortSignal,
@@ -193,6 +199,7 @@ export async function createImageTask(
   };
 }
 
+// 用户点击“取消”时只通知服务端把任务标记为取消；真正的模型请求可能已经在路上。
 export async function cancelImageTask(taskId: string): Promise<void> {
   const response = await fetchWithRetry(`${DEFAULT_GENERATE_PATH}/cancel`, {
     method: "POST",
@@ -205,6 +212,7 @@ export async function cancelImageTask(taskId: string): Promise<void> {
   }
 }
 
+// 查询图片生成结果。成功时返回 base64，前端再把它转成 data URL 展示。
 export async function pollImageTask(
   taskId: string,
   timeoutMs = 8 * 60 * 1000,
@@ -247,6 +255,7 @@ export async function pollImageTask(
   throw new Error("任务超时，请重试");
 }
 
+// 抠图流程：提交原图和 mask，创建白底图生成任务。
 export async function createCutoutTask(
   options: CreateCutoutTaskOptions,
   signal?: AbortSignal,
@@ -282,6 +291,7 @@ export async function createCutoutTask(
   };
 }
 
+// 取消抠图任务，逻辑和详情图取消一致。
 export async function cancelCutoutTask(taskId: string): Promise<void> {
   const response = await fetchWithRetry(`${DEFAULT_CUTOUT_PATH}/cancel`, {
     method: "POST",
@@ -294,6 +304,7 @@ export async function cancelCutoutTask(taskId: string): Promise<void> {
   }
 }
 
+// 查询抠图任务结果。成功时返回 base64 格式的白底图片。
 export async function pollCutoutTask(
   taskId: string,
   timeoutMs = 8 * 60 * 1000,
@@ -336,6 +347,7 @@ export async function pollCutoutTask(
   throw new Error("抠图任务超时，请重试");
 }
 
+// 以下是管理后台接口：只有 admin/super_admin 能正常调用。
 export async function fetchAdminUsers(): Promise<{ users: AdminUserRow[] }> {
   const response = await fetchWithRetry("/api/admin/users", {
     method: "GET",

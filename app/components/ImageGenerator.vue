@@ -72,6 +72,7 @@ interface DraftState {
   productImageIds?: string[]
 }
 
+// 自定义错误类型：用来区分“用户主动取消”和“真正生成失败”。
 class ImageGenerationCancelledError extends Error {
   constructor() {
     super("已中断生成详情图")
@@ -79,6 +80,7 @@ class ImageGenerationCancelledError extends Error {
   }
 }
 
+// 页面核心状态。`shallowRef` 适合字符串、数字、布尔值这类只做整体替换的数据。
 const studioMode = shallowRef<StudioMode>(props.initialMode)
 const productName = shallowRef("")
 const sellingPoints = shallowRef("")
@@ -107,6 +109,7 @@ const error = shallowRef<string | null>(null)
 const lightboxSrc = shallowRef<string | null>(null)
 const avatarFailed = shallowRef(false)
 
+// DOM/浏览器能力引用：这些值不是普通业务数据，只在特定操作时使用。
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const authPopoverRef = ref<HTMLDivElement | null>(null)
 const wakeLockRef = shallowRef<WakeLockSentinelLike | null>(null)
@@ -114,6 +117,7 @@ const imageAbortRef = shallowRef<AbortController | null>(null)
 const imageCancelRequestedRef = shallowRef(false)
 const currentImageTaskIdRef = shallowRef<string | null>(null)
 
+// computed 是派生状态：不直接存数据，而是根据上面的源状态实时计算。
 const currentProduct = computed<ProductInput>(() => ({
   name: productName.value.trim(),
   sellingPoints: sellingPoints.value.trim(),
@@ -167,6 +171,7 @@ const activePromptIndex = computed(() =>
 )
 const activePrompt = computed(() => prompts.value[activePromptIndex.value] ?? null)
 
+// 上传的原图可能很大；先压缩再转成 data URL，减少接口请求体大小。
 function fileToCompressedDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -198,6 +203,7 @@ function fileToCompressedDataURL(file: File): Promise<string> {
   })
 }
 
+// 服务端只返回 title/prompt，这里补上前端需要跟踪的 id、index 和状态。
 function createPromptItem(index: number, title: string, prompt: string): DetailPromptItem {
   return {
     id: crypto.randomUUID(),
@@ -208,6 +214,7 @@ function createPromptItem(index: number, title: string, prompt: string): DetailP
   }
 }
 
+// 页面刷新或中断后，把未完成的 queued/running 状态恢复成可继续操作的状态。
 function resetInterruptedPrompt(item: DetailPromptItem): DetailPromptItem {
   if (item.status !== "queued" && item.status !== "running") return item
   return {
@@ -219,6 +226,7 @@ function resetInterruptedPrompt(item: DetailPromptItem): DetailPromptItem {
   }
 }
 
+// 批量生成被取消时，需要把所有未完成项一起恢复。
 function resetActiveGenerationPrompts(items: DetailPromptItem[]): DetailPromptItem[] {
   return items.map((item) =>
     item.status === "queued" || item.status === "running"
@@ -233,6 +241,7 @@ function resetActiveGenerationPrompts(items: DetailPromptItem[]): DetailPromptIt
   )
 }
 
+// 保存历史前复制商品输入，避免用户继续编辑表单时影响已经创建的历史记录。
 function cloneProduct(input: ProductInput): ProductInput {
   return {
     name: input.name,
@@ -255,6 +264,7 @@ function blobToDataUrl(blob: Blob) {
   })
 }
 
+// 历史里的图片可能是 data URL，也可能是服务端图片 URL；提交给模型前统一转 data URL。
 async function imageSrcToDataUrl(src: string) {
   const value = src.trim()
   if (value.startsWith("data:image/")) return value
@@ -265,6 +275,7 @@ async function imageSrcToDataUrl(src: string) {
   return blobToDataUrl(blob)
 }
 
+// 生成文案和图片前统一校验参考图数量/大小，避免服务端收到超大 JSON。
 async function getPromptReadyImages(images: string[]) {
   const dataUrls = await Promise.all(images.slice(0, 8).map(imageSrcToDataUrl))
   const next = dataUrls
@@ -286,6 +297,7 @@ function getPromptImageSrc(item: DetailPromptItem | undefined) {
   return null
 }
 
+// 支持 `/image/`、`/cutout/` 以及旧版 hash/query 写法，统一判断当前模块。
 function readStudioModeFromUrl(): StudioMode {
   if (typeof window === "undefined") return props.initialMode
   const pathname = window.location.pathname.replace(/\/+$/, "")
@@ -323,6 +335,7 @@ async function handleHomeLinkClick(event: MouseEvent) {
   window.location.assign("/")
 }
 
+// 写入详情图历史。新增时拿服务端返回的 id，更新时保留当前记录。
 async function persistHistory(item: HistoryItem) {
   try {
     if (item.id == null) {
@@ -339,6 +352,7 @@ async function persistHistory(item: HistoryItem) {
   }
 }
 
+// 普通用户生成成功会扣次数；super_admin 返回 unlimitedCredits 时不改本地次数。
 function updateSessionCredits(result: {
   remainingCredits?: number
   usedCredits?: number
@@ -356,6 +370,7 @@ function updateSessionCredits(result: {
   }
 }
 
+// 处理参考图上传：过滤非图片/超大文件，并把可用图片压缩进 productImages。
 async function handleSelectFiles(files: FileList | null) {
   if (!files?.length) return
   error.value = null
@@ -379,6 +394,7 @@ async function handleSelectFiles(files: FileList | null) {
   if (fileInputRef.value) fileInputRef.value.value = ""
 }
 
+// 重置当前编辑中的商品资料和文案，不清空云端历史。
 function handleResetProductInput() {
   if (promptBusy.value || imageBusy.value) return
   error.value = null
@@ -395,6 +411,7 @@ function handleResetProductInput() {
   if (fileInputRef.value) fileInputRef.value.value = ""
 }
 
+// 前端先做基础校验，能把明显问题拦在接口请求之前。
 function validateProduct() {
   if (!session.value?.authenticated) {
     error.value = "请先登录后再使用 EcomImgGen。"
@@ -415,6 +432,7 @@ function validateProduct() {
   return true
 }
 
+// 第一步：根据商品资料生成详情图文案，不直接生成图片。
 async function handleGeneratePrompts() {
   error.value = null
   if (!validateProduct()) return
@@ -447,6 +465,7 @@ function handleTitleChange(id: string, value: string) {
   prompts.value = prompts.value.map((item) => (item.id === id ? { ...item, title: value } : item))
 }
 
+// 长时间生成时尽量保持屏幕唤醒；浏览器不支持也不影响核心功能。
 async function requestWakeLock() {
   try {
     const maybeWakeLock = (
@@ -471,6 +490,7 @@ async function cleanupImageGeneration() {
   imageBusy.value = false
 }
 
+// 第二步：按文案顺序逐张创建图片任务、轮询结果、保存历史。
 async function handleGenerateImages() {
   error.value = null
   if (!validateProduct()) return
@@ -509,6 +529,7 @@ async function handleGenerateImages() {
     history.value = [...history.value, historyItem]
     activeHistoryIdx.value = history.value.length - 1
 
+    // 每张图独立创建任务，方便失败时知道是哪一张出问题，也支持逐张保存历史。
     let working = historyItem.prompts
     for (let index = 0; index < working.length; index += 1) {
       if (imageCancelRequestedRef.value) throw new ImageGenerationCancelledError()
@@ -535,6 +556,7 @@ async function handleGenerateImages() {
       currentImageTaskIdRef.value = task.taskId
       updateSessionCredits(task)
 
+      // 创建任务成功后进入 running；真正图片结果要等 pollImageTask 返回。
       working = working.map((item, itemIndex) =>
         itemIndex === index
           ? { ...item, status: "running", taskId: task.taskId, updatedAt: Date.now() }
@@ -562,6 +584,7 @@ async function handleGenerateImages() {
       }
       updateSessionCredits(result)
 
+      // 生成成功后先把 base64 放到前端状态；persistHistory 会再交给服务端转存。
       working = working.map((item, itemIndex) =>
         itemIndex === index
           ? {
@@ -597,6 +620,7 @@ async function handleGenerateImages() {
   }
 }
 
+// 只重新生成当前选中的一张详情图，其余已完成图片保持不变。
 async function handleRegenerateActiveImage() {
   error.value = null
   if (!validateProduct()) return
@@ -745,6 +769,7 @@ async function handleRegenerateActiveImage() {
   }
 }
 
+// 中断当前正在轮询的图片任务，并通知服务端把任务标记为取消。
 function handleCancelImageGeneration() {
   if (!imageBusy.value) return
   imageCancelRequestedRef.value = true
@@ -753,6 +778,7 @@ function handleCancelImageGeneration() {
   imageAbortRef.value?.abort()
 }
 
+// 从历史记录恢复到编辑区，用户可以继续改文案或重新生成某张图。
 function handleSelectHistory(idx: number) {
   const item = history.value[idx]
   if (!item) return
@@ -779,6 +805,7 @@ function handleSelectHistory(idx: number) {
   activePromptIdx.value = 0
 }
 
+// 删除单条历史时，同步维护当前选中的历史下标。
 function handleDeleteHistory(idx: number) {
   const item = history.value[idx]
   if (!item) return
@@ -802,6 +829,7 @@ async function handleClearHistory() {
   activeHistoryIdx.value = -1
 }
 
+// 访问码登录，用于没有 OAuth 的场景。
 async function handleAccessLogin() {
   const code = accessCode.value.trim()
   if (!code) {
@@ -833,6 +861,7 @@ async function handleAccessLogin() {
   }
 }
 
+// 兑换码只增加当前账号的可用次数，不改变登录身份。
 async function handleRedeemCode() {
   const code = redeemCode.value.trim()
   if (!code) {
@@ -856,6 +885,7 @@ async function handleRedeemCode() {
   }
 }
 
+// 下载时直接使用当前图片 src，可能是 data URL，也可能是服务端文件 URL。
 function handleDownload(index: number) {
   const imageSrc = getPromptImageSrc(prompts.value[index])
   if (!imageSrc) return
@@ -886,8 +916,9 @@ watch(
   },
 )
 
+// 登录菜单打开时监听外部点击和 Escape；关闭时及时移除监听，避免泄漏。
 watch(authPopoverOpen, (open) => {
-    if (typeof window === "undefined") return
+  if (typeof window === "undefined") return
   document.removeEventListener("mousedown", handlePointerDownOutside)
   document.removeEventListener("keydown", handleAuthEscape)
   if (open) {
@@ -896,6 +927,7 @@ watch(authPopoverOpen, (open) => {
   }
 })
 
+// 自动保存草稿到 localStorage。这里 deep: true 是为了监听 prompts 数组内部变化。
 watch(
   [draftLoaded, productName, sellingPoints, imageCount, prompts, aspectRatio, quality, productImageIds],
   () => {
@@ -918,6 +950,7 @@ watch(
   { deep: true },
 )
 
+// 页面初始化：恢复草稿、加载历史、读取登录态。
 onMounted(() => {
   studioMode.value = readStudioModeFromUrl()
   window.addEventListener("popstate", handleLocationChange)
@@ -984,6 +1017,7 @@ onMounted(() => {
   })()
 })
 
+// 组件卸载时清理全局监听，防止切换页面后事件重复触发。
 onBeforeUnmount(() => {
   window.removeEventListener("popstate", handleLocationChange)
   window.removeEventListener("hashchange", handleLocationChange)

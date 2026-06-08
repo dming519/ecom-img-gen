@@ -7,6 +7,7 @@ interface CutoutRequestBody {
   maskImage?: string;
 }
 
+// 抠图接口同样采用“创建任务 + 前端轮询”的异步模式。
 interface RequestContext {
   request: Request;
   env: {
@@ -24,6 +25,7 @@ interface RequestContext {
   };
 }
 
+// 统一 JSON 响应格式。
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
     ...init,
@@ -34,10 +36,12 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
+// 抠图只接受浏览器上传后的 data URL，避免服务端主动抓取不可信远程图片。
 function isDataImage(value: unknown) {
   return typeof value === "string" && value.startsWith("data:image/");
 }
 
+// POST /api/cutout：创建白底抠图任务。
 export async function handlePost(context: RequestContext) {
   const session = await requireSession(context.request, context.env);
   if (!session) {
@@ -63,6 +67,7 @@ export async function handlePost(context: RequestContext) {
   if (!workerToken) {
     return json({ error: "服务端未配置 IMAGE_WORKER_TOKEN" }, { status: 500 });
   }
+  // sourceImage 是原图，maskImage 是黑白选择区，二者缺一不可。
   if (!isDataImage(body.sourceImage)) {
     return json({ error: "请上传需要抠图的产品图片" }, { status: 400 });
   }
@@ -72,6 +77,7 @@ export async function handlePost(context: RequestContext) {
 
   let creditResult: Awaited<ReturnType<typeof requireImageCredit>>;
   try {
+    // 这里只检查额度，任务成功后由 status 接口扣费。
     creditResult = await requireImageCredit(context.env, session.user);
   } catch (error) {
     return json(
@@ -83,6 +89,7 @@ export async function handlePost(context: RequestContext) {
   const taskId = crypto.randomUUID();
   const now = Date.now();
   const userKey = getUserKey(session.user);
+  // 写入 pending 状态，让前端立刻拿到 taskId 并开始轮询。
   await kv.put(
     `cutout-task:${taskId}`,
     JSON.stringify({
@@ -95,6 +102,7 @@ export async function handlePost(context: RequestContext) {
   );
 
   try {
+    // 真正的抠图模型调用交给 Worker；Pages API 不直接等待模型结果。
     const dispatch = await fetch(`${workerUrl.replace(/\/+$/, "")}/cutout-task`, {
       method: "POST",
       headers: {

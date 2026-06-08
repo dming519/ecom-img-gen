@@ -1,3 +1,5 @@
+// 这里集中放前端和服务端都会用到的 TypeScript 类型。
+// TypeScript 小提示：`type A = "x" | "y"` 表示 A 只能是这几个字符串之一。
 export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 export type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 export type ImageQuality = "1K" | "2K" | "4K";
@@ -5,6 +7,7 @@ export type ImageQuality = "1K" | "2K" | "4K";
 type AuthProvider = "github" | "google" | "access";
 export type UserRole = "super_admin" | "admin" | "user";
 
+// 当前登录用户。带 `?` 的字段表示可选字段，接口可能返回也可能不返回。
 export interface AuthUser {
   provider: AuthProvider;
   id: string;
@@ -18,11 +21,13 @@ export interface AuthUser {
   grantedCredits?: number;
 }
 
+// 登录态接口 `/api/auth/session` 的返回结构。
 export interface AuthSession {
   authenticated: boolean;
   user: AuthUser | null;
 }
 
+// 管理后台用户列表的一行数据。
 export interface AdminUserRow {
   userKey: string;
   provider: AuthProvider;
@@ -39,6 +44,7 @@ export interface AdminUserRow {
   lastLoginAt: number;
 }
 
+// 访问码：用于登录系统。
 export interface AccessCodeRow {
   id: string;
   label: string;
@@ -50,6 +56,7 @@ export interface AccessCodeRow {
   useCount: number;
 }
 
+// 兑换码：登录后给用户增加图片生成次数。
 export interface RedeemCodeRow {
   id: string;
   label: string;
@@ -63,6 +70,7 @@ export interface RedeemCodeRow {
   lastRedeemedAt?: number;
 }
 
+// 详情图生成前，用户在左侧表单里填写的商品资料。
 export interface ProductInput {
   name: string;
   sellingPoints: string;
@@ -71,6 +79,7 @@ export interface ProductInput {
   productImageIds?: string[];
 }
 
+// 单张详情图在前端生命周期里的状态。
 type DetailImageStatus =
   | "draft"
   | "queued"
@@ -78,6 +87,7 @@ type DetailImageStatus =
   | "succeeded"
   | "failed";
 
+// 一条详情图文案，以及它对应的生成状态和结果图。
 export interface DetailPromptItem {
   id: string;
   index: number;
@@ -93,6 +103,7 @@ export interface DetailPromptItem {
   updatedAt?: number;
 }
 
+// 一组详情图历史记录：商品资料 + 多张文案/图片 + 生成参数。
 export interface HistoryItem {
   id?: number;
   product: ProductInput;
@@ -105,8 +116,10 @@ export interface HistoryItem {
   };
 }
 
+// 生成详情图文案时，前端提交给 `/api/prompt` 的参数。
 export type GeneratePromptOptions = ProductInput;
 
+// `/api/prompt/status` 成功后返回的文案列表。
 export interface GeneratePromptResult {
   prompts: Array<{
     title: string;
@@ -115,6 +128,7 @@ export interface GeneratePromptResult {
   model: string;
 }
 
+// 文案任务状态。任务是异步的，所以会经历 pending/running/succeeded/failed。
 export interface PromptTaskStatus {
   status: "pending" | "running" | "succeeded" | "failed";
   prompts?: GeneratePromptResult["prompts"];
@@ -124,6 +138,7 @@ export interface PromptTaskStatus {
   updatedAt?: number;
 }
 
+// 创建图片生成任务时提交给 `/api/generate` 的参数。
 export interface CreateImageTaskOptions {
   prompt: string;
   size: ImageSize;
@@ -132,6 +147,7 @@ export interface CreateImageTaskOptions {
   inputImages: string[];
 }
 
+// 图片生成任务状态。成功时 `base64` 就是生成后的图片内容。
 export interface ImageTaskStatus {
   status: "pending" | "running" | "succeeded" | "failed" | "canceled";
   base64?: string;
@@ -146,6 +162,7 @@ export interface ImageTaskStatus {
   billedAt?: number;
 }
 
+// 抠图历史里使用的状态，比接口多了 draft，因为前端会保存草稿。
 type CutoutStatus =
   | "draft"
   | "running"
@@ -153,11 +170,13 @@ type CutoutStatus =
   | "failed"
   | "canceled";
 
+// 创建抠图任务需要原图和 mask 图。mask 图白色区域表示要保留的主体。
 export interface CreateCutoutTaskOptions {
   sourceImage: string;
   maskImage: string;
 }
 
+// 抠图任务状态。成功时 `base64` 是白底结果图。
 export interface CutoutTaskStatus {
   status: "pending" | "running" | "succeeded" | "failed" | "canceled";
   base64?: string;
@@ -169,6 +188,7 @@ export interface CutoutTaskStatus {
   billedAt?: number;
 }
 
+// 一条抠图历史记录。
 export interface CutoutHistoryItem {
   id?: number;
   sourceImageId?: string;
@@ -185,6 +205,7 @@ export interface CutoutHistoryItem {
   updatedAt: number;
 }
 
+// 抠图页面的自动草稿，保存当前原图、mask、结果和画笔设置。
 export interface CutoutDraft {
   id: "active";
   sourceImageId?: string;

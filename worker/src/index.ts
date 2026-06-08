@@ -12,6 +12,7 @@ export interface Env {
   CUTOUT_TASKS: DurableObjectNamespace;
 }
 
+// Worker 侧不直接复用前端类型，避免把前端依赖带进 Worker bundle。
 type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 type ImageQuality = "1K" | "2K" | "4K";
@@ -51,6 +52,7 @@ interface ImageRequestAttemptResult {
 
 const IMAGE_RETRY_ATTEMPTS = 3;
 const IMAGE_RETRY_DELAYS = [1600, 3600];
+// 这些上游状态码通常是临时问题，可以稍后重试。
 const IMAGE_RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504, 520, 522, 524]);
 
 interface PromptRequestBody {
@@ -87,6 +89,7 @@ function resolveOpenAiEndpoint(baseUrl: string, path: string) {
   return `${base}${path}`;
 }
 
+// 有参考图时必须走 images/edits；本项目禁止纯文案生成，所以实际只走 edits。
 function resolveImageEndpoint(baseUrl: string, hasImages: boolean) {
   return resolveOpenAiEndpoint(
     baseUrl,
@@ -94,6 +97,7 @@ function resolveImageEndpoint(baseUrl: string, hasImages: boolean) {
   );
 }
 
+// 模型接口需要 Blob/FormData，这里把浏览器传来的 data URL 还原成 Blob。
 function dataUrlToBlob(dataUrl: string) {
   const match = dataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/);
   if (!match) {
@@ -122,6 +126,7 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
+// 上游错误格式不稳定，统一提取一段可读的错误原因。
 function getUpstreamErrorDetail(text: string) {
   let detail = text.replace(/\s+/g, " ").trim().slice(0, 300);
   try {
@@ -134,6 +139,7 @@ function getUpstreamErrorDetail(text: string) {
   return detail;
 }
 
+// 组装 OpenAI 兼容图片接口请求。参考图通过 FormData 的 image 字段传入。
 function createImageRequest(
   baseUrl: string,
   apiKey: string,
@@ -167,11 +173,13 @@ function createImageRequest(
   });
 }
 
+// 把 UI 里的比例选择翻译成 prompt 附加说明，帮助模型尽量贴近目标比例。
 function getAspectRatioInstruction(aspectRatio: AspectRatio) {
   if (aspectRatio === "auto") return "画面比例由模型自动选择，确保主体完整、构图稳定。";
   return `画面比例需要接近 ${aspectRatio}，主体完整，不要裁切商品关键区域。`;
 }
 
+// 前端取消任务后会把 KV 标记为 canceled；Worker 在重试前检查这个状态。
 async function isImageTaskCanceled(env: Env, taskKey: string) {
   const raw = await env.TASKS_KV.get(taskKey);
   if (!raw) return false;
@@ -194,6 +202,7 @@ async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// 上游图像接口偶发超时/限流时重试几次，并在每次重试前检查是否已取消。
 async function createImageRequestWithRetry(
   baseUrl: string,
   apiKey: string,
@@ -429,6 +438,8 @@ function normalizeQuality(value: unknown): ImageQuality {
   return value === "1K" || value === "2K" || value === "4K" ? value : "1K";
 }
 
+// Durable Object 用来承接较长的模型调用。
+// fetch 只保存任务并设置 alarm，alarm 再异步执行 runTask。
 export class ImageTasksDO {
   state: DurableObjectState;
   env: Env;
@@ -438,6 +449,8 @@ export class ImageTasksDO {
     this.env = env;
   }
 
+  // alarm 由 Cloudflare 调度触发，避免在 fetch 请求里同步等待模型完成。
+  // alarm 触发后才真正开始请求模型。
   async alarm() {
     const body = await this.state.storage.get<GenerateRequestBody & { taskId?: string }>(
       "task",
@@ -446,6 +459,8 @@ export class ImageTasksDO {
     await this.runTask(body);
   }
 
+  // Pages API 派发任务到这里，Worker 只做基本校验并安排异步执行。
+  // 保存抠图任务参数，并安排 alarm 异步执行。
   async fetch(request: Request) {
     if (request.method !== "POST") {
       return json({ error: "Method Not Allowed" }, { status: 405 });
@@ -509,6 +524,7 @@ export class ImageTasksDO {
     return json({ ok: true });
   }
 
+  // 真正调用图像模型，并把 running/succeeded/failed 写回 TASKS_KV。
   async runTask(body: GenerateRequestBody & { taskId?: string }) {
     const taskId = body.taskId?.trim();
     if (!taskId) return;
@@ -540,6 +556,7 @@ export class ImageTasksDO {
       if (!images.length) {
         throw new Error("缺少产品参考图，系统已禁止纯文案生成");
       }
+      // 每次重试前检查取消状态，避免用户取消后继续消耗上游请求。
       const shouldStop = () => isImageTaskCanceled(this.env, taskKey);
       const attemptResult = await createImageRequestWithRetry(
         baseUrl,
@@ -638,6 +655,7 @@ export class ImageTasksDO {
   }
 }
 
+// 抠图任务的 Durable Object，结构和 ImageTasksDO 类似，只是输入多了 mask。
 export class CutoutTasksDO {
   state: DurableObjectState;
   env: Env;
@@ -716,6 +734,7 @@ export class CutoutTasksDO {
     return json({ ok: true });
   }
 
+  // 调用图像编辑接口：第一张是原图，第二张是黑白 mask。
   async runTask(body: CutoutRequestBody) {
     const taskId = body.taskId?.trim();
     if (!taskId) return;
@@ -742,6 +761,7 @@ export class CutoutTasksDO {
         throw new Error("抠图任务缺少原图或涂抹区域");
       }
 
+      // 抠图和详情图共用取消检查逻辑。
       const shouldStop = () => isImageTaskCanceled(this.env, taskKey);
       const attemptResult = await createImageRequestWithRetry(
         baseUrl,
@@ -836,6 +856,7 @@ export class CutoutTasksDO {
   }
 }
 
+// 文案任务的 Durable Object，负责调用聊天补全接口并解析 JSON prompt 列表。
 export class PromptTasksDO {
   state: DurableObjectState;
   env: Env;
@@ -845,12 +866,14 @@ export class PromptTasksDO {
     this.env = env;
   }
 
+  // alarm 触发后开始生成文案。
   async alarm() {
     const body = await this.state.storage.get<PromptRequestBody>("task");
     if (!body?.taskId) return;
     await this.runTask(body);
   }
 
+  // 保存文案任务参数，并安排 alarm 异步执行。
   async fetch(request: Request) {
     if (request.method !== "POST") {
       return json({ error: "Method Not Allowed" }, { status: 405 });
@@ -930,6 +953,7 @@ export class PromptTasksDO {
     return json({ ok: true });
   }
 
+  // 调用文本模型生成详情图文案，并把规范化后的 prompts 写回 KV。
   async runTask(body: PromptRequestBody) {
     const taskId = body.taskId?.trim();
     if (!taskId) return;
@@ -1044,6 +1068,7 @@ export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url);
     if (url.pathname === "/task" && request.method === "POST") {
+      // 详情图任务入口：校验 Pages API 携带的内部 token 后转交 ImageTasksDO。
       const token = env.IMAGE_WORKER_TOKEN?.trim();
       const auth = request.headers.get("Authorization")?.trim();
       if (!token || auth !== `Bearer ${token}`) {
@@ -1061,6 +1086,7 @@ export default {
       });
     }
     if (url.pathname === "/prompt-task" && request.method === "POST") {
+      // 文案任务入口：转交 PromptTasksDO。
       const token = env.IMAGE_WORKER_TOKEN?.trim();
       const auth = request.headers.get("Authorization")?.trim();
       if (!token || auth !== `Bearer ${token}`) {
@@ -1078,6 +1104,7 @@ export default {
       });
     }
     if (url.pathname === "/cutout-task" && request.method === "POST") {
+      // 抠图任务入口：转交 CutoutTasksDO。
       const token = env.IMAGE_WORKER_TOKEN?.trim();
       const auth = request.headers.get("Authorization")?.trim();
       if (!token || auth !== `Bearer ${token}`) {

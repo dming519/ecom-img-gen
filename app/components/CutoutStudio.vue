@@ -36,6 +36,7 @@ const MAX_CUTOUT_IMAGE_BYTES = 10 * 1024 * 1024
 const CANVAS_EDGE = 960
 const MASK_HISTORY_LIMIT = 18
 
+// 抠图页面核心状态：原图、结果图、历史、画笔和当前任务。
 const sourceImage = shallowRef<string | null>(null)
 const sourceImageId = shallowRef<string | undefined>()
 const resultImageId = shallowRef<string | undefined>()
@@ -54,6 +55,7 @@ const canvasSize = ref({ width: 0, height: 0 })
 const canvasZoom = shallowRef(1)
 const cursorPreview = ref({ visible: false, x: 0, y: 0 })
 
+// canvas/文件输入框的 DOM 引用，以及绘制过程里的临时状态。
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const imageCanvasRef = ref<HTMLCanvasElement | null>(null)
 const maskCanvasRef = ref<HTMLCanvasElement | null>(null)
@@ -64,6 +66,7 @@ const taskIdRef = shallowRef<string | null>(null)
 const pendingMaskRef = shallowRef<string | null>(null)
 const pendingCanvasZoomRef = shallowRef<number | null>(null)
 
+// 根据父组件传入的 session 派生页面展示状态。
 const remainingCredits = computed(() => props.session?.user?.remainingCredits ?? 0)
 const isSuperAdmin = computed(() => props.session?.user?.role === "super_admin")
 const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
@@ -81,10 +84,12 @@ const canvasStyle = computed(() =>
 
 declare global {
   interface Window {
+    // 父组件切换页面前会调用这个函数，确保抠图草稿先保存。
     ecomImgGenFlushCutoutDraft?: () => Promise<void>
   }
 }
 
+// 抠图原图不压缩，保持尽量多细节给模型识别。
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -98,6 +103,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
+// 把浏览器里的鼠标坐标换算成 canvas 内部像素坐标。
 function getPointerPoint(event: PointerEvent, canvas: HTMLCanvasElement) {
   const rect = canvas.getBoundingClientRect()
   return {
@@ -106,6 +112,7 @@ function getPointerPoint(event: PointerEvent, canvas: HTMLCanvasElement) {
   }
 }
 
+// 这个坐标只用于显示笔刷圆圈，所以使用页面显示尺寸即可。
 function getCursorPreviewPoint(event: PointerEvent, canvas: HTMLCanvasElement) {
   const stage = canvas.parentElement
   const rect = stage?.getBoundingClientRect() ?? canvas.getBoundingClientRect()
@@ -115,6 +122,7 @@ function getCursorPreviewPoint(event: PointerEvent, canvas: HTMLCanvasElement) {
   }
 }
 
+// 在 mask canvas 上画一个半透明圆；橡皮模式用 destination-out 擦掉已有区域。
 function drawMaskCircle(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -131,6 +139,7 @@ function drawMaskCircle(
   ctx.restore()
 }
 
+// 判断用户是否真的涂抹过：只要 alpha 通道有像素，就认为 mask 有内容。
 function hasMaskPixels(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext("2d")
   if (!ctx) return false
@@ -141,6 +150,7 @@ function hasMaskPixels(canvas: HTMLCanvasElement) {
   return false
 }
 
+// 原图加载后同步设置两个 canvas 尺寸：底层画原图，上层画 mask。
 function redrawSource(dataUrl: string) {
   const imageCanvas = imageCanvasRef.value
   const maskCanvas = maskCanvasRef.value
@@ -186,6 +196,7 @@ function redrawSource(dataUrl: string) {
   image.src = dataUrl
 }
 
+// 保存当前抠图草稿，包含原图、mask、结果和画笔设置。
 async function persistCurrentDraft(
   overrides: Partial<Omit<CutoutDraft, "id" | "updatedAt">> = {},
 ) {
@@ -220,6 +231,7 @@ async function persistCurrentDraft(
   }
 }
 
+// 新增或更新一条抠图历史。服务端可能会把图片转存成 imageId。
 async function persistCutout(item: CutoutHistoryItem) {
   try {
     if (item.id == null) {
@@ -233,6 +245,7 @@ async function persistCutout(item: CutoutHistoryItem) {
   }
 }
 
+// 用户上传原图后，先存到服务端拿 imageId，再刷新画布和草稿。
 async function handleFileChange(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -283,6 +296,7 @@ function pushMaskHistory() {
   ].slice(-MASK_HISTORY_LIMIT)
 }
 
+// 开始涂抹前先保存一份 mask 快照，支持撤销。
 function handlePointerDown(event: PointerEvent) {
   const canvas = maskCanvasRef.value
   if (!canvas || controlsDisabled.value || !sourceImage.value) return
@@ -299,6 +313,7 @@ function handlePointerDown(event: PointerEvent) {
   maskDirty.value = hasMaskPixels(canvas)
 }
 
+// 鼠标移动时按路径补点，避免快速拖动时出现断线。
 function handlePointerMove(event: PointerEvent) {
   const canvas = maskCanvasRef.value
   if (!canvas || controlsDisabled.value || !sourceImage.value) return
@@ -351,6 +366,7 @@ function hideCursorPreview(event: PointerEvent) {
   cursorPreview.value = { ...cursorPreview.value, visible: false }
 }
 
+// 撤销就是把上一张 mask 快照重新画回 mask canvas。
 function handleUndo() {
   const maskCanvas = maskCanvasRef.value
   const last = historyStack.value.at(-1)
@@ -370,6 +386,7 @@ function handleUndo() {
   historyStack.value = historyStack.value.slice(0, -1)
 }
 
+// 清空只清 mask，不清原图和结果图。
 function handleClearMask() {
   const maskCanvas = maskCanvasRef.value
   if (!maskCanvas) return
@@ -383,6 +400,7 @@ function handleClearMask() {
   )
 }
 
+// 模型接口需要黑白 mask：黑色背景表示丢弃，白色区域表示保留商品主体。
 function exportMaskImage() {
   const maskCanvas = maskCanvasRef.value
   if (!maskCanvas || !hasMaskPixels(maskCanvas)) {
@@ -411,6 +429,7 @@ function exportMaskImage() {
   return output.toDataURL("image/png")
 }
 
+// 抠图成功后普通用户会扣次数；super_admin 不扣，所以直接跳过本地次数更新。
 function updateSessionCredits(result: {
   remainingCredits?: number
   usedCredits?: number
@@ -428,6 +447,7 @@ function updateSessionCredits(result: {
   })
 }
 
+// 提交抠图任务：保存历史 -> 创建任务 -> 轮询结果 -> 写回结果图。
 async function handleGenerate() {
   error.value = null
   if (!props.authenticated) {
@@ -465,6 +485,7 @@ async function handleGenerate() {
     history.value = [...history.value, item]
     activeHistoryIdx.value = history.value.length - 1
 
+    // createCutoutTask 只负责派发任务，真正结果要通过 pollCutoutTask 查询。
     const created = await createCutoutTask(
       { sourceImage: sourceImage.value, maskImage: apiMaskImage },
       abortRef.value.signal,
@@ -497,6 +518,7 @@ async function handleGenerate() {
       return
     }
     updateSessionCredits(result)
+    // 成功结果先存在 resultBase64；persistCutout 会让服务端决定是否转存为图片文件。
     item = {
       ...item,
       status: "succeeded",
@@ -537,6 +559,7 @@ async function handleGenerate() {
   }
 }
 
+// 取消当前任务，并中断前端正在进行的轮询请求。
 function handleCancel() {
   const taskId = taskIdRef.value
   if (taskId) cancelCutoutTask(taskId).catch((event) => console.warn("取消抠图任务失败:", event))
@@ -544,6 +567,7 @@ function handleCancel() {
   busy.value = false
 }
 
+// 从历史记录恢复原图、mask 和结果，方便继续编辑或下载。
 async function handleSelectHistory(index: number) {
   const item = history.value[index]
   if (!item) return
@@ -576,6 +600,7 @@ async function handleSelectHistory(index: number) {
   }
 }
 
+// 删除历史时要同步修正当前选中的下标。
 function handleDeleteHistory(index: number) {
   const item = history.value[index]
   if (!item) return
@@ -603,6 +628,7 @@ function handleDownload() {
   anchor.click()
 }
 
+// 初始化时恢复云端历史和上次未完成的草稿。
 onMounted(() => {
   void (async () => {
     try {
@@ -639,15 +665,18 @@ onMounted(() => {
     }
   })()
 
+  // 暴露给父组件，切换详情图/抠图页面前可以先保存草稿。
   window.ecomImgGenFlushCutoutDraft = persistCurrentDraft
 })
 
+// 组件卸载时移除全局函数，避免父组件拿到过期引用。
 onBeforeUnmount(() => {
   if (window.ecomImgGenFlushCutoutDraft === persistCurrentDraft) {
     delete window.ecomImgGenFlushCutoutDraft
   }
 })
 
+// sourceImage 改变时重绘 canvas。watch 用于处理“状态变化引发副作用”的场景。
 watch(sourceImage, (next) => {
   if (next) redrawSource(next)
 })
