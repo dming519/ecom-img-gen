@@ -55,6 +55,9 @@ const historyStack = ref<string[]>([])
 const canvasSize = ref({ width: 0, height: 0 })
 const canvasZoom = shallowRef(1)
 const cursorPreview = ref({ visible: false, x: 0, y: 0 })
+const componentMounted = shallowRef(false)
+const historyLoadedUserKey = shallowRef<string | null>(null)
+const draftLoadedUserKey = shallowRef<string | null>(null)
 
 // canvas/文件输入框的 DOM 引用，以及绘制过程里的临时状态。
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -70,6 +73,7 @@ const pendingCanvasZoomRef = shallowRef<number | null>(null)
 // 根据父组件传入的 session 派生页面展示状态。
 const remainingCredits = computed(() => props.session?.user?.remainingCredits ?? 0)
 const isSuperAdmin = computed(() => props.session?.user?.role === "super_admin")
+const sessionUserKey = computed(() => props.session?.user?.userKey ?? props.session?.user?.id ?? null)
 const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
 const resultSrc = computed(() =>
   resultBase64.value
@@ -682,49 +686,74 @@ function getCutoutResultSrc(item: CutoutHistoryItem) {
   return null
 }
 
-// 初始化时恢复云端历史和上次未完成的草稿。
+async function loadCutoutHistoryIfAuthenticated() {
+  const userKey = sessionUserKey.value
+  if (
+    !componentMounted.value ||
+    props.sessionLoading ||
+    !props.authenticated ||
+    !userKey ||
+    historyLoadedUserKey.value === userKey
+  ) {
+    return
+  }
+  historyLoadedUserKey.value = userKey
+  try {
+    const items = await dbAllCutouts()
+    history.value = items
+    activeHistoryIdx.value = items.length ? items.length - 1 : -1
+  } catch (event) {
+    console.warn("抠图历史读取失败:", event)
+  }
+}
+
+async function loadCutoutDraftIfAuthenticated() {
+  if (!componentMounted.value || props.sessionLoading) return
+  const userKey = sessionUserKey.value
+  if (!props.authenticated || !userKey) {
+    draftLoaded.value = true
+    draftLoadedUserKey.value = null
+    return
+  }
+  if (draftLoadedUserKey.value === userKey) return
+  draftLoadedUserKey.value = userKey
+  draftLoaded.value = false
+  try {
+    const draft = await dbGetCutoutDraft()
+    if (!draft) return
+    brushSize.value = clamp(Number(draft.brushSize ?? 34), 12, 96)
+    mode.value = draft.mode === "eraser" ? "eraser" : "brush"
+    resultImageId.value = draft.resultImageId
+    resultBase64.value = draft.resultBase64 ?? null
+    const [sourceImages, maskImages] = await Promise.all([
+      draft.sourceImageId ? dbGetProductImages([draft.sourceImageId]) : Promise.resolve([]),
+      draft.maskImageId ? dbGetProductImages([draft.maskImageId]) : Promise.resolve([]),
+    ])
+    pendingMaskRef.value = maskImages[0] ?? null
+    pendingCanvasZoomRef.value = clamp(Number(draft.canvasZoom ?? 1), 0.45, 2.2)
+    if (sourceImages[0]) {
+      sourceImageId.value = draft.sourceImageId
+      sourceImage.value = sourceImages[0]
+    }
+  } catch (event) {
+    console.warn("抠图草稿恢复失败:", event)
+  } finally {
+    draftLoaded.value = true
+  }
+}
+
+// 初始化时先确认 canvas 已挂载，再按登录态恢复云端历史和上次未完成的草稿。
 onMounted(() => {
-  void (async () => {
-    try {
-      const items = await dbAllCutouts()
-      history.value = items
-      if (items.length) activeHistoryIdx.value = items.length - 1
-    } catch (event) {
-      console.warn("抠图历史读取失败:", event)
-    }
-  })()
-
-  void (async () => {
-    try {
-      const draft = await dbGetCutoutDraft()
-      if (!draft) return
-      brushSize.value = clamp(Number(draft.brushSize ?? 34), 12, 96)
-      mode.value = draft.mode === "eraser" ? "eraser" : "brush"
-      resultImageId.value = draft.resultImageId
-      resultBase64.value = draft.resultBase64 ?? null
-      const [sourceImages, maskImages] = await Promise.all([
-        draft.sourceImageId ? dbGetProductImages([draft.sourceImageId]) : Promise.resolve([]),
-        draft.maskImageId ? dbGetProductImages([draft.maskImageId]) : Promise.resolve([]),
-      ])
-      pendingMaskRef.value = maskImages[0] ?? null
-      pendingCanvasZoomRef.value = clamp(Number(draft.canvasZoom ?? 1), 0.45, 2.2)
-      if (sourceImages[0]) {
-        sourceImageId.value = draft.sourceImageId
-        sourceImage.value = sourceImages[0]
-      }
-    } catch (event) {
-      console.warn("抠图草稿恢复失败:", event)
-    } finally {
-      draftLoaded.value = true
-    }
-  })()
-
+  componentMounted.value = true
   // 暴露给父组件，切换详情图/抠图页面前可以先保存草稿。
   window.ecomImgGenFlushCutoutDraft = persistCurrentDraft
+  void loadCutoutHistoryIfAuthenticated()
+  void loadCutoutDraftIfAuthenticated()
 })
 
 // 组件卸载时移除全局函数，避免父组件拿到过期引用。
 onBeforeUnmount(() => {
+  componentMounted.value = false
   if (window.ecomImgGenFlushCutoutDraft === persistCurrentDraft) {
     delete window.ecomImgGenFlushCutoutDraft
   }
@@ -734,6 +763,14 @@ onBeforeUnmount(() => {
 watch(sourceImage, (next) => {
   if (next) redrawSource(next)
 })
+
+watch(
+  () => [props.sessionLoading, props.authenticated, sessionUserKey.value] as const,
+  () => {
+    void loadCutoutHistoryIfAuthenticated()
+    void loadCutoutDraftIfAuthenticated()
+  },
+)
 </script>
 
 <template>

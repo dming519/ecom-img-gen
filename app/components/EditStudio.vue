@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from "vue"
+import { computed, ref, shallowRef, watch } from "vue"
 import {
   cancelEditTask,
   createEditTask,
@@ -52,6 +52,7 @@ const historyStack = ref<string[]>([])
 const canvasSize = ref({ width: 0, height: 0 })
 const canvasZoom = shallowRef(1)
 const cursorPreview = ref({ visible: false, x: 0, y: 0 })
+const historyLoadedUserKey = shallowRef<string | null>(null)
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const imageCanvasRef = ref<HTMLCanvasElement | null>(null)
@@ -65,6 +66,7 @@ const pendingCanvasZoomRef = shallowRef<number | null>(null)
 
 const remainingCredits = computed(() => props.session?.user?.remainingCredits ?? 0)
 const isSuperAdmin = computed(() => props.session?.user?.role === "super_admin")
+const sessionUserKey = computed(() => props.session?.user?.userKey ?? props.session?.user?.id ?? null)
 const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
 const resultSrc = computed(() =>
   resultBase64.value
@@ -548,21 +550,37 @@ function getEditResultSrc(item: EditHistoryItem) {
   return null
 }
 
-onMounted(() => {
-  void (async () => {
-    try {
-      const items = await dbAllEdits()
-      history.value = items
-      if (items.length) activeHistoryIdx.value = items.length - 1
-    } catch (event) {
-      console.warn("改图历史读取失败:", event)
-    }
-  })()
-})
+async function loadEditHistoryIfAuthenticated() {
+  const userKey = sessionUserKey.value
+  if (
+    props.sessionLoading ||
+    !props.authenticated ||
+    !userKey ||
+    historyLoadedUserKey.value === userKey
+  ) {
+    return
+  }
+  historyLoadedUserKey.value = userKey
+  try {
+    const items = await dbAllEdits()
+    history.value = items
+    activeHistoryIdx.value = items.length ? items.length - 1 : -1
+  } catch (event) {
+    console.warn("改图历史读取失败:", event)
+  }
+}
 
 watch(sourceImage, (next) => {
   if (next) redrawSource(next)
 })
+
+watch(
+  () => [props.sessionLoading, props.authenticated, sessionUserKey.value] as const,
+  () => {
+    void loadEditHistoryIfAuthenticated()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
