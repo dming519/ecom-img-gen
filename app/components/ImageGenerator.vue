@@ -469,8 +469,9 @@ async function handleGeneratePrompts() {
   promptBusy.value = true
   try {
     const result = await generateDetailPrompts({
-      ...currentProduct.value,
-      productImages: [],
+      name: productName.value.trim(),
+      sellingPoints: sellingPoints.value.trim(),
+      imageCount: imageCount.value,
       productImageIds: await ensureProductImageIds(),
     })
     prompts.value = result.prompts.map((item, index) =>

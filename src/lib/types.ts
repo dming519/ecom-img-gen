@@ -117,7 +117,13 @@ export interface HistoryItem {
 }
 
 // 生成详情图文案时，前端提交给 `/api/prompt` 的参数。
-export type GeneratePromptOptions = ProductInput;
+// 本地预览用的 productImages 不允许进入请求体，公开接口只接收 imageId。
+export interface GeneratePromptOptions {
+  name: string;
+  sellingPoints: string;
+  imageCount: number;
+  productImageIds: string[];
+}
 
 // `/api/prompt/status` 成功后返回的文案列表。
 export interface GeneratePromptResult {

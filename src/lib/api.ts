@@ -79,7 +79,12 @@ async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit) {
 export async function generateDetailPrompts(
   options: GeneratePromptOptions,
 ): Promise<GeneratePromptResult> {
-  const body = JSON.stringify(options);
+  const body = JSON.stringify({
+    name: options.name,
+    sellingPoints: options.sellingPoints,
+    imageCount: options.imageCount,
+    productImageIds: options.productImageIds,
+  });
   if (body.length > MAX_PROMPT_PAYLOAD_CHARS) {
     throw new Error("产品参考图数据过大，请减少图片数量或重新上传后再生成。");
   }
