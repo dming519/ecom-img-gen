@@ -709,7 +709,7 @@ async function handleSelectHistory(index: number) {
     total: item.progress?.total,
     current: item.progress?.current ?? "",
   })
-  if (layers.value.length && sourceDimensions.value && !layersNormalizedToSourceSize.value) {
+  if (layers.value.length && !layersNormalizedToSourceSize.value) {
     await normalizeLayersToWhiteSourceCanvas()
     updateLayerHistorySnapshot(item)
     await persistLayer(item)
