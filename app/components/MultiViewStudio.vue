@@ -1,18 +1,34 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from "vue"
+import { computed, ref, shallowRef, watch } from "vue"
 import {
   cancelImageTask,
   createImageTask,
   pollImageTask,
 } from "@/lib/api"
-import { dbImageFileUrl, dbPutProductImage } from "@/lib/db"
+import {
+  dbAddMultiView,
+  dbAllMultiViews,
+  dbClearMultiViews,
+  dbDelMultiView,
+  dbGetProductImages,
+  dbImageFileUrl,
+  dbPutMultiView,
+  dbPutProductImage,
+} from "@/lib/db"
 import { resolveImageSize } from "@/lib/imageOptions"
-import type { AspectRatio, AuthSession, ImageQuality, MultiViewAngleId } from "@/lib/types"
+import type {
+  AspectRatio,
+  AuthSession,
+  ImageQuality,
+  MultiViewAngleId,
+  MultiViewHistoryItem,
+  MultiViewHistoryStatus,
+} from "@/lib/types"
 import Icon from "./Icon.vue"
 import QualitySelector from "./QualitySelector.vue"
 import SegmentedControl from "./SegmentedControl.vue"
 
-type MultiViewStatus = "draft" | "queued" | "running" | "succeeded" | "failed"
+type MultiViewStatus = MultiViewHistoryStatus
 
 interface MultiViewAngle {
   id: MultiViewAngleId
@@ -94,6 +110,7 @@ const STATUS_LABEL: Record<MultiViewStatus, string> = {
   running: "生成中",
   succeeded: "已完成",
   failed: "失败",
+  canceled: "已中断",
 }
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -108,9 +125,13 @@ const error = shallowRef<string | null>(null)
 const currentTaskIdRef = shallowRef<string | null>(null)
 const abortRef = shallowRef<AbortController | null>(null)
 const cancelRequestedRef = shallowRef(false)
+const history = ref<MultiViewHistoryItem[]>([])
+const activeHistoryIdx = shallowRef(-1)
+const historyLoadedUserKey = shallowRef<string | null>(null)
 
 const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
 const angleControlsDisabled = computed(() => props.sessionLoading || busy.value)
+const sessionUserKey = computed(() => props.session?.user?.userKey ?? props.session?.user?.id ?? null)
 const remainingCredits = computed(() =>
   props.session?.user?.role === "super_admin"
     ? "不限次数"
@@ -142,6 +163,61 @@ function createViewItems(angleIds: MultiViewAngleId[]): MultiViewItem[] {
   }))
 }
 
+function cloneViewItems(): MultiViewItem[] {
+  return items.value.map((item) => ({ ...item }))
+}
+
+function getHistoryStatusFromItems(): MultiViewHistoryStatus {
+  if (items.value.some((item) => item.status === "queued" || item.status === "running")) return "running"
+  if (items.value.some((item) => item.status === "failed")) return "failed"
+  if (items.value.length && items.value.every((item) => item.status === "succeeded")) return "succeeded"
+  if (items.value.some((item) => item.status === "canceled")) return "canceled"
+  return "draft"
+}
+
+function syncMultiViewHistoryList(item: MultiViewHistoryItem) {
+  const index = history.value.findIndex((historyItem) =>
+    item.id != null
+      ? historyItem.id === item.id
+      : historyItem.createdAt === item.createdAt,
+  )
+  if (index >= 0) {
+    history.value = history.value.map((historyItem, itemIndex) => (itemIndex === index ? { ...item } : historyItem))
+    activeHistoryIdx.value = index
+  } else {
+    history.value = [...history.value, { ...item }]
+    activeHistoryIdx.value = history.value.length - 1
+  }
+}
+
+function updateMultiViewHistorySnapshot(
+  item: MultiViewHistoryItem,
+  options: { status?: MultiViewHistoryStatus; error?: string | null } = {},
+) {
+  item.sourceImageIds = productImageIds.value.slice()
+  item.sourceImages = productImages.value.slice()
+  item.aspectRatio = aspectRatio.value
+  item.quality = quality.value
+  item.results = cloneViewItems()
+  item.status = options.status ?? getHistoryStatusFromItems()
+  item.error = options.error === undefined ? item.error : options.error || undefined
+  item.updatedAt = Date.now()
+}
+
+async function persistMultiView(item: MultiViewHistoryItem) {
+  try {
+    if (item.id == null) {
+      const id = await dbAddMultiView(item)
+      item.id = id as number
+    } else {
+      await dbPutMultiView(item)
+    }
+    syncMultiViewHistoryList(item)
+  } catch (event) {
+    console.warn("多视角历史写入失败:", event)
+  }
+}
+
 function isAngleSelected(angleId: MultiViewAngleId) {
   return selectedAngleIds.value.includes(angleId)
 }
@@ -161,6 +237,7 @@ function handleResetInput() {
   productImages.value = []
   productImageIds.value = []
   items.value = createViewItems(selectedAngleIds.value)
+  activeHistoryIdx.value = -1
 }
 
 function fileToCompressedDataURL(file: File): Promise<string> {
@@ -289,7 +366,7 @@ function validateGeneration() {
   return true
 }
 
-async function generateView(index: number, generationImageIds: string[]) {
+async function generateView(index: number, generationImageIds: string[], historyItem?: MultiViewHistoryItem) {
   const item = items.value[index]
   if (!item) return
 
@@ -307,6 +384,10 @@ async function generateView(index: number, generationImageIds: string[]) {
         }
       : view,
   )
+  if (historyItem) {
+    updateMultiViewHistorySnapshot(historyItem, { status: "running", error: null })
+    await persistMultiView(historyItem)
+  }
 
   const task = await createImageTask(
     {
@@ -327,6 +408,10 @@ async function generateView(index: number, generationImageIds: string[]) {
       ? { ...view, status: "running", taskId: task.taskId, updatedAt: Date.now() }
       : view,
   )
+  if (historyItem) {
+    updateMultiViewHistorySnapshot(historyItem, { status: "running", error: null })
+    await persistMultiView(historyItem)
+  }
 
   const result = await pollImageTask(task.taskId, undefined, abortRef.value?.signal)
   if (cancelRequestedRef.value || result.status === "canceled") return
@@ -341,6 +426,10 @@ async function generateView(index: number, generationImageIds: string[]) {
           }
         : view,
     )
+    if (historyItem) {
+      updateMultiViewHistorySnapshot(historyItem, { status: "failed", error: result.error || "任务执行失败" })
+      await persistMultiView(historyItem)
+    }
     return
   }
 
@@ -359,6 +448,10 @@ async function generateView(index: number, generationImageIds: string[]) {
         }
       : view,
   )
+  if (historyItem) {
+    updateMultiViewHistorySnapshot(historyItem, { status: getHistoryStatusFromItems(), error: null })
+    await persistMultiView(historyItem)
+  }
   currentTaskIdRef.value = null
 }
 
@@ -369,12 +462,24 @@ async function handleGenerateAll() {
   cancelRequestedRef.value = false
   abortRef.value = new AbortController()
   items.value = createViewItems(selectedAngleIds.value)
+  let historyItem: MultiViewHistoryItem | undefined
   try {
     const generationImageIds = await getGenerationImageIds()
+    historyItem = {
+      sourceImageIds: generationImageIds,
+      sourceImages: productImages.value.slice(),
+      aspectRatio: aspectRatio.value,
+      quality: quality.value,
+      results: cloneViewItems(),
+      status: "running",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    await persistMultiView(historyItem)
     for (let index = 0; index < items.value.length; index += 1) {
       if (cancelRequestedRef.value) break
       try {
-        await generateView(index, generationImageIds)
+        await generateView(index, generationImageIds, historyItem)
       } catch (event) {
         if (event instanceof DOMException && event.name === "AbortError") break
         items.value = items.value.map((view, viewIndex) =>
@@ -387,12 +492,28 @@ async function handleGenerateAll() {
               }
             : view,
         )
+        updateMultiViewHistorySnapshot(historyItem, {
+          status: "failed",
+          error: event instanceof Error ? event.message : String(event),
+        })
+        await persistMultiView(historyItem)
       }
     }
     const failed = items.value.filter((item) => item.status === "failed").length
     if (failed > 0) error.value = `${failed} 张生成失败，可单独重新生成失败视角。`
+    if (historyItem) {
+      updateMultiViewHistorySnapshot(historyItem, {
+        status: cancelRequestedRef.value ? "canceled" : failed > 0 ? "failed" : "succeeded",
+        error: failed > 0 ? error.value : null,
+      })
+      await persistMultiView(historyItem)
+    }
   } catch (event) {
     error.value = event instanceof Error ? event.message : String(event)
+    if (historyItem) {
+      updateMultiViewHistorySnapshot(historyItem, { status: "failed", error: error.value })
+      await persistMultiView(historyItem)
+    }
   } finally {
     busy.value = false
     currentTaskIdRef.value = null
@@ -407,11 +528,32 @@ async function handleRegenerate(index: number) {
   busy.value = true
   cancelRequestedRef.value = false
   abortRef.value = new AbortController()
+  let historyItem = history.value[activeHistoryIdx.value]
   try {
-    await generateView(index, await getGenerationImageIds())
+    const generationImageIds = await getGenerationImageIds()
+    if (!historyItem) {
+      historyItem = {
+        sourceImageIds: generationImageIds,
+        sourceImages: productImages.value.slice(),
+        aspectRatio: aspectRatio.value,
+        quality: quality.value,
+        results: cloneViewItems(),
+        status: "running",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      await persistMultiView(historyItem)
+    }
+    await generateView(index, generationImageIds, historyItem)
+    updateMultiViewHistorySnapshot(historyItem, { status: getHistoryStatusFromItems(), error: null })
+    await persistMultiView(historyItem)
   } catch (event) {
     if (!(event instanceof DOMException && event.name === "AbortError")) {
       error.value = event instanceof Error ? event.message : String(event)
+      if (historyItem) {
+        updateMultiViewHistorySnapshot(historyItem, { status: "failed", error: error.value })
+        await persistMultiView(historyItem)
+      }
     }
   } finally {
     busy.value = false
@@ -432,6 +574,11 @@ function handleCancelGeneration() {
       ? { ...item, status: item.base64 || item.imageId ? "succeeded" : "draft", taskId: undefined }
       : item,
   )
+  const historyItem = history.value[activeHistoryIdx.value]
+  if (historyItem) {
+    updateMultiViewHistorySnapshot(historyItem, { status: "canceled", error: "多视角生成已中断" })
+    void persistMultiView(historyItem)
+  }
 }
 
 function getResultSrc(item: MultiViewItem) {
@@ -448,6 +595,79 @@ function handleDownload(item: MultiViewItem) {
   anchor.download = `ecom-multi-view-${item.id}.png`
   anchor.click()
 }
+
+function getMultiViewHistoryCover(item: MultiViewHistoryItem) {
+  const result = item.results.find((view) => view.imageId || view.base64)
+  if (!result) return null
+  if (result.base64) return `data:image/png;base64,${result.base64}`
+  if (result.imageId) return dbImageFileUrl(result.imageId)
+  return null
+}
+
+async function handleSelectHistory(index: number) {
+  const item = history.value[index]
+  if (!item) return
+  activeHistoryIdx.value = index
+  aspectRatio.value = item.aspectRatio
+  quality.value = item.quality
+  selectedAngleIds.value = getSortedAngleIds(item.results.map((result) => result.id))
+  items.value = getSortedAngleIds(item.results.map((result) => result.id))
+    .map((angleId) => item.results.find((result) => result.id === angleId))
+    .filter((result): result is MultiViewItem => !!result)
+    .map((result) => ({ ...result }))
+  productImageIds.value = item.sourceImageIds?.slice() ?? []
+  productImages.value = productImageIds.value.length
+    ? await dbGetProductImages(productImageIds.value)
+    : item.sourceImages?.slice() ?? []
+  error.value = item.error ?? null
+}
+
+function handleDeleteHistory(index: number) {
+  const item = history.value[index]
+  if (!item) return
+  if (item.id != null) dbDelMultiView(item.id).catch((event) => console.warn(event))
+  history.value = history.value.filter((_, itemIndex) => itemIndex !== index)
+  if (activeHistoryIdx.value === index) {
+    activeHistoryIdx.value = history.value.length ? Math.min(index, history.value.length - 1) : -1
+  } else if (activeHistoryIdx.value > index) {
+    activeHistoryIdx.value -= 1
+  }
+}
+
+async function handleClearHistory() {
+  if (!confirm("确定清空所有多视角历史？此操作不可撤销。")) return
+  await dbClearMultiViews()
+  history.value = []
+  activeHistoryIdx.value = -1
+}
+
+async function loadMultiViewHistoryIfAuthenticated() {
+  const userKey = sessionUserKey.value
+  if (
+    props.sessionLoading ||
+    !props.authenticated ||
+    !userKey ||
+    historyLoadedUserKey.value === userKey
+  ) {
+    return
+  }
+  historyLoadedUserKey.value = userKey
+  try {
+    const items = await dbAllMultiViews()
+    history.value = items
+    activeHistoryIdx.value = items.length ? items.length - 1 : -1
+  } catch (event) {
+    console.warn("多视角历史读取失败:", event)
+  }
+}
+
+watch(
+  () => [props.sessionLoading, props.authenticated, sessionUserKey.value] as const,
+  () => {
+    void loadMultiViewHistoryIfAuthenticated()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -661,6 +881,48 @@ function handleDownload(item: MultiViewItem) {
       </div>
     </section>
   </div>
+
+  <section class="studio-panel history-dock cutout-history-dock multi-view-history-dock">
+    <div class="history-bar">
+      <h2>多视角历史</h2>
+      <button type="button" class="inline-action" :disabled="!history.length" @click="handleClearHistory">
+        清空历史
+      </button>
+    </div>
+    <div v-if="history.length" class="cutout-history-grid">
+      <article
+        v-for="(item, index) in history"
+        :key="item.id ?? `${item.createdAt}-${index}`"
+        :class="['cutout-history-card', { 'is-active': index === activeHistoryIdx }]"
+      >
+        <button type="button" class="cutout-history-main" @click="handleSelectHistory(index)">
+          <div class="cutout-history-image multi-view-history-image">
+            <img v-if="getMultiViewHistoryCover(item)" :src="getMultiViewHistoryCover(item)!" alt="多视角历史结果">
+            <span v-else>{{ item.status === "failed" ? "失败" : "处理中" }}</span>
+          </div>
+          <div>
+            <strong>
+              {{
+                item.status === "succeeded"
+                  ? "多视角白底图"
+                  : item.status === "failed"
+                    ? "多视角失败"
+                    : item.status === "canceled"
+                      ? "已中断"
+                      : "处理中"
+              }}
+            </strong>
+            <p>{{ item.error || `${item.results.filter(result => result.imageId || result.base64).length}/${item.results.length} 张视角图` }}</p>
+            <small>{{ new Date(item.createdAt).toLocaleString() }}</small>
+          </div>
+        </button>
+        <button type="button" class="tile-del" aria-label="删除多视角历史" @click="handleDeleteHistory(index)">
+          <Icon name="trash" />
+        </button>
+      </article>
+    </div>
+    <div v-else class="empty">暂无多视角历史。</div>
+  </section>
 </template>
 
 <style scoped>
@@ -826,6 +1088,15 @@ function handleDownload(item: MultiViewItem) {
 .multi-view-preview svg {
   width: 34px;
   height: 34px;
+}
+
+.multi-view-history-dock {
+  margin-top: 12px;
+}
+
+.multi-view-history-image img {
+  background: #fff;
+  object-fit: contain;
 }
 
 .multi-view-error {

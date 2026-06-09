@@ -3,6 +3,8 @@ import type {
   CutoutHistoryItem,
   EditHistoryItem,
   HistoryItem,
+  LayerHistoryItem,
+  MultiViewHistoryItem,
 } from "@/lib/types";
 import { requireSession } from "./auth";
 import { getUserKey, type UserKvNamespace } from "./users";
@@ -58,7 +60,7 @@ export interface HistoryStorageFunctionEnv extends HistoryStorageEnv {
   TASKS_KV?: UserKvNamespace;
 }
 
-type HistoryKind = "detail" | "cutout" | "edit";
+type HistoryKind = "detail" | "cutout" | "edit" | "multi-view" | "layer";
 
 interface HistoryRow {
   id: number;
@@ -490,6 +492,73 @@ async function serializeEditItem(
   };
 }
 
+async function serializeMultiViewItem(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  item: MultiViewHistoryItem,
+) {
+  const sourceImages = (item.sourceImages ?? [])
+    .filter((image) => image.startsWith("data:image/"))
+    .slice(0, 8);
+  const existingImageIds = item.sourceImageIds ?? [];
+  const sourceImageIds = sourceImages.length
+    ? await Promise.all(
+        sourceImages.map((image, index) =>
+          existingImageIds[index] ?? writeImage(env, userKey, image),
+        ),
+      )
+    : existingImageIds;
+  const results = await Promise.all(
+    item.results.map(async (result) => {
+      const imageId =
+        result.base64 && !result.imageId
+          ? await writeImage(env, userKey, result.base64, DEFAULT_IMAGE_MIME)
+          : result.imageId;
+      const { base64: _base64, ...rest } = result;
+      return {
+        ...rest,
+        imageId,
+      };
+    }),
+  );
+  const { sourceImages: _sourceImages, ...rest } = item;
+  return {
+    ...rest,
+    sourceImageIds,
+    results,
+  };
+}
+
+async function serializeLayerItem(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  item: LayerHistoryItem,
+) {
+  const sourceImageId =
+    item.sourceImage && !item.sourceImageId
+      ? await writeImage(env, userKey, item.sourceImage, DEFAULT_IMAGE_MIME)
+      : item.sourceImageId;
+  const layers = await Promise.all(
+    item.layers.map(async (layer) => {
+      const imageId =
+        layer.base64 && !layer.imageId
+          ? await writeImage(env, userKey, layer.base64, DEFAULT_IMAGE_MIME)
+          : layer.imageId;
+      const { base64: _base64, ...rest } = layer;
+      return {
+        ...rest,
+        imageId,
+      };
+    }),
+  );
+  const { sourceImage: _sourceImage, ...rest } = item;
+  return {
+    ...rest,
+    sourceImageId,
+    layers,
+  };
+}
+
 async function serializeCutoutDraft(
   env: Required<HistoryStorageEnv>,
   userKey: string,
@@ -587,6 +656,20 @@ function hasInlineEditImages(item: EditHistoryItem) {
   );
 }
 
+function hasInlineMultiViewImages(item: MultiViewHistoryItem) {
+  return !!(
+    item.sourceImages?.some((image) => image.startsWith("data:image/")) ||
+    item.results.some((result) => result.base64)
+  );
+}
+
+function hasInlineLayerImages(item: LayerHistoryItem) {
+  return !!(
+    item.sourceImage ||
+    item.layers.some((layer) => layer.base64)
+  );
+}
+
 function hasInlineCutoutDraftImages(draft: CutoutDraft) {
   return typeof draft.resultBase64 === "string" && !!draft.resultBase64;
 }
@@ -630,6 +713,34 @@ async function normalizeStoredEditItem(
 
   const payload = await serializeEditItem(env, userKey, item);
   await updateHistoryRecord(env.HISTORY_DB, userKey, "edit", row.id, payload, Date.now());
+  return { ...payload, id: row.id };
+}
+
+async function normalizeStoredMultiViewItem(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  row: HistoryRow,
+) {
+  const item = parseJson<MultiViewHistoryItem>(row.payload);
+  if (!item) return null;
+  if (!hasInlineMultiViewImages(item)) return { ...item, id: row.id };
+
+  const payload = await serializeMultiViewItem(env, userKey, item);
+  await updateHistoryRecord(env.HISTORY_DB, userKey, "multi-view", row.id, payload, Date.now());
+  return { ...payload, id: row.id };
+}
+
+async function normalizeStoredLayerItem(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  row: HistoryRow,
+) {
+  const item = parseJson<LayerHistoryItem>(row.payload);
+  if (!item) return null;
+  if (!hasInlineLayerImages(item)) return { ...item, id: row.id };
+
+  const payload = await serializeLayerItem(env, userKey, item);
+  await updateHistoryRecord(env.HISTORY_DB, userKey, "layer", row.id, payload, Date.now());
   return { ...payload, id: row.id };
 }
 
@@ -807,6 +918,114 @@ export async function deleteEditHistory(
   await env.HISTORY_DB.prepare(
     `DELETE FROM history_records
      WHERE id = ? AND user_key = ? AND kind = 'edit'`,
+  )
+    .bind(id, userKey)
+    .run();
+}
+
+export async function saveMultiViewHistory(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  item: MultiViewHistoryItem,
+) {
+  await ensureHistorySchema(env.HISTORY_DB);
+  const now = Date.now();
+  const payload = await serializeMultiViewItem(env, userKey, item);
+  let id = item.id;
+  if (id == null) {
+    id = await insertHistoryRecord(env.HISTORY_DB, userKey, "multi-view", payload, now);
+  } else {
+    await updateHistoryRecord(env.HISTORY_DB, userKey, "multi-view", id, payload, now);
+  }
+  return { ...payload, id };
+}
+
+export async function listMultiViewHistory(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+) {
+  await ensureHistorySchema(env.HISTORY_DB);
+  const rows = await listHistoryRows(env.HISTORY_DB, userKey, "multi-view");
+  const items: MultiViewHistoryItem[] = [];
+  for (const row of rows) {
+    const item = await normalizeStoredMultiViewItem(env, userKey, row);
+    if (item) items.push(item);
+  }
+  return items;
+}
+
+export async function deleteMultiViewHistory(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  id?: number,
+) {
+  await ensureHistorySchema(env.HISTORY_DB);
+  if (id == null) {
+    await env.HISTORY_DB.prepare(
+      `DELETE FROM history_records
+       WHERE user_key = ? AND kind = 'multi-view'`,
+    )
+      .bind(userKey)
+      .run();
+    return;
+  }
+  await env.HISTORY_DB.prepare(
+    `DELETE FROM history_records
+     WHERE id = ? AND user_key = ? AND kind = 'multi-view'`,
+  )
+    .bind(id, userKey)
+    .run();
+}
+
+export async function saveLayerHistory(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  item: LayerHistoryItem,
+) {
+  await ensureHistorySchema(env.HISTORY_DB);
+  const now = Date.now();
+  const payload = await serializeLayerItem(env, userKey, item);
+  let id = item.id;
+  if (id == null) {
+    id = await insertHistoryRecord(env.HISTORY_DB, userKey, "layer", payload, now);
+  } else {
+    await updateHistoryRecord(env.HISTORY_DB, userKey, "layer", id, payload, now);
+  }
+  return { ...payload, id };
+}
+
+export async function listLayerHistory(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+) {
+  await ensureHistorySchema(env.HISTORY_DB);
+  const rows = await listHistoryRows(env.HISTORY_DB, userKey, "layer");
+  const items: LayerHistoryItem[] = [];
+  for (const row of rows) {
+    const item = await normalizeStoredLayerItem(env, userKey, row);
+    if (item) items.push(item);
+  }
+  return items;
+}
+
+export async function deleteLayerHistory(
+  env: Required<HistoryStorageEnv>,
+  userKey: string,
+  id?: number,
+) {
+  await ensureHistorySchema(env.HISTORY_DB);
+  if (id == null) {
+    await env.HISTORY_DB.prepare(
+      `DELETE FROM history_records
+       WHERE user_key = ? AND kind = 'layer'`,
+    )
+      .bind(userKey)
+      .run();
+    return;
+  }
+  await env.HISTORY_DB.prepare(
+    `DELETE FROM history_records
+     WHERE id = ? AND user_key = ? AND kind = 'layer'`,
   )
     .bind(id, userKey)
     .run();

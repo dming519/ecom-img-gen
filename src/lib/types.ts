@@ -213,6 +213,14 @@ type CutoutStatus =
   | "failed"
   | "canceled";
 
+export type MultiViewHistoryStatus =
+  | "draft"
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "canceled";
+
 // 创建抠图任务需要原图和 mask 图。mask 图白色区域表示要保留的主体。
 export interface CreateCutoutTaskOptions {
   sourceImageId: string;
@@ -303,6 +311,49 @@ export interface EditHistoryItem {
   error?: string;
   taskId?: string;
   model?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MultiViewHistoryResultItem {
+  id: MultiViewAngleId;
+  title: string;
+  status: MultiViewHistoryStatus;
+  taskId?: string;
+  imageId?: string;
+  base64?: string;
+  model?: string;
+  error?: string;
+  updatedAt?: number;
+}
+
+export interface MultiViewHistoryItem {
+  id?: number;
+  sourceImageIds?: string[];
+  sourceImages?: string[];
+  aspectRatio: AspectRatio;
+  quality: ImageQuality;
+  results: MultiViewHistoryResultItem[];
+  status: MultiViewHistoryStatus;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface LayerHistoryItem {
+  id?: number;
+  sourceImageId?: string;
+  sourceImage?: string;
+  layers: LayerResultItem[];
+  status: "running" | "succeeded" | "failed" | "canceled";
+  taskId?: string;
+  error?: string;
+  model?: string;
+  progress?: {
+    done?: number;
+    total?: number;
+    current?: string;
+  };
   createdAt: number;
   updatedAt: number;
 }

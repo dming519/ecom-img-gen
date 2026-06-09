@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from "vue"
+import { computed, ref, shallowRef, watch } from "vue"
 import {
   cancelLayerTask,
   createLayerTask,
   pollLayerTask,
 } from "@/lib/api"
 import {
+  dbAddLayer,
+  dbAllLayers,
+  dbClearLayers,
+  dbDelLayer,
+  dbGetProductImages,
   dbImageFileUrl,
+  dbPutLayer,
   dbPutProductImage,
 } from "@/lib/db"
-import type { AuthSession, LayerResultItem, LayerTaskStatus } from "@/lib/types"
+import type { AuthSession, LayerHistoryItem, LayerResultItem, LayerTaskStatus } from "@/lib/types"
 import Icon from "./Icon.vue"
 
 const props = defineProps<{
@@ -36,6 +42,9 @@ const zipBusy = shallowRef(false)
 const error = shallowRef<string | null>(null)
 const taskIdRef = shallowRef<string | null>(null)
 const abortRef = shallowRef<AbortController | null>(null)
+const history = ref<LayerHistoryItem[]>([])
+const activeHistoryIdx = shallowRef(-1)
+const historyLoadedUserKey = shallowRef<string | null>(null)
 const progress = ref<{ done: number; total: number; current: string }>({
   done: 0,
   total: 6,
@@ -53,6 +62,7 @@ const LAYER_ROLE_LABEL: Record<LayerResultItem["role"], string> = {
 }
 
 const isSuperAdmin = computed(() => props.session?.user?.role === "super_admin")
+const sessionUserKey = computed(() => props.session?.user?.userKey ?? props.session?.user?.id ?? null)
 const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
 const creditLabel = computed(() =>
   `今日剩余 ${props.session?.user?.dailyRemainingCredits ?? props.session?.user?.remainingCredits ?? 0} 次 · 永久 ${props.session?.user?.permanentRemainingCredits ?? 0} 次`,
@@ -87,6 +97,55 @@ function getLayerSrc(layer: LayerResultItem) {
 
 function getLayerRoleLabel(role: LayerResultItem["role"]) {
   return LAYER_ROLE_LABEL[role] ?? "图层"
+}
+
+function syncLayerHistoryList(item: LayerHistoryItem) {
+  const index = history.value.findIndex((historyItem) =>
+    item.id != null
+      ? historyItem.id === item.id
+      : historyItem.createdAt === item.createdAt,
+  )
+  if (index >= 0) {
+    history.value = history.value.map((historyItem, itemIndex) => (itemIndex === index ? { ...item } : historyItem))
+    activeHistoryIdx.value = index
+  } else {
+    history.value = [...history.value, { ...item }]
+    activeHistoryIdx.value = history.value.length - 1
+  }
+}
+
+function updateLayerHistorySnapshot(
+  item: LayerHistoryItem,
+  options: {
+    status?: LayerHistoryItem["status"];
+    error?: string | null;
+    model?: string;
+    taskId?: string | null;
+  } = {},
+) {
+  item.sourceImageId = sourceImageId.value
+  item.sourceImage = sourceImage.value ?? undefined
+  item.layers = layers.value.map((layer) => ({ ...layer }))
+  item.status = options.status ?? item.status
+  item.error = options.error === undefined ? item.error : options.error || undefined
+  item.model = options.model ?? item.model
+  item.taskId = options.taskId === undefined ? item.taskId : options.taskId || undefined
+  item.progress = { ...progress.value }
+  item.updatedAt = Date.now()
+}
+
+async function persistLayer(item: LayerHistoryItem) {
+  try {
+    if (item.id == null) {
+      const id = await dbAddLayer(item)
+      item.id = id as number
+    } else {
+      await dbPutLayer(item)
+    }
+    syncLayerHistoryList(item)
+  } catch (event) {
+    console.warn("分层历史写入失败:", event)
+  }
 }
 
 function syncLayersFromTask(result: Pick<LayerTaskStatus, "layers">, options: { preferPreview?: boolean } = {}) {
@@ -125,6 +184,7 @@ async function handleFileChange(event: Event) {
     layers.value = []
     selectedLayerId.value = null
     progress.value = { done: 0, total: 6, current: "" }
+    activeHistoryIdx.value = -1
   } catch (uploadError) {
     error.value = uploadError instanceof Error ? uploadError.message : String(uploadError)
   } finally {
@@ -166,11 +226,29 @@ async function handleGenerate() {
   layers.value = []
   selectedLayerId.value = null
   progress.value = { done: 0, total: 6, current: "" }
+  let historyItem: LayerHistoryItem = {
+    sourceImageId: sourceImageId.value,
+    sourceImage: sourceImage.value ?? undefined,
+    layers: [],
+    status: "running",
+    progress: { ...progress.value },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }
+  let persistQueue = Promise.resolve()
+  const queuePersistLayer = () => {
+    persistQueue = persistQueue
+      .catch(() => undefined)
+      .then(() => persistLayer(historyItem))
+  }
 
   try {
+    await persistLayer(historyItem)
     const created = await createLayerTask({ sourceImageId: sourceImageId.value }, abortRef.value.signal)
     taskIdRef.value = created.taskId
     updateSessionCredits({ status: "pending", ...created })
+    updateLayerHistorySnapshot(historyItem, { status: "running", taskId: created.taskId, error: null })
+    await persistLayer(historyItem)
     const result = await pollLayerTask(created.taskId, undefined, abortRef.value.signal, (next) => {
       syncLayersFromTask(next)
       if (!next.progress) return
@@ -179,23 +257,43 @@ async function handleGenerate() {
         total: Number(next.progress.total ?? 6),
         current: next.progress.current ?? "",
       }
+      updateLayerHistorySnapshot(historyItem, { status: "running", error: null })
+      queuePersistLayer()
     })
     syncLayersFromTask(result, { preferPreview: result.status === "succeeded" })
+    await persistQueue
     if (result.status === "canceled") {
+      updateLayerHistorySnapshot(historyItem, { status: "canceled", error: "分层已中断", taskId: null })
+      await persistLayer(historyItem)
       error.value = "分层已中断"
       return
     }
     if (result.status === "failed") {
+      updateLayerHistorySnapshot(historyItem, { status: "failed", error: result.error || "分层失败", taskId: null })
+      await persistLayer(historyItem)
       error.value = result.error || "分层失败"
       return
     }
     updateSessionCredits(result)
+    updateLayerHistorySnapshot(historyItem, {
+      status: "succeeded",
+      error: null,
+      model: result.model,
+      taskId: null,
+    })
+    await persistLayer(historyItem)
     if (!layers.value.length) error.value = "分层任务未返回图层"
   } catch (generateError) {
+    await persistQueue
     if (generateError instanceof DOMException && generateError.name === "AbortError") {
+      updateLayerHistorySnapshot(historyItem, { status: "canceled", error: "分层已中断", taskId: null })
+      await persistLayer(historyItem)
       error.value = "分层已中断"
     } else {
-      error.value = generateError instanceof Error ? generateError.message : String(generateError)
+      const message = generateError instanceof Error ? generateError.message : String(generateError)
+      updateLayerHistorySnapshot(historyItem, { status: "failed", error: message, taskId: null })
+      await persistLayer(historyItem)
+      error.value = message
     }
   } finally {
     taskIdRef.value = null
@@ -344,6 +442,85 @@ async function handleDownloadZip() {
     zipBusy.value = false
   }
 }
+
+function getLayerHistoryCover(item: LayerHistoryItem) {
+  const layer = item.layers.find((entry) => entry.role === "preview" && (entry.imageId || entry.base64)) ??
+    item.layers.find((entry) => entry.imageId || entry.base64)
+  if (!layer) return null
+  if (layer.base64) return `data:image/png;base64,${layer.base64}`
+  if (layer.imageId) return dbImageFileUrl(layer.imageId)
+  return null
+}
+
+async function handleSelectHistory(index: number) {
+  const item = history.value[index]
+  if (!item) return
+  activeHistoryIdx.value = index
+  sourceImageId.value = item.sourceImageId
+  sourceImage.value = null
+  if (item.sourceImageId) {
+    const [restored] = await dbGetProductImages([item.sourceImageId])
+    sourceImage.value = restored ?? null
+  } else {
+    sourceImage.value = item.sourceImage ?? null
+  }
+  layers.value = [...item.layers].sort((a, b) => a.index - b.index)
+  selectedLayerId.value =
+    layers.value.find((layer) => layer.role === "preview")?.id ?? layers.value[0]?.id ?? null
+  progress.value = {
+    done: Number(item.progress?.done ?? layers.value.length),
+    total: Number(item.progress?.total ?? 6),
+    current: item.progress?.current ?? "",
+  }
+  error.value = item.error ?? null
+}
+
+function handleDeleteHistory(index: number) {
+  const item = history.value[index]
+  if (!item) return
+  if (item.id != null) dbDelLayer(item.id).catch((event) => console.warn(event))
+  history.value = history.value.filter((_, itemIndex) => itemIndex !== index)
+  if (activeHistoryIdx.value === index) {
+    activeHistoryIdx.value = history.value.length ? Math.min(index, history.value.length - 1) : -1
+  } else if (activeHistoryIdx.value > index) {
+    activeHistoryIdx.value -= 1
+  }
+}
+
+async function handleClearHistory() {
+  if (!confirm("确定清空所有分层历史？此操作不可撤销。")) return
+  await dbClearLayers()
+  history.value = []
+  activeHistoryIdx.value = -1
+}
+
+async function loadLayerHistoryIfAuthenticated() {
+  const userKey = sessionUserKey.value
+  if (
+    props.sessionLoading ||
+    !props.authenticated ||
+    !userKey ||
+    historyLoadedUserKey.value === userKey
+  ) {
+    return
+  }
+  historyLoadedUserKey.value = userKey
+  try {
+    const items = await dbAllLayers()
+    history.value = items
+    activeHistoryIdx.value = items.length ? items.length - 1 : -1
+  } catch (event) {
+    console.warn("分层历史读取失败:", event)
+  }
+}
+
+watch(
+  () => [props.sessionLoading, props.authenticated, sessionUserKey.value] as const,
+  () => {
+    void loadLayerHistoryIfAuthenticated()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -487,6 +664,48 @@ async function handleDownloadZip() {
       </div>
     </aside>
   </div>
+
+  <section class="studio-panel history-dock cutout-history-dock layer-history-dock">
+    <div class="history-bar">
+      <h2>分层历史</h2>
+      <button type="button" class="inline-action" :disabled="!history.length" @click="handleClearHistory">
+        清空历史
+      </button>
+    </div>
+    <div v-if="history.length" class="cutout-history-grid">
+      <article
+        v-for="(item, index) in history"
+        :key="item.id ?? `${item.createdAt}-${index}`"
+        :class="['cutout-history-card', { 'is-active': index === activeHistoryIdx }]"
+      >
+        <button type="button" class="cutout-history-main" @click="handleSelectHistory(index)">
+          <div class="cutout-history-image layer-history-image">
+            <img v-if="getLayerHistoryCover(item)" :src="getLayerHistoryCover(item)!" alt="分层历史结果">
+            <span v-else>{{ item.status === "failed" ? "失败" : "处理中" }}</span>
+          </div>
+          <div>
+            <strong>
+              {{
+                item.status === "succeeded"
+                  ? "商品分层"
+                  : item.status === "failed"
+                    ? "分层失败"
+                    : item.status === "canceled"
+                      ? "已中断"
+                      : "处理中"
+              }}
+            </strong>
+            <p>{{ item.error || `${item.layers.length} 个图层` }}</p>
+            <small>{{ new Date(item.createdAt).toLocaleString() }}</small>
+          </div>
+        </button>
+        <button type="button" class="tile-del" aria-label="删除分层历史" @click="handleDeleteHistory(index)">
+          <Icon name="trash" />
+        </button>
+      </article>
+    </div>
+    <div v-else class="empty">暂无分层历史。</div>
+  </section>
 </template>
 
 <style scoped>
@@ -496,6 +715,14 @@ async function handleDownloadZip() {
 
 .layer-source-body {
   display: block;
+}
+
+.layer-history-dock {
+  margin-top: 12px;
+}
+
+.layer-history-image img {
+  object-fit: contain;
 }
 
 .layer-source-panel .cutout-upload-zone {

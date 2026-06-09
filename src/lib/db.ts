@@ -3,6 +3,8 @@ import type {
   CutoutHistoryItem,
   EditHistoryItem,
   HistoryItem,
+  LayerHistoryItem,
+  MultiViewHistoryItem,
 } from "./types";
 
 interface ErrorPayload {
@@ -154,6 +156,32 @@ function toEditRequestItem(item: EditHistoryItem): EditHistoryItem {
       };
 }
 
+function toMultiViewRequestItem(item: MultiViewHistoryItem): MultiViewHistoryItem {
+  const sourceImages = item.sourceImageIds?.length ? [] : item.sourceImages;
+  return {
+    ...item,
+    sourceImages,
+    results: item.results.map((result) => {
+      if (!result.imageId) return result;
+      const { base64: _base64, ...rest } = result;
+      return rest;
+    }),
+  };
+}
+
+function toLayerRequestItem(item: LayerHistoryItem): LayerHistoryItem {
+  const { sourceImage: _sourceImage, ...rest } = item;
+  return {
+    ...rest,
+    sourceImage: item.sourceImageId ? undefined : item.sourceImage,
+    layers: item.layers.map((layer) => {
+      if (!layer.imageId) return layer;
+      const { base64: _base64, ...layerRest } = layer;
+      return layerRest;
+    }),
+  };
+}
+
 // 草稿如果已经有 resultImageId，就不需要重复带上 resultBase64。
 function toCutoutDraftRequest(
   draft: Omit<CutoutDraft, "id"> & { id?: "active" },
@@ -286,6 +314,86 @@ export async function dbDelEdit(id: number) {
 
 export async function dbClearEdits() {
   await requestJson<{ ok: boolean }>("/api/history/edit", { method: "DELETE" });
+}
+
+export async function dbAddMultiView(item: MultiViewHistoryItem) {
+  const payload = await requestJson<{ item: MultiViewHistoryItem }>("/api/history/multi-view", {
+    method: "POST",
+    body: JSON.stringify({ item: toMultiViewRequestItem(item) }),
+  });
+  const saved = assignSaved(item, payload.item);
+  if (saved.id == null) {
+    throw new Error("服务端未返回多视角历史 ID");
+  }
+  return saved.id;
+}
+
+export async function dbPutMultiView(item: MultiViewHistoryItem) {
+  const payload = await requestJson<{ item: MultiViewHistoryItem }>("/api/history/multi-view", {
+    method: "PUT",
+    body: JSON.stringify({ item: toMultiViewRequestItem(item) }),
+  });
+  const saved = assignSaved(item, payload.item);
+  if (saved.id == null) {
+    throw new Error("服务端未返回多视角历史 ID");
+  }
+  return saved.id;
+}
+
+export async function dbAllMultiViews() {
+  const payload = await requestJson<{ items: MultiViewHistoryItem[] }>("/api/history/multi-view");
+  return payload.items;
+}
+
+export async function dbDelMultiView(id: number) {
+  await requestJson<{ ok: boolean }>(
+    `/api/history/multi-view?id=${encodeURIComponent(String(id))}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function dbClearMultiViews() {
+  await requestJson<{ ok: boolean }>("/api/history/multi-view", { method: "DELETE" });
+}
+
+export async function dbAddLayer(item: LayerHistoryItem) {
+  const payload = await requestJson<{ item: LayerHistoryItem }>("/api/history/layer", {
+    method: "POST",
+    body: JSON.stringify({ item: toLayerRequestItem(item) }),
+  });
+  const saved = assignSaved(item, payload.item);
+  if (saved.id == null) {
+    throw new Error("服务端未返回分层历史 ID");
+  }
+  return saved.id;
+}
+
+export async function dbPutLayer(item: LayerHistoryItem) {
+  const payload = await requestJson<{ item: LayerHistoryItem }>("/api/history/layer", {
+    method: "PUT",
+    body: JSON.stringify({ item: toLayerRequestItem(item) }),
+  });
+  const saved = assignSaved(item, payload.item);
+  if (saved.id == null) {
+    throw new Error("服务端未返回分层历史 ID");
+  }
+  return saved.id;
+}
+
+export async function dbAllLayers() {
+  const payload = await requestJson<{ items: LayerHistoryItem[] }>("/api/history/layer");
+  return payload.items;
+}
+
+export async function dbDelLayer(id: number) {
+  await requestJson<{ ok: boolean }>(
+    `/api/history/layer?id=${encodeURIComponent(String(id))}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function dbClearLayers() {
+  await requestJson<{ ok: boolean }>("/api/history/layer", { method: "DELETE" });
 }
 
 export async function dbGetCutoutDraft() {
