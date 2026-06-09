@@ -2,6 +2,7 @@ import {
   DEFAULT_CUTOUT_PATH,
   DEFAULT_EDIT_PATH,
   DEFAULT_GENERATE_PATH,
+  DEFAULT_LAYER_PATH,
   DEFAULT_PROMPT_PATH,
 } from "./config";
 import type {
@@ -13,10 +14,12 @@ import type {
   GeneratePromptOptions,
   GeneratePromptResult,
   ImageTaskStatus,
+  LayerTaskStatus,
   PromptTaskStatus,
   RedeemCodeRow,
   AuthUser,
   CreateEditTaskOptions,
+  CreateLayerTaskOptions,
   UserRole,
   EditTaskStatus,
 } from "./types";
@@ -374,6 +377,51 @@ export async function createEditTask(
   };
 }
 
+export async function createLayerTask(
+  options: CreateLayerTaskOptions,
+  signal?: AbortSignal,
+): Promise<{
+  taskId: string;
+  remainingCredits?: number;
+  usedCredits?: number;
+  dailyRemainingCredits?: number;
+  dailyUsedCredits?: number;
+  dailyGrantedCredits?: number;
+  permanentRemainingCredits?: number;
+  permanentGrantedCredits?: number;
+  unlimitedCredits?: boolean;
+}> {
+  const response = await fetchWithRetry(DEFAULT_LAYER_PATH, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sourceImageId: options.sourceImageId }),
+    signal,
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
+  }
+
+  const payload = JSON.parse(text) as CreateTaskPayload;
+  if (!payload.taskId) {
+    throw new Error(
+      typeof payload.error === "string" ? payload.error : "创建分层任务失败",
+    );
+  }
+  return {
+    taskId: payload.taskId,
+    remainingCredits: payload.remainingCredits,
+    usedCredits: payload.usedCredits,
+    dailyRemainingCredits: payload.dailyRemainingCredits,
+    dailyUsedCredits: payload.dailyUsedCredits,
+    dailyGrantedCredits: payload.dailyGrantedCredits,
+    permanentRemainingCredits: payload.permanentRemainingCredits,
+    permanentGrantedCredits: payload.permanentGrantedCredits,
+    unlimitedCredits: payload.unlimitedCredits,
+  };
+}
+
 // 取消抠图任务，逻辑和详情图取消一致。
 export async function cancelCutoutTask(taskId: string): Promise<void> {
   const response = await fetchWithRetry(`${DEFAULT_CUTOUT_PATH}/cancel`, {
@@ -396,6 +444,18 @@ export async function cancelEditTask(taskId: string): Promise<void> {
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`取消改图任务失败: HTTP ${response.status}: ${extractError(text)}`);
+  }
+}
+
+export async function cancelLayerTask(taskId: string): Promise<void> {
+  const response = await fetchWithRetry(`${DEFAULT_LAYER_PATH}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ taskId }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`取消分层任务失败: HTTP ${response.status}: ${extractError(text)}`);
   }
 }
 
@@ -483,6 +543,50 @@ export async function pollEditTask(
   }
 
   throw new Error("改图任务超时，请重试");
+}
+
+export async function pollLayerTask(
+  taskId: string,
+  timeoutMs = 10 * 60 * 1000,
+  signal?: AbortSignal,
+  onUpdate?: (payload: LayerTaskStatus) => void,
+): Promise<LayerTaskStatus> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (signal?.aborted) {
+      throw new DOMException("分层任务已中断", "AbortError");
+    }
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, 2000);
+      signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(new DOMException("分层任务已中断", "AbortError"));
+        },
+        { once: true },
+      );
+    });
+    const response = await fetch(
+      `${DEFAULT_LAYER_PATH}/status?taskId=${encodeURIComponent(taskId)}`,
+      { method: "GET", signal, cache: "no-store" },
+    );
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`查询分层任务失败: HTTP ${response.status}: ${extractError(text)}`);
+    }
+    const payload = JSON.parse(text) as LayerTaskStatus;
+    onUpdate?.(payload);
+    if (
+      payload.status === "succeeded" ||
+      payload.status === "failed" ||
+      payload.status === "canceled"
+    ) {
+      return payload;
+    }
+  }
+
+  throw new Error("分层任务超时，请重试");
 }
 
 // 以下是管理后台接口：只有 admin/super_admin 能正常调用。

@@ -226,11 +226,36 @@ export interface CreateEditTaskOptions {
   instruction: string;
 }
 
+export interface CreateLayerTaskOptions {
+  sourceImageId: string;
+}
+
+export interface LayerResultItem {
+  id: string;
+  name: string;
+  role: "background" | "subject" | "text" | "decoration" | "shadow" | "preview" | "other";
+  index: number;
+  imageId?: string;
+  base64?: string;
+}
+
 // 抠图任务状态。成功时优先返回 `imageId`，前端通过图片文件接口加载白底结果图。
 export interface CutoutTaskStatus {
   status: "pending" | "running" | "succeeded" | "failed" | "canceled";
   imageId?: string;
   base64?: string;
+  layers?: LayerResultItem[];
+  manifest?: {
+    width?: number;
+    height?: number;
+    sourceImageId?: string;
+    createdAt?: number;
+  };
+  progress?: {
+    done?: number;
+    total?: number;
+    current?: string;
+  };
   model?: string;
   error?: string;
   remainingCredits?: number;
@@ -245,6 +270,7 @@ export interface CutoutTaskStatus {
 }
 
 export type EditTaskStatus = CutoutTaskStatus;
+export type LayerTaskStatus = CutoutTaskStatus;
 
 // 一条抠图历史记录。
 export interface CutoutHistoryItem {

@@ -29,9 +29,10 @@ interface GenerateRequestBody {
 interface CutoutRequestBody {
   taskId?: string;
   sourceImage?: string;
+  sourceImageId?: string;
   maskImage?: string;
   editInstruction?: string;
-  taskType?: "cutout" | "edit";
+  taskType?: "cutout" | "edit" | "layer";
   userKey?: string;
 }
 
@@ -225,6 +226,9 @@ async function createImageRequestWithRetry(
     try {
       const response = await createImageRequest(baseUrl, apiKey, model, prompt, size, images);
       const text = await response.text();
+      if (await shouldStop?.()) {
+        throw new Error("任务已取消");
+      }
       if (
         response.ok ||
         !isRetryableImageStatus(response.status) ||
@@ -438,6 +442,82 @@ function createEditPrompt(instruction: string) {
   ].join("\n\n");
 }
 
+const LAYER_PRESETS = [
+  {
+    id: "background",
+    name: "背景层",
+    role: "background",
+    prompt: [
+      "你正在执行电商图片分层任务。请基于上传图片生成“背景层”。",
+      "输出只包含背景、底色、场景、纹理、远景和环境光，不要包含商品主体、文字、Logo、图标、贴纸、人物、手、道具或前景装饰。",
+      "如果原图背景被商品或文字遮挡，请自然补全被遮挡区域。保持原图构图、透视、光影方向和画面比例。",
+      "输出为一张干净的 PNG 图层，背景不需要透明。",
+    ].join("\n\n"),
+  },
+  {
+    id: "main-subject",
+    name: "商品主体",
+    role: "subject",
+    prompt: [
+      "你正在执行电商图片分层任务。请基于上传图片生成“商品主体层”。",
+      "只保留商品主体本体，包括包装、瓶身、盒子、Logo、标签和商品上的真实可见文字。",
+      "移除背景、营销文案、装饰贴纸、信息卡片、人物、手、道具、阴影和额外场景。",
+      "输出透明背景 PNG，商品边缘干净，保持原商品外观、比例、颜色、材质、品牌标识和可见文字，不要重新设计商品。",
+    ].join("\n\n"),
+  },
+  {
+    id: "text",
+    name: "文字层",
+    role: "text",
+    prompt: [
+      "你正在执行电商图片分层任务。请基于上传图片生成“文字层”。",
+      "只保留画面中的营销标题、卖点文案、参数文字、价格文字、标签文字、说明文字和文字框。",
+      "不要保留商品主体、背景、人物、手、道具或纯装饰图形。商品包装本身印刷的 Logo 和标签文字不属于这一层。",
+      "输出透明背景 PNG，文字位置、颜色、字号、排版尽量与原图一致。",
+    ].join("\n\n"),
+  },
+  {
+    id: "decoration",
+    name: "装饰道具层",
+    role: "decoration",
+    prompt: [
+      "你正在执行电商图片分层任务。请基于上传图片生成“装饰道具层”。",
+      "只保留非商品主体的装饰元素、图标、贴纸、信息卡片、几何形、道具、点缀素材、前景摆件和辅助视觉元素。",
+      "不要保留商品主体、背景大色块、营销文字、人物或手。",
+      "输出透明背景 PNG，元素位置和外观尽量与原图一致。",
+    ].join("\n\n"),
+  },
+  {
+    id: "shadow-light",
+    name: "阴影光效层",
+    role: "shadow",
+    prompt: [
+      "你正在执行电商图片分层任务。请基于上传图片生成“阴影光效层”。",
+      "只保留商品和视觉元素造成的阴影、投影、反光、高光、光晕、光束、柔光和局部氛围光。",
+      "不要保留商品主体、文字、背景纹理、道具或装饰图形。",
+      "输出透明背景 PNG，阴影和光效应保持柔和自然，可用于叠加回原图。",
+    ].join("\n\n"),
+  },
+  {
+    id: "preview",
+    name: "合成预览",
+    role: "preview",
+    prompt: [
+      "请根据上传图片生成一张完整合成预览图。",
+      "画面应尽量还原原图内容、构图、商品、文字、装饰、背景和光影，作为分层结果的预览。",
+      "输出普通 PNG，不需要透明背景。",
+    ].join("\n\n"),
+  },
+] as const;
+
+function createLayerPrompt(prompt: string) {
+  return [
+    "输出要求：只输出单张 PNG 图片，不要添加解释、不要添加额外文字、不要添加水印。",
+    "分层结果必须适合后续设计软件继续编辑；透明图层必须保留 alpha 通道，非该层内容应完全透明或尽量移除。",
+    prompt,
+  ].join("\n\n");
+}
+
 function normalizeAspectRatio(value: unknown): AspectRatio {
   return value === "auto" ||
     value === "1:1" ||
@@ -558,6 +638,7 @@ export class ImageTasksDO {
     const taskKey = `task:${taskId}`;
     const now = Date.now();
 
+    if (await isImageTaskCanceled(this.env, taskKey)) return;
     await this.env.TASKS_KV.put(
       taskKey,
       JSON.stringify({ status: "running", userKey, createdAt: now, updatedAt: now }),
@@ -700,7 +781,12 @@ export class CutoutTasksDO {
 
     const taskId = body.taskId?.trim();
     const userKey = body.userKey?.trim();
-    const taskType = new URL(request.url).pathname.includes("edit-task") ? "edit" : "cutout";
+    const pathname = new URL(request.url).pathname;
+    const taskType = pathname.includes("layer-task")
+      ? "layer"
+      : pathname.includes("edit-task")
+        ? "edit"
+        : "cutout";
     const taskKey = `${taskType}-task:${taskId}`;
     const now = Date.now();
     if (!taskId) {
@@ -725,7 +811,9 @@ export class CutoutTasksDO {
       return json({ ok: false }, { status: 500 });
     }
 
-    if (!body.sourceImage?.startsWith("data:image/") || !body.maskImage?.startsWith("data:image/")) {
+    const hasSourceImage = body.sourceImage?.startsWith("data:image/");
+    const hasMaskImage = body.maskImage?.startsWith("data:image/");
+    if (!hasSourceImage || (taskType !== "layer" && !hasMaskImage)) {
       await this.env.TASKS_KV.put(
         taskKey,
         JSON.stringify({
@@ -733,7 +821,12 @@ export class CutoutTasksDO {
           userKey,
           createdAt: now,
           updatedAt: now,
-          error: taskType === "edit" ? "改图任务缺少原图或涂抹区域" : "抠图任务缺少原图或涂抹区域",
+          error:
+            taskType === "layer"
+              ? "分层任务缺少原图"
+              : taskType === "edit"
+                ? "改图任务缺少原图或涂抹区域"
+                : "抠图任务缺少原图或涂抹区域",
         }),
         { expirationTtl: 3600 },
       );
@@ -768,7 +861,7 @@ export class CutoutTasksDO {
     return json({ ok: true });
   }
 
-  // 调用图像编辑接口：第一张是原图，第二张是黑白 mask。
+  // 调用图像编辑接口：抠图/改图使用原图+mask，分层只使用原图。
   async runTask(body: CutoutRequestBody) {
     const taskId = body.taskId?.trim();
     if (!taskId) return;
@@ -778,11 +871,13 @@ export class CutoutTasksDO {
     const model = this.env.OPENAI_MODEL?.trim();
     const sourceImage = body.sourceImage ?? "";
     const maskImage = body.maskImage ?? "";
-    const taskType = body.taskType === "edit" ? "edit" : "cutout";
+    const taskType =
+      body.taskType === "edit" ? "edit" : body.taskType === "layer" ? "layer" : "cutout";
     const taskKey = `${taskType}-task:${taskId}`;
     const editInstruction = body.editInstruction?.trim().replace(/\s+/g, " ").slice(0, 600) ?? "";
     const now = Date.now();
 
+    if (await isImageTaskCanceled(this.env, taskKey)) return;
     await this.env.TASKS_KV.put(
       taskKey,
       JSON.stringify({ status: "running", userKey, createdAt: now, updatedAt: now }),
@@ -793,8 +888,11 @@ export class CutoutTasksDO {
       if (!apiKey || !baseUrl || !model) {
         throw new Error("服务端缺少 OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL 配置");
       }
-      if (!sourceImage.startsWith("data:image/") || !maskImage.startsWith("data:image/")) {
-        throw new Error(taskType === "edit" ? "改图任务缺少原图或涂抹区域" : "抠图任务缺少原图或涂抹区域");
+      if (!sourceImage.startsWith("data:image/")) {
+        throw new Error(taskType === "layer" ? "分层任务缺少原图" : "任务缺少原图");
+      }
+      if (taskType !== "layer" && !maskImage.startsWith("data:image/")) {
+        throw new Error(taskType === "edit" ? "改图任务缺少涂抹区域" : "抠图任务缺少涂抹区域");
       }
       if (taskType === "edit" && !editInstruction) {
         throw new Error("改图任务缺少修改内容");
@@ -802,6 +900,123 @@ export class CutoutTasksDO {
 
       // 抠图、改图和详情图共用取消检查逻辑。
       const shouldStop = () => isImageTaskCanceled(this.env, taskKey);
+      if (taskType === "layer") {
+        const layers = [];
+        for (let index = 0; index < LAYER_PRESETS.length; index += 1) {
+          const preset = LAYER_PRESETS[index];
+          if (await shouldStop()) return;
+          const attemptResult = await createImageRequestWithRetry(
+            baseUrl,
+            apiKey,
+            model,
+            createLayerPrompt(preset.prompt),
+            "1024x1024",
+            [sourceImage],
+            shouldStop,
+          );
+          if (!attemptResult.response.ok) {
+            if (await shouldStop()) return;
+            await this.env.TASKS_KV.put(
+              taskKey,
+              JSON.stringify({
+                status: "failed",
+                userKey,
+                sourceImageId: body.sourceImageId,
+                createdAt: now,
+                updatedAt: Date.now(),
+                error: formatImageAttemptFailure(`分层-${preset.name}`, attemptResult),
+              }),
+              { expirationTtl: 3600 },
+            );
+            return;
+          }
+
+          let payload: ImagesPayload;
+          try {
+            payload = JSON.parse(attemptResult.text) as ImagesPayload;
+          } catch {
+            if (await shouldStop()) return;
+            await this.env.TASKS_KV.put(
+              taskKey,
+              JSON.stringify({
+                status: "failed",
+                userKey,
+                sourceImageId: body.sourceImageId,
+                createdAt: now,
+                updatedAt: Date.now(),
+                error: `分层-${preset.name} 返回了无法解析的 JSON`,
+              }),
+              { expirationTtl: 3600 },
+            );
+            return;
+          }
+
+          const result = payload.data?.[0]?.b64_json;
+          if (!result) {
+            if (await shouldStop()) return;
+            await this.env.TASKS_KV.put(
+              taskKey,
+              JSON.stringify({
+                status: "failed",
+                userKey,
+                sourceImageId: body.sourceImageId,
+                createdAt: now,
+                updatedAt: Date.now(),
+                error: `API 返回成功但未包含${preset.name}结果`,
+              }),
+              { expirationTtl: 3600 },
+            );
+            return;
+          }
+
+          layers.push({
+            id: preset.id,
+            name: preset.name,
+            role: preset.role,
+            index,
+            base64: result,
+          });
+
+          await this.env.TASKS_KV.put(
+            taskKey,
+            JSON.stringify({
+              status: "running",
+              userKey,
+              sourceImageId: body.sourceImageId,
+              progress: {
+                done: layers.length,
+                total: LAYER_PRESETS.length,
+                current: preset.name,
+              },
+              createdAt: now,
+              updatedAt: Date.now(),
+            }),
+            { expirationTtl: 3600 },
+          );
+        }
+
+        await this.env.TASKS_KV.put(
+          taskKey,
+          JSON.stringify({
+            status: "succeeded",
+            userKey,
+            sourceImageId: body.sourceImageId,
+            createdAt: now,
+            updatedAt: Date.now(),
+            model,
+            layers,
+            manifest: {
+              sourceImageId: body.sourceImageId,
+              createdAt: Date.now(),
+            },
+          }),
+          { expirationTtl: 3600 },
+        );
+
+        await this.state.storage.delete("task");
+        return;
+      }
+
       const attemptResult = await createImageRequestWithRetry(
         baseUrl,
         apiKey,
@@ -1020,6 +1235,7 @@ export class PromptTasksDO {
     const imageCount = Math.min(8, Math.max(1, Math.round(body.imageCount ?? 5)));
     const productImages = (body.productImages ?? []).filter(Boolean).slice(0, 8);
 
+    if (await isImageTaskCanceled(this.env, taskKey)) return;
     await this.env.TASKS_KV.put(
       taskKey,
       JSON.stringify({ status: "running", userKey, createdAt, updatedAt: createdAt }),
@@ -1184,6 +1400,24 @@ export default {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...body, taskType: "edit" }),
+      });
+    }
+    if (url.pathname === "/layer-task" && request.method === "POST") {
+      // 分层任务入口：复用 CutoutTasksDO，只使用原图生成多张透明 PNG 图层。
+      const token = env.IMAGE_WORKER_TOKEN?.trim();
+      const auth = request.headers.get("Authorization")?.trim();
+      if (!token || auth !== `Bearer ${token}`) {
+        return json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const body = (await request.json()) as CutoutRequestBody & {
+        taskId: string;
+      };
+      const id = env.CUTOUT_TASKS.idFromName(`layer:${body.taskId}`);
+      const stub = env.CUTOUT_TASKS.get(id);
+      return stub.fetch("https://do/layer-task", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, taskType: "layer" }),
       });
     }
     return json({ ok: true });

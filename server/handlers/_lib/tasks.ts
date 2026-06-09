@@ -48,6 +48,7 @@ interface TaskRecord {
   userKey?: string;
   imageId?: string;
   base64?: unknown;
+  layers?: unknown;
   // billedAt 存在时说明这条成功任务已经扣过费，防止前端多次轮询重复扣费。
   billedAt?: number;
   createdAt?: number;
@@ -98,6 +99,35 @@ async function ensureTaskImageId(
   key: string,
   task: TaskRecord,
 ) {
+  if (task.status === "succeeded" && Array.isArray(task.layers) && task.userKey) {
+    let changed = false;
+    const layers = await Promise.all(
+      task.layers.map(async (layer) => {
+        if (!layer || typeof layer !== "object") return layer;
+        const item = layer as Record<string, unknown>;
+        if (typeof item.imageId === "string" && item.imageId) {
+          const { base64: _base64, ...rest } = item;
+          return rest;
+        }
+        if (typeof item.base64 !== "string") return item;
+        const imageId = await storeHistoryImage(context.env, task.userKey!, item.base64);
+        changed = true;
+        const { base64: _base64, ...rest } = item;
+        return { ...rest, imageId };
+      }),
+    );
+    if (changed) {
+      const nextTask = stripTaskBase64({
+        ...task,
+        layers,
+        updatedAt: Date.now(),
+      });
+      await kv.put(key, JSON.stringify(nextTask), { expirationTtl: 3600 });
+      return nextTask;
+    }
+    return stripTaskBase64({ ...task, layers });
+  }
+
   if (task.status !== "succeeded" || typeof task.base64 !== "string") {
     return stripTaskBase64(task);
   }

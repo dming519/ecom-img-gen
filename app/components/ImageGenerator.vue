@@ -32,12 +32,13 @@ import EditStudio from "./EditStudio.vue"
 import HistoryGrid from "./HistoryGrid.vue"
 import Icon from "./Icon.vue"
 import ImageCountSelector from "./ImageCountSelector.vue"
+import LayerStudio from "./LayerStudio.vue"
 import Lightbox from "./Lightbox.vue"
 import MultiViewStudio from "./MultiViewStudio.vue"
 import QualitySelector from "./QualitySelector.vue"
 import Stage from "./Stage.vue"
 
-type StudioMode = "image" | "cutout" | "multi-view" | "edit"
+type StudioMode = "image" | "cutout" | "multi-view" | "edit" | "layer"
 type WakeLockSentinelLike = { release: () => Promise<void> }
 
 const props = withDefaults(defineProps<{
@@ -154,6 +155,8 @@ const authRedirectPath = computed(() =>
       ? "/multi-view/"
       : studioMode.value === "edit"
         ? "/edit/"
+        : studioMode.value === "layer"
+          ? "/layer/"
         : "/image/",
 )
 const isAdmin = computed(
@@ -332,16 +335,19 @@ function readStudioModeFromUrl(): StudioMode {
   if (pathname.endsWith("/cutout")) return "cutout"
   if (pathname.endsWith("/multi-view")) return "multi-view"
   if (pathname.endsWith("/edit")) return "edit"
+  if (pathname.endsWith("/layer")) return "layer"
   if (pathname.endsWith("/image")) return "image"
   const hashMode = window.location.hash.replace(/^#/, "")
   if (hashMode === "cutout") return "cutout"
   if (hashMode === "multi-view") return "multi-view"
   if (hashMode === "edit") return "edit"
+  if (hashMode === "layer") return "layer"
   if (hashMode === "image") return "image"
   const module = new URL(window.location.href).searchParams.get("module")
   if (module === "cutout") return "cutout"
   if (module === "multi-view") return "multi-view"
   if (module === "edit") return "edit"
+  if (module === "layer") return "layer"
   return "image"
 }
 
@@ -367,6 +373,8 @@ async function handleModuleLinkClick(event: MouseEvent, mode: StudioMode) {
         ? "/multi-view/"
         : mode === "edit"
           ? "/edit/"
+          : mode === "layer"
+            ? "/layer/"
           : "/image/",
   )
 }
@@ -1115,10 +1123,15 @@ onBeforeUnmount(() => {
           <Icon name="brush" />
           <span>改图</span>
         </a>
-        <button type="button" class="creative-tab" disabled>
+        <a
+          href="/layer/"
+          :class="['creative-tab', { 'is-active': studioMode === 'layer' }]"
+          :aria-current="studioMode === 'layer' ? 'page' : undefined"
+          @click="event => handleModuleLinkClick(event, 'layer')"
+        >
           <Icon name="text" />
           <span>分层</span>
-        </button>
+        </a>
         <button type="button" class="creative-tab" disabled>
           <Icon name="video" />
           <span>视频</span>
@@ -1544,6 +1557,15 @@ onBeforeUnmount(() => {
     />
 
     <EditStudio
+      v-else-if="studioMode === 'edit'"
+      :authenticated="authenticated"
+      :session-loading="sessionLoading"
+      :session="session"
+      @update:session="session = $event"
+      @zoom="lightboxSrc = $event"
+    />
+
+    <LayerStudio
       v-else
       :authenticated="authenticated"
       :session-loading="sessionLoading"
