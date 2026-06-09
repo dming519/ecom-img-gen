@@ -48,6 +48,12 @@ interface LayerDisplayRow {
   state: "done" | "running" | "pending"
 }
 
+interface LayerProgress {
+  done: number
+  total: number
+  current: string
+}
+
 const EXPECTED_LAYER_ROWS: Array<Omit<LayerDisplayRow, "state" | "layer">> = [
   { id: "background", name: "背景层", role: "background", index: 0 },
   { id: "main-subject", name: "商品主体", role: "subject", index: 1 },
@@ -72,11 +78,7 @@ const abortRef = shallowRef<AbortController | null>(null)
 const history = ref<LayerHistoryItem[]>([])
 const activeHistoryIdx = shallowRef(-1)
 const historyLoadedUserKey = shallowRef<string | null>(null)
-const progress = ref<{ done: number; total: number; current: string }>({
-  done: 0,
-  total: EXPECTED_LAYER_COUNT,
-  current: "",
-})
+const progress = ref<LayerProgress>(normalizeLayerProgress())
 
 const LAYER_ROLE_LABEL: Record<LayerResultItem["role"], string> = {
   background: "背景",
@@ -146,6 +148,24 @@ const layerRows = computed<LayerDisplayRow[]>(() => {
     }
   })
 })
+
+function normalizeLayerProgress(raw?: Partial<LayerProgress>): LayerProgress {
+  const rawTotal = Number(raw?.total ?? EXPECTED_LAYER_COUNT)
+  const total = Math.min(
+    Math.max(Number.isFinite(rawTotal) ? Math.round(rawTotal) : EXPECTED_LAYER_COUNT, 1),
+    EXPECTED_LAYER_COUNT,
+  )
+  const rawDone = Number(raw?.done ?? 0)
+  const done = Math.min(
+    Math.max(Number.isFinite(rawDone) ? Math.round(rawDone) : 0, 0),
+    total,
+  )
+  return {
+    done,
+    total,
+    current: raw?.current ?? "",
+  }
+}
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -283,7 +303,7 @@ async function handleFileChange(event: Event) {
     layers.value = []
     layersNormalizedToSourceSize.value = false
     selectedLayerId.value = null
-    progress.value = { done: 0, total: EXPECTED_LAYER_COUNT, current: "" }
+    progress.value = normalizeLayerProgress()
     activeHistoryIdx.value = -1
   } catch (uploadError) {
     error.value = uploadError instanceof Error ? uploadError.message : String(uploadError)
@@ -330,7 +350,7 @@ async function handleGenerate() {
   layers.value = []
   layersNormalizedToSourceSize.value = false
   selectedLayerId.value = null
-  progress.value = { done: 0, total: EXPECTED_LAYER_COUNT, current: "" }
+  progress.value = normalizeLayerProgress()
   let historyItem: LayerHistoryItem = {
     sourceImageId: sourceImageId.value,
     sourceImage: sourceImage.value ?? undefined,
@@ -357,11 +377,7 @@ async function handleGenerate() {
     const result = await pollLayerTask(created.taskId, undefined, abortRef.value.signal, (next) => {
       syncLayersFromTask(next)
       if (!next.progress) return
-      progress.value = {
-        done: Number(next.progress.done ?? 0),
-        total: Number(next.progress.total ?? EXPECTED_LAYER_COUNT),
-        current: next.progress.current ?? "",
-      }
+      progress.value = normalizeLayerProgress(next.progress)
       updateLayerHistorySnapshot(historyItem, { status: "running", error: null })
       queuePersistLayer()
     })
@@ -379,11 +395,11 @@ async function handleGenerate() {
       error.value = result.error || "分层失败"
       return
     }
-    progress.value = {
-      done: Number(progress.value.total || EXPECTED_LAYER_COUNT),
-      total: Number(progress.value.total || EXPECTED_LAYER_COUNT),
+    progress.value = normalizeLayerProgress({
+      done: EXPECTED_LAYER_COUNT,
+      total: EXPECTED_LAYER_COUNT,
       current: "正在校准白底图层",
-    }
+    })
     updateLayerHistorySnapshot(historyItem, { status: "running", error: null })
     await persistLayer(historyItem)
     await normalizeLayersToWhiteSourceCanvas()
@@ -650,15 +666,11 @@ async function handleSelectHistory(index: number) {
   layers.value = getOutputLayers(item.layers)
   layersNormalizedToSourceSize.value = !!item.normalizedToSourceSize
   selectedLayerId.value = layers.value[0]?.id ?? null
-  const historyProgressTotal = Math.min(
-    Math.max(Number(item.progress?.total ?? EXPECTED_LAYER_COUNT), 1),
-    EXPECTED_LAYER_COUNT,
-  )
-  progress.value = {
-    done: Math.min(Number(item.progress?.done ?? layers.value.length), historyProgressTotal),
-    total: historyProgressTotal,
+  progress.value = normalizeLayerProgress({
+    done: item.progress?.done ?? layers.value.length,
+    total: item.progress?.total,
     current: item.progress?.current ?? "",
-  }
+  })
   error.value = item.error ?? null
 }
 

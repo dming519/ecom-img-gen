@@ -16,6 +16,7 @@ export interface Env {
 type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 type ImageQuality = "1K" | "2K" | "4K";
+type LayerAspectRatio = "1:1" | "3:4" | "4:3";
 
 interface GenerateRequestBody {
   prompt?: string;
@@ -242,8 +243,26 @@ function getImageDimensions(dataUrl: string) {
   }
 }
 
-function resolveLayerImageSize(_sourceImage: string): ImageSize {
-  return "auto";
+function resolveLayerAspectRatio(dimensions: { width: number; height: number } | null): LayerAspectRatio {
+  if (!dimensions?.width || !dimensions.height) return "1:1";
+  const sourceRatio = dimensions.width / dimensions.height;
+  const candidates: Array<{ aspectRatio: LayerAspectRatio; ratio: number }> = [
+    { aspectRatio: "1:1", ratio: 1 },
+    { aspectRatio: "3:4", ratio: 3 / 4 },
+    { aspectRatio: "4:3", ratio: 4 / 3 },
+  ];
+  return candidates.reduce((best, candidate) =>
+    Math.abs(Math.log(sourceRatio / candidate.ratio)) <
+    Math.abs(Math.log(sourceRatio / best.ratio))
+      ? candidate
+      : best,
+  ).aspectRatio;
+}
+
+function resolveLayerImageSize(aspectRatio: LayerAspectRatio): ImageSize {
+  if (aspectRatio === "1:1") return "1024x1024";
+  if (aspectRatio === "4:3") return "1536x1024";
+  return "1024x1536";
 }
 
 function json(data: unknown, init?: ResponseInit) {
@@ -1182,7 +1201,8 @@ export class CutoutTasksDO {
       if (taskType === "layer") {
         const layers: GeneratedLayerItem[] = [];
         const sourceDimensions = getImageDimensions(sourceImage);
-        const layerImageSize = resolveLayerImageSize(sourceImage);
+        const layerAspectRatio = resolveLayerAspectRatio(sourceDimensions);
+        const layerImageSize = resolveLayerImageSize(layerAspectRatio);
         const modelLayerPresets = LAYER_PRESETS;
         const progressTotal = LAYER_PRESETS.length;
         let progressDone = 0;
