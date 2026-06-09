@@ -281,7 +281,7 @@ async function persistLayer(item: LayerHistoryItem) {
 
 async function normalizeLayerToWhiteSourceCanvas(
   layer: LayerResultItem,
-  dimensions: ImageDimensions,
+  dimensions?: ImageDimensions | null,
 ) {
   const sourceKey = getLayerSourceKey(layer)
   const cached = normalizedLayerCache.get(sourceKey)
@@ -298,7 +298,6 @@ async function normalizeLayerToWhiteSourceCanvas(
 async function normalizeLayerListToWhiteSourceCanvas(sourceLayers: LayerResultItem[]) {
   const sortedLayers = getOutputLayers(sourceLayers)
   const dimensions = sourceDimensions.value
-  if (!dimensions?.width || !dimensions.height) return sortedLayers
   return Promise.all(
     sortedLayers.map((layer) => normalizeLayerToWhiteSourceCanvas(layer, dimensions)),
   )
@@ -310,7 +309,7 @@ async function syncLayersFromTask(
 ) {
   if (!result.layers) return
   const sortedLayers = await normalizeLayerListToWhiteSourceCanvas(result.layers)
-  layersNormalizedToSourceSize.value = !!sourceDimensions.value
+  layersNormalizedToSourceSize.value = true
   layers.value = sortedLayers
   const currentLayerExists = sortedLayers.some((layer) => layer.id === selectedLayerId.value)
   if (options.preferPreview) {
@@ -587,26 +586,30 @@ async function fetchLayerBlob(layer: LayerResultItem) {
   return response.blob()
 }
 
-async function drawBlobOnWhiteSourceCanvas(blob: Blob, dimensions: ImageDimensions) {
+async function drawBlobOnWhiteSourceCanvas(blob: Blob, dimensions?: ImageDimensions | null) {
   const objectUrl = URL.createObjectURL(blob)
   try {
     const image = await loadImage(objectUrl)
-    const canvas = document.createElement("canvas")
-    canvas.width = dimensions.width
-    canvas.height = dimensions.height
-    const context = canvas.getContext("2d")
-    if (!context) throw new Error("浏览器不支持图层白底规范化")
-    context.fillStyle = LAYER_BACKGROUND_COLOR
-    context.fillRect(0, 0, dimensions.width, dimensions.height)
-    context.imageSmoothingEnabled = true
-    context.imageSmoothingQuality = "high"
     const imageWidth = image.naturalWidth || image.width
     const imageHeight = image.naturalHeight || image.height
-    const scale = Math.min(dimensions.width / imageWidth, dimensions.height / imageHeight)
+    const canvasWidth = dimensions?.width || imageWidth
+    const canvasHeight = dimensions?.height || imageHeight
+    const canvas = document.createElement("canvas")
+    canvas.width = canvasWidth
+    canvas.height = canvasHeight
+    const context = canvas.getContext("2d", { alpha: false })
+    if (!context) throw new Error("浏览器不支持图层白底规范化")
+    context.fillStyle = LAYER_BACKGROUND_COLOR
+    context.fillRect(0, 0, canvasWidth, canvasHeight)
+    context.imageSmoothingEnabled = true
+    context.imageSmoothingQuality = "high"
+    const scale = dimensions?.width && dimensions.height
+      ? Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight)
+      : 1
     const drawWidth = imageWidth * scale
     const drawHeight = imageHeight * scale
-    const drawX = (dimensions.width - drawWidth) / 2
-    const drawY = (dimensions.height - drawHeight) / 2
+    const drawX = (canvasWidth - drawWidth) / 2
+    const drawY = (canvasHeight - drawHeight) / 2
     context.drawImage(image, drawX, drawY, drawWidth, drawHeight)
     return canvasToBlob(canvas)
   } finally {
@@ -616,7 +619,7 @@ async function drawBlobOnWhiteSourceCanvas(blob: Blob, dimensions: ImageDimensio
 
 async function normalizeLayersToWhiteSourceCanvas() {
   const dimensions = sourceDimensions.value
-  if (!dimensions?.width || !dimensions.height || layersNormalizedToSourceSize.value) return
+  if (layersNormalizedToSourceSize.value) return
 
   const currentLayerId = selectedLayerId.value
   const normalizedLayers = await Promise.all(
@@ -632,8 +635,6 @@ async function normalizeLayersToWhiteSourceCanvas() {
 async function fetchLayerBytes(layer: LayerResultItem) {
   const blob = await fetchLayerBlob(layer)
   const dimensions = sourceDimensions.value
-  if (!dimensions?.width || !dimensions.height) return blobToBytes(blob)
-
   return blobToBytes(await drawBlobOnWhiteSourceCanvas(blob, dimensions))
 }
 
