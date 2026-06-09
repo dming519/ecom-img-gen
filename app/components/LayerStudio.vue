@@ -613,7 +613,7 @@ async function drawBlobOnWhiteSourceCanvas(blob: Blob, dimensions?: ImageDimensi
     context.imageSmoothingEnabled = true
     context.imageSmoothingQuality = "high"
     const scale = dimensions?.width && dimensions.height
-      ? Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight)
+      ? Math.max(canvasWidth / imageWidth, canvasHeight / imageHeight)
       : 1
     const drawWidth = imageWidth * scale
     const drawHeight = imageHeight * scale

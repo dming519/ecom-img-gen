@@ -711,11 +711,27 @@ async function mergeStoredLayerImageIds(env: Env, taskKey: string, layers: Gener
   });
 }
 
-function createLayerPrompt(prompt: string) {
+function describeLayerCanvas(
+  aspectRatio: LayerAspectRatio,
+  size: ImageSize,
+  dimensions: { width: number; height: number } | null,
+) {
+  const sourceSize = dimensions ? `${dimensions.width}x${dimensions.height}` : "the uploaded image";
+  return `Use the full model output canvas (${size}) for the selected ${aspectRatio} layer standard, matched to ${sourceSize}. The layer content must occupy the same full-canvas composition as the uploaded image; do not place a square 1:1 rendering inside a wider or taller white canvas.`;
+}
+
+function createLayerPrompt(
+  prompt: string,
+  aspectRatio: LayerAspectRatio,
+  size: ImageSize,
+  dimensions: { width: number; height: number } | null,
+) {
   return [
     "Return exactly one PNG image. Do not add explanations, captions, watermarks, borders, or extra text.",
+    describeLayerCanvas(aspectRatio, size, dimensions),
     "Use the uploaded image as the only visual source. Keep the original canvas composition, aspect ratio, perspective, placement, and lighting.",
     "Keep the output canvas size and aspect ratio the same as the uploaded image whenever the image API allows it.",
+    "If the image API uses a nearest supported ratio, fill that entire ratio with the original composition instead of returning centered square content with side or top/bottom margins.",
     "Do not crop, zoom, recenter, rotate, stretch, or change the target object's position relative to the original canvas.",
     "The result must be a PNG on a pure white background. Pixels outside the requested layer must be white, not transparent, gray, checkerboard, or filled with invented texture.",
     "Prefer isolating visible original content over redesigning or inventing new content.",
@@ -723,11 +739,18 @@ function createLayerPrompt(prompt: string) {
   ].join("\n\n");
 }
 
-function createLayerFallbackPrompt(preset: (typeof LAYER_PRESETS)[number]) {
+function createLayerFallbackPrompt(
+  preset: (typeof LAYER_PRESETS)[number],
+  aspectRatio: LayerAspectRatio,
+  size: ImageSize,
+  dimensions: { width: number; height: number } | null,
+) {
   const common = [
+    describeLayerCanvas(aspectRatio, size, dimensions),
     "Use the uploaded ecommerce image as the visual reference.",
     "Create one clean PNG layer for a design workflow. Keep the original canvas, aspect ratio, perspective, placement, and lighting as much as possible.",
     "Keep the output canvas size and aspect ratio the same as the uploaded image whenever the image API allows it.",
+    "Fill the whole supported output ratio with the original composition. Do not return a centered square layer with white side margins.",
     "Do not crop, recenter, zoom, stretch, rotate, or redesign visible elements.",
   ];
 
@@ -779,13 +802,15 @@ async function createLayerImageWithFallback(
   preset: (typeof LAYER_PRESETS)[number],
   sourceImage: string,
   size: ImageSize,
+  aspectRatio: LayerAspectRatio,
+  dimensions: { width: number; height: number } | null,
   shouldStop: () => Promise<boolean>,
 ) {
   const primary = await createImageRequestWithRetry(
     baseUrl,
     apiKey,
     model,
-    createLayerPrompt(preset.prompt),
+    createLayerPrompt(preset.prompt, aspectRatio, size, dimensions),
     size,
     [sourceImage],
     shouldStop,
@@ -798,7 +823,7 @@ async function createLayerImageWithFallback(
     baseUrl,
     apiKey,
     model,
-    createLayerPrompt(createLayerFallbackPrompt(preset)),
+    createLayerPrompt(createLayerFallbackPrompt(preset, aspectRatio, size, dimensions), aspectRatio, size, dimensions),
     size,
     [sourceImage],
     shouldStop,
@@ -1252,6 +1277,8 @@ export class CutoutTasksDO {
             preset,
             sourceImage,
             layerImageSize,
+            layerAspectRatio,
+            sourceDimensions,
             shouldStop,
           );
           if (!attemptResult.response.ok) {
