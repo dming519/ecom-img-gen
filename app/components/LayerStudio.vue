@@ -24,6 +24,7 @@ const emit = defineEmits<{
 }>()
 
 const MAX_LAYER_IMAGE_BYTES = 10 * 1024 * 1024
+const fileInputId = "layer-source-file"
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const sourceImage = shallowRef<string | null>(null)
@@ -344,11 +345,8 @@ async function handleDownloadZip() {
         <span class="panel-count">分层源图</span>
       </div>
       <div class="cutout-panel-body layer-source-body">
-        <button
-          type="button"
-          :class="['cutout-upload-zone', { 'has-image': sourceImage }]"
-          :disabled="controlsDisabled"
-          @click="fileInputRef?.click()"
+        <label
+          :class="['cutout-upload-zone', { 'has-image': sourceImage, 'is-disabled': controlsDisabled }]"
         >
           <img v-if="sourceImage" :src="sourceImage" alt="待分层原图">
           <span v-else>
@@ -356,13 +354,24 @@ async function handleDownloadZip() {
             <strong>上传商品图片</strong>
             <small>支持商品图、详情图、主图或海报图</small>
           </span>
-        </button>
-        <input ref="fileInputRef" type="file" accept="image/*" hidden @change="handleFileChange">
+          <input
+            :id="fileInputId"
+            ref="fileInputRef"
+            class="layer-file-input"
+            type="file"
+            accept="image/*"
+            :disabled="controlsDisabled"
+            @change="handleFileChange"
+          >
+        </label>
         <div class="cutout-source-actions">
-          <button type="button" class="btn-ghost" :disabled="controlsDisabled" @click="fileInputRef?.click()">
+          <label
+            :class="['btn-ghost layer-change-trigger', { 'is-disabled': controlsDisabled }]"
+            :for="controlsDisabled ? undefined : fileInputId"
+          >
             <Icon name="upload" />
             更换图片
-          </button>
+          </label>
           <button type="button" class="btn-ghost" :disabled="!sourceImage" @click="sourceImage && emit('zoom', sourceImage)">
             <Icon name="zoom" />
             查看原图
@@ -474,11 +483,51 @@ async function handleDownloadZip() {
 }
 
 .layer-source-panel .cutout-upload-zone {
+  position: relative;
   min-height: 254px;
+  cursor: pointer;
 }
 
 .layer-source-panel .cutout-upload-zone img {
   max-height: 300px;
+}
+
+.layer-source-panel .cutout-upload-zone.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.layer-source-panel .cutout-upload-zone.is-disabled:hover {
+  transform: none;
+  border-color: var(--border-strong);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.72), rgba(255,255,255,0.08)),
+    var(--bg-soft);
+  box-shadow: none;
+}
+
+.layer-file-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.layer-file-input:disabled {
+  cursor: not-allowed;
+}
+
+.layer-change-trigger {
+  cursor: pointer;
+}
+
+.layer-change-trigger.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+  pointer-events: none;
 }
 
 .layer-output-note {
