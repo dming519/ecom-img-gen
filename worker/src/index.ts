@@ -102,7 +102,7 @@ function resolveImageEndpoint(baseUrl: string, hasImages: boolean) {
 }
 
 // 模型接口需要 Blob/FormData，这里把浏览器传来的 data URL 还原成 Blob。
-function dataUrlToBlob(dataUrl: string) {
+function dataUrlToBytes(dataUrl: string) {
   const match = dataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/);
   if (!match) {
     throw new Error("图片数据格式无效，无法解析上传内容");
@@ -117,7 +117,137 @@ function dataUrlToBlob(dataUrl: string) {
     bytes[i] = binary.charCodeAt(i);
   }
 
+  return { mimeType, bytes };
+}
+
+function dataUrlToBlob(dataUrl: string) {
+  const { mimeType, bytes } = dataUrlToBytes(dataUrl);
+
   return new Blob([bytes], { type: mimeType });
+}
+
+function readUint32Be(bytes: Uint8Array, offset: number) {
+  return (
+    ((bytes[offset] ?? 0) << 24) |
+    ((bytes[offset + 1] ?? 0) << 16) |
+    ((bytes[offset + 2] ?? 0) << 8) |
+    (bytes[offset + 3] ?? 0)
+  ) >>> 0;
+}
+
+function readUint16Be(bytes: Uint8Array, offset: number) {
+  return (((bytes[offset] ?? 0) << 8) | (bytes[offset + 1] ?? 0)) >>> 0;
+}
+
+function readUint24Le(bytes: Uint8Array, offset: number) {
+  return (
+    (bytes[offset] ?? 0) |
+    ((bytes[offset + 1] ?? 0) << 8) |
+    ((bytes[offset + 2] ?? 0) << 16)
+  ) >>> 0;
+}
+
+function getPngDimensions(bytes: Uint8Array) {
+  const isPng =
+    bytes.length >= 24 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47;
+  if (!isPng) return null;
+  return {
+    width: readUint32Be(bytes, 16),
+    height: readUint32Be(bytes, 20),
+  };
+}
+
+function getJpegDimensions(bytes: Uint8Array) {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let offset = 2;
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    const marker = bytes[offset + 1] ?? 0;
+    const length = readUint16Be(bytes, offset + 2);
+    if (!length || offset + length + 2 > bytes.length) return null;
+    const isStartOfFrame =
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf);
+    if (isStartOfFrame) {
+      return {
+        width: readUint16Be(bytes, offset + 7),
+        height: readUint16Be(bytes, offset + 5),
+      };
+    }
+    offset += length + 2;
+  }
+  return null;
+}
+
+function getWebpDimensions(bytes: Uint8Array) {
+  const isWebp =
+    bytes.length >= 30 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50;
+  if (!isWebp) return null;
+
+  const chunk = String.fromCharCode(bytes[12] ?? 0, bytes[13] ?? 0, bytes[14] ?? 0, bytes[15] ?? 0);
+  if (chunk === "VP8X" && bytes.length >= 30) {
+    return {
+      width: readUint24Le(bytes, 24) + 1,
+      height: readUint24Le(bytes, 27) + 1,
+    };
+  }
+  if (chunk === "VP8 " && bytes.length >= 30) {
+    return {
+      width: readUint16Be(new Uint8Array([bytes[27] ?? 0, bytes[26] ?? 0]), 0) & 0x3fff,
+      height: readUint16Be(new Uint8Array([bytes[29] ?? 0, bytes[28] ?? 0]), 0) & 0x3fff,
+    };
+  }
+  if (chunk === "VP8L" && bytes.length >= 25) {
+    const b0 = bytes[21] ?? 0;
+    const b1 = bytes[22] ?? 0;
+    const b2 = bytes[23] ?? 0;
+    const b3 = bytes[24] ?? 0;
+    return {
+      width: 1 + (((b1 & 0x3f) << 8) | b0),
+      height: 1 + (((b3 & 0x0f) << 10) | (b2 << 2) | ((b1 & 0xc0) >> 6)),
+    };
+  }
+  return null;
+}
+
+function getImageDimensions(dataUrl: string) {
+  try {
+    const { bytes } = dataUrlToBytes(dataUrl);
+    const dimensions =
+      getPngDimensions(bytes) ??
+      getJpegDimensions(bytes) ??
+      getWebpDimensions(bytes);
+    if (!dimensions?.width || !dimensions.height) return null;
+    return dimensions;
+  } catch {
+    return null;
+  }
+}
+
+function resolveLayerImageSize(sourceImage: string): ImageSize {
+  const dimensions = getImageDimensions(sourceImage);
+  if (!dimensions) return "auto";
+  const ratio = dimensions.width / dimensions.height;
+  if (ratio > 1.18) return "1536x1024";
+  if (ratio < 0.85) return "1024x1536";
+  return "1024x1024";
 }
 
 function json(data: unknown, init?: ResponseInit) {
@@ -460,10 +590,11 @@ const LAYER_PRESETS = [
     name: "背景层",
     role: "background",
     prompt: [
-      "你正在执行电商图片分层任务。请基于上传图片生成“背景层”。",
-      "输出只包含背景、底色、场景、纹理、远景和环境光，不要包含商品主体、文字、Logo、图标、贴纸、人物、手、道具或前景装饰。",
-      "如果原图背景被商品或文字遮挡，请自然补全被遮挡区域。保持原图构图、透视、光影方向和画面比例。",
-      "输出为一张干净的 PNG 图层，背景不需要透明。",
+      "你正在执行电商图片分层任务。请基于上传图片生成“背景补全层”。",
+      "把商品主体、营销文字、Logo、图标、贴纸、人物、手、道具和前景装饰视为需要移除的前景元素。",
+      "输出只包含背景、底色、场景、纹理、远景和环境光；被前景遮挡的区域用周围背景自然补全，不能出现糊块、重复纹理或明显接缝。",
+      "保持原图构图、透视、光影方向、画面比例和完整画布，不要重新设计背景风格。",
+      "输出为一张普通 PNG 背景板，不需要透明。",
     ].join("\n\n"),
   },
   {
@@ -471,10 +602,11 @@ const LAYER_PRESETS = [
     name: "商品主体",
     role: "subject",
     prompt: [
-      "你正在执行电商图片分层任务。请基于上传图片生成“商品主体层”。",
-      "只保留商品主体本体，包括包装、瓶身、盒子、Logo、标签和商品上的真实可见文字。",
-      "移除背景、营销文案、装饰贴纸、信息卡片、人物、手、道具、阴影和额外场景。",
-      "输出透明背景 PNG，商品边缘干净，保持原商品外观、比例、颜色、材质、品牌标识和可见文字，不要重新设计商品。",
+      "你正在执行电商图片分层任务。请基于上传图片隔离“商品主体层”。",
+      "只保留原图中真实可见的商品本体，包括包装、瓶身、盒子、商品 Logo、标签版式和商品包装上的真实可见文字。",
+      "移除背景、营销文案、装饰贴纸、信息卡片、人物、手、道具、投影和额外场景。",
+      "不要美化、修复、补全、重画或重新设计商品；必须尽量保持原商品的形状、比例、颜色、材质、瑕疵、品牌标识和可见文字。",
+      "输出透明背景 PNG，元素保持在原图中的位置和大小，画布比例不变，商品外区域必须是真实透明 alpha。",
     ].join("\n\n"),
   },
   {
@@ -482,10 +614,11 @@ const LAYER_PRESETS = [
     name: "文字层",
     role: "text",
     prompt: [
-      "你正在执行电商图片分层任务。请基于上传图片生成“文字层”。",
-      "只保留画面中的营销标题、卖点文案、参数文字、价格文字、标签文字、说明文字和文字框。",
+      "你正在执行电商图片分层任务。请基于上传图片隔离“文字层”。",
+      "只保留画面中的营销标题、卖点文案、参数文字、价格文字、标签文字、说明文字、文字框和排版线条。",
       "不要保留商品主体、背景、人物、手、道具或纯装饰图形。商品包装本身印刷的 Logo 和标签文字不属于这一层。",
-      "输出透明背景 PNG，文字位置、颜色、字号、排版尽量与原图一致。",
+      "把文字当作图像形状隔离，不要重新写文案，不要纠错，不要翻译，不要改字体，不要改颜色。",
+      "输出透明背景 PNG，文字位置、颜色、字号、排版和画布比例尽量与原图一致；没有文字的区域必须是真实透明 alpha。",
     ].join("\n\n"),
   },
   {
@@ -493,10 +626,11 @@ const LAYER_PRESETS = [
     name: "装饰道具层",
     role: "decoration",
     prompt: [
-      "你正在执行电商图片分层任务。请基于上传图片生成“装饰道具层”。",
+      "你正在执行电商图片分层任务。请基于上传图片隔离“装饰道具层”。",
       "只保留非商品主体的装饰元素、图标、贴纸、信息卡片、几何形、道具、点缀素材、前景摆件和辅助视觉元素。",
       "不要保留商品主体、背景大色块、营销文字、人物或手。",
-      "输出透明背景 PNG，元素位置和外观尽量与原图一致。",
+      "不要新增装饰，不要重新设计现有装饰；保持元素在原图中的位置、大小、颜色、边缘和透明关系。",
+      "输出透明背景 PNG，没有装饰道具的区域必须是真实透明 alpha。",
     ].join("\n\n"),
   },
   {
@@ -504,20 +638,19 @@ const LAYER_PRESETS = [
     name: "阴影光效层",
     role: "shadow",
     prompt: [
-      "你正在执行电商图片分层任务。请基于上传图片生成“阴影光效层”。",
-      "只保留商品和视觉元素造成的阴影、投影、反光、高光、光晕、光束、柔光和局部氛围光。",
+      "你正在执行电商图片分层任务。请基于上传图片隔离“阴影光效层”。",
+      "只保留原图中已经存在的阴影、投影、反光、高光、光晕、光束、柔光和局部氛围光。",
       "不要保留商品主体、文字、背景纹理、道具或装饰图形。",
-      "输出透明背景 PNG，阴影和光效应保持柔和自然，可用于叠加回原图。",
+      "不要重新打光，不要新增阴影；阴影和光效应保持柔和自然，可用于叠加回原图。",
+      "输出透明背景 PNG，没有阴影光效的区域必须是真实透明 alpha。",
     ].join("\n\n"),
   },
   {
     id: "preview",
-    name: "合成预览",
+    name: "原图预览",
     role: "preview",
     prompt: [
-      "请根据上传图片生成一张完整合成预览图。",
-      "画面应尽量还原原图内容、构图、商品、文字、装饰、背景和光影，作为分层结果的预览。",
-      "输出普通 PNG，不需要透明背景。",
+      "直接使用用户上传原图作为分层预览，不需要调用模型重新生成。",
     ].join("\n\n"),
   },
 ] as const;
@@ -566,7 +699,10 @@ async function mergeStoredLayerImageIds(env: Env, taskKey: string, layers: Gener
 function createLayerPrompt(prompt: string) {
   return [
     "Return exactly one PNG image. Do not add explanations, captions, watermarks, borders, or extra text.",
-    "The result must be usable as an editable design layer. For transparent layers, keep a real alpha channel; pixels outside the requested layer should be transparent.",
+    "Use the uploaded image as the only visual source. Keep the original canvas composition, aspect ratio, perspective, placement, and lighting.",
+    "Do not crop, zoom, recenter, rotate, stretch, or change the target object's position relative to the original canvas.",
+    "The result must be usable as an editable design layer. For transparent layers, keep a real alpha channel; pixels outside the requested layer must be transparent, not white, gray, checkerboard, or filled with a background.",
+    "Prefer isolating visible original content over redesigning or inventing new content.",
     prompt,
   ].join("\n\n");
 }
@@ -574,47 +710,48 @@ function createLayerPrompt(prompt: string) {
 function createLayerFallbackPrompt(preset: (typeof LAYER_PRESETS)[number]) {
   const common = [
     "Use the uploaded ecommerce image as the visual reference.",
-    "Create one clean PNG layer for a design workflow. Keep the original canvas, perspective, placement, and lighting as much as possible.",
+    "Create one clean PNG layer for a design workflow. Keep the original canvas, aspect ratio, perspective, placement, and lighting as much as possible.",
+    "Do not crop, recenter, zoom, stretch, rotate, or redesign visible elements.",
   ];
 
   if (preset.role === "background") {
     return [
       ...common,
-      "Layer target: background plate only. Show the background, base color, texture, scene, and ambient light. Fill covered areas naturally.",
-      "Do not show foreground merchandise, marketing text, labels, icons, hands, or props.",
+      "Layer target: background plate only. Remove foreground merchandise, marketing text, labels, icons, hands, and props. Fill covered areas naturally using nearby background texture and lighting.",
+      "Do not show foreground elements and do not change the original background style.",
     ].join("\n\n");
   }
   if (preset.role === "subject") {
     return [
       ...common,
-      "Layer target: merchandise subject only. Preserve the real item shape, color, material, logo, label layout, and visible packaging text.",
-      "Use a transparent background. Do not include scene background, marketing copy, decorative stickers, props, or cast shadows.",
+      "Layer target: merchandise subject only. Preserve the real item shape, color, material, logo, label layout, and visible packaging text from the uploaded image.",
+      "Use a transparent background. Do not include scene background, marketing copy, decorative stickers, props, or cast shadows. Do not beautify or redesign the merchandise.",
     ].join("\n\n");
   }
   if (preset.role === "text") {
     return [
       ...common,
-      "Layer target: marketing and layout text only. Preserve text position, color, size, and layout from the reference image.",
-      "Use a transparent background. Do not include the merchandise subject, background, props, or pure decoration.",
+      "Layer target: marketing and layout text only. Treat text as image shapes. Preserve text position, color, size, and layout from the reference image.",
+      "Use a transparent background. Do not rewrite, correct, translate, or replace the text. Do not include the merchandise subject, background, props, or pure decoration.",
     ].join("\n\n");
   }
   if (preset.role === "decoration") {
     return [
       ...common,
       "Layer target: decorative visual elements and props only, such as stickers, icons, cards, geometric shapes, foreground props, and accents.",
-      "Use a transparent background. Do not include the merchandise subject, background plate, or marketing text.",
+      "Use a transparent background. Do not include the merchandise subject, background plate, or marketing text. Do not invent new decoration.",
     ].join("\n\n");
   }
   if (preset.role === "shadow") {
     return [
       ...common,
-      "Layer target: shadows and lighting effects only, including cast shadows, reflections, highlights, glow, beams, and soft ambient effects.",
-      "Use a transparent background. Do not include the merchandise subject, text, props, or background texture.",
+      "Layer target: existing shadows and lighting effects only, including cast shadows, reflections, highlights, glow, beams, and soft ambient effects.",
+      "Use a transparent background. Do not include the merchandise subject, text, props, or background texture. Do not create new lighting.",
     ].join("\n\n");
   }
   return [
     ...common,
-    "Layer target: full composite preview. Recreate the uploaded image content as a complete preview PNG.",
+    "Layer target: source preview. Keep the uploaded image unchanged.",
   ].join("\n\n");
 }
 
@@ -624,6 +761,7 @@ async function createLayerImageWithFallback(
   model: string,
   preset: (typeof LAYER_PRESETS)[number],
   sourceImage: string,
+  size: ImageSize,
   shouldStop: () => Promise<boolean>,
 ) {
   const primary = await createImageRequestWithRetry(
@@ -631,7 +769,7 @@ async function createLayerImageWithFallback(
     apiKey,
     model,
     createLayerPrompt(preset.prompt),
-    "1024x1024",
+    size,
     [sourceImage],
     shouldStop,
   );
@@ -644,7 +782,7 @@ async function createLayerImageWithFallback(
     apiKey,
     model,
     createLayerPrompt(createLayerFallbackPrompt(preset)),
-    "1024x1024",
+    size,
     [sourceImage],
     shouldStop,
   );
@@ -1044,13 +1182,25 @@ export class CutoutTasksDO {
       const shouldStop = () => isImageTaskCanceled(this.env, taskKey);
       if (taskType === "layer") {
         const layers: GeneratedLayerItem[] = [];
+        const sourceDimensions = getImageDimensions(sourceImage);
+        const layerImageSize = resolveLayerImageSize(sourceImage);
+        const modelLayerPresets = LAYER_PRESETS.filter((preset) => preset.role !== "preview");
+        const previewPreset = LAYER_PRESETS.find((preset) => preset.role === "preview");
+        const progressTotal = LAYER_PRESETS.length;
+        let progressDone = 0;
         const writeLayerTask = async (
           status: "running" | "succeeded" | "failed",
           options: {
             current?: string;
             error?: string;
             model?: string;
-            manifest?: { sourceImageId?: string; createdAt?: number };
+            manifest?: {
+              sourceImageId?: string;
+              createdAt?: number;
+              width?: number;
+              height?: number;
+              renderSize?: ImageSize;
+            };
           } = {},
         ) => {
           const persistedLayers = await mergeStoredLayerImageIds(this.env, taskKey, layers);
@@ -1059,8 +1209,8 @@ export class CutoutTasksDO {
             userKey,
             sourceImageId: body.sourceImageId,
             progress: {
-              done: layers.length,
-              total: LAYER_PRESETS.length,
+              done: progressDone,
+              total: progressTotal,
               current: options.current ?? "",
             },
             createdAt: now,
@@ -1073,8 +1223,8 @@ export class CutoutTasksDO {
           await this.env.TASKS_KV.put(taskKey, JSON.stringify(record), { expirationTtl: 3600 });
         };
 
-        for (let index = 0; index < LAYER_PRESETS.length; index += 1) {
-          const preset = LAYER_PRESETS[index];
+        for (const preset of modelLayerPresets) {
+          const index = LAYER_PRESETS.findIndex((item) => item.id === preset.id);
           if (await shouldStop()) return;
           const attemptResult = await createLayerImageWithFallback(
             baseUrl,
@@ -1082,6 +1232,7 @@ export class CutoutTasksDO {
             model,
             preset,
             sourceImage,
+            layerImageSize,
             shouldStop,
           );
           if (!attemptResult.response.ok) {
@@ -1122,8 +1273,25 @@ export class CutoutTasksDO {
             index,
             base64: result,
           });
+          progressDone += 1;
 
           await writeLayerTask("running", { current: preset.name });
+        }
+
+        if (previewPreset) {
+          const previewLayer: GeneratedLayerItem = {
+            id: previewPreset.id,
+            name: previewPreset.name,
+            role: previewPreset.role,
+            index: LAYER_PRESETS.findIndex((item) => item.id === previewPreset.id),
+          };
+          if (body.sourceImageId) {
+            previewLayer.imageId = body.sourceImageId;
+          } else {
+            previewLayer.base64 = sourceImage.replace(/^data:image\/[^;]+;base64,/, "");
+          }
+          layers.push(previewLayer);
+          progressDone = progressTotal;
         }
 
         await writeLayerTask("succeeded", {
@@ -1131,6 +1299,9 @@ export class CutoutTasksDO {
           model,
           manifest: {
             sourceImageId: body.sourceImageId,
+            width: sourceDimensions?.width,
+            height: sourceDimensions?.height,
+            renderSize: layerImageSize,
             createdAt: Date.now(),
           },
         });

@@ -256,6 +256,7 @@ export interface CutoutTaskStatus {
   manifest?: {
     width?: number;
     height?: number;
+    renderSize?: ImageSize;
     sourceImageId?: string;
     createdAt?: number;
   };

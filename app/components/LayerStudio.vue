@@ -572,7 +572,7 @@ watch(
         </div>
         <div class="cutout-help layer-output-note">
           <strong>输出内容</strong>
-          <p>自动拆出背景、商品主体、文字、装饰道具、阴影光效和合成预览，并打包为 ZIP。</p>
+          <p>自动拆出背景、商品主体、文字、装饰道具和阴影光效；预览层保留原图，结果可打包为 ZIP。</p>
         </div>
       </div>
       <div v-if="error" class="alert cutout-alert">{{ error }}</div>
