@@ -164,7 +164,7 @@ const creditLabel = computed(() =>
   authenticated.value
     ? isSuperAdmin.value
       ? "不限次数"
-      : `今日剩余 ${session.value?.user?.remainingCredits ?? 0} 次`
+      : `今日剩余 ${session.value?.user?.dailyRemainingCredits ?? session.value?.user?.remainingCredits ?? 0} 次 · 永久 ${session.value?.user?.permanentRemainingCredits ?? 0} 次`
     : "未登录",
 )
 const showUserImage = computed(
@@ -399,6 +399,11 @@ async function persistHistory(item: HistoryItem) {
 function updateSessionCredits(result: {
   remainingCredits?: number
   usedCredits?: number
+  dailyRemainingCredits?: number
+  dailyUsedCredits?: number
+  dailyGrantedCredits?: number
+  permanentRemainingCredits?: number
+  permanentGrantedCredits?: number
   unlimitedCredits?: boolean
 }) {
   if (result.unlimitedCredits || !Number.isFinite(result.remainingCredits)) return
@@ -407,8 +412,13 @@ function updateSessionCredits(result: {
     ...session.value,
     user: {
       ...session.value.user,
-      remainingCredits: result.remainingCredits,
-      usedCredits: result.usedCredits,
+      remainingCredits: result.remainingCredits ?? session.value.user.remainingCredits,
+      usedCredits: result.usedCredits ?? session.value.user.usedCredits,
+      dailyRemainingCredits: result.dailyRemainingCredits ?? session.value.user.dailyRemainingCredits,
+      dailyUsedCredits: result.dailyUsedCredits ?? session.value.user.dailyUsedCredits,
+      dailyGrantedCredits: result.dailyGrantedCredits ?? session.value.user.dailyGrantedCredits,
+      permanentRemainingCredits: result.permanentRemainingCredits ?? session.value.user.permanentRemainingCredits,
+      permanentGrantedCredits: result.permanentGrantedCredits ?? session.value.user.permanentGrantedCredits,
     },
   }
 }
@@ -1162,8 +1172,8 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="account-stats">
-                <span>{{ isSuperAdmin ? "不限次数" : `今日剩余 ${session.user.remainingCredits ?? 0} 次` }}</span>
-                <span>今日已用 {{ session.user.usedCredits ?? 0 }} 次</span>
+                <span>{{ isSuperAdmin ? "不限次数" : `今日剩余 ${session.user.dailyRemainingCredits ?? session.user.remainingCredits ?? 0} 次 · 永久 ${session.user.permanentRemainingCredits ?? 0} 次` }}</span>
+                <span>今日已用 {{ session.user.dailyUsedCredits ?? 0 }} 次</span>
               </div>
               <button
                 v-if="isAdmin"

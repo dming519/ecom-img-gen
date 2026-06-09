@@ -214,6 +214,11 @@ export async function handleTaskStatusRequest(
         billedAt: Date.now(),
         remainingCredits: billed.user.remainingCredits,
         usedCredits: billed.user.usedCredits,
+        dailyRemainingCredits: billed.user.dailyRemainingCredits,
+        dailyUsedCredits: billed.user.dailyUsedCredits,
+        dailyGrantedCredits: billed.user.dailyGrantedCredits,
+        permanentRemainingCredits: billed.user.permanentRemainingCredits,
+        permanentGrantedCredits: billed.user.permanentGrantedCredits,
         unlimitedCredits: billed.unlimited,
       };
       await access.kv.put(key, JSON.stringify(stripTaskBase64(nextTask)), { expirationTtl: 3600 });

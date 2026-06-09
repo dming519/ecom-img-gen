@@ -114,7 +114,7 @@ const angleControlsDisabled = computed(() => props.sessionLoading || busy.value)
 const remainingCredits = computed(() =>
   props.session?.user?.role === "super_admin"
     ? "不限次数"
-    : `今日剩余 ${props.session?.user?.remainingCredits ?? 0} 次`,
+    : `今日剩余 ${props.session?.user?.dailyRemainingCredits ?? props.session?.user?.remainingCredits ?? 0} 次 · 永久 ${props.session?.user?.permanentRemainingCredits ?? 0} 次`,
 )
 const generationLabel = computed(() =>
   `${aspectRatio.value === "auto" ? "Auto" : aspectRatio.value} · ${quality.value}`,
@@ -253,6 +253,11 @@ async function getGenerationImageIds() {
 function updateSessionCredits(result: {
   remainingCredits?: number
   usedCredits?: number
+  dailyRemainingCredits?: number
+  dailyUsedCredits?: number
+  dailyGrantedCredits?: number
+  permanentRemainingCredits?: number
+  permanentGrantedCredits?: number
   unlimitedCredits?: boolean
 }) {
   if (result.unlimitedCredits || !Number.isFinite(result.remainingCredits)) return
@@ -261,8 +266,13 @@ function updateSessionCredits(result: {
     ...props.session,
     user: {
       ...props.session.user,
-      remainingCredits: result.remainingCredits,
-      usedCredits: result.usedCredits,
+      remainingCredits: result.remainingCredits ?? props.session.user.remainingCredits,
+      usedCredits: result.usedCredits ?? props.session.user.usedCredits,
+      dailyRemainingCredits: result.dailyRemainingCredits ?? props.session.user.dailyRemainingCredits,
+      dailyUsedCredits: result.dailyUsedCredits ?? props.session.user.dailyUsedCredits,
+      dailyGrantedCredits: result.dailyGrantedCredits ?? props.session.user.dailyGrantedCredits,
+      permanentRemainingCredits: result.permanentRemainingCredits ?? props.session.user.permanentRemainingCredits,
+      permanentGrantedCredits: result.permanentGrantedCredits ?? props.session.user.permanentGrantedCredits,
     },
   })
 }

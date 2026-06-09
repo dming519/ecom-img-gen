@@ -71,7 +71,9 @@ const pendingMaskRef = shallowRef<string | null>(null)
 const pendingCanvasZoomRef = shallowRef<number | null>(null)
 
 // 根据父组件传入的 session 派生页面展示状态。
-const remainingCredits = computed(() => props.session?.user?.remainingCredits ?? 0)
+const creditLabel = computed(() =>
+  `今日剩余 ${props.session?.user?.dailyRemainingCredits ?? props.session?.user?.remainingCredits ?? 0} 次 · 永久 ${props.session?.user?.permanentRemainingCredits ?? 0} 次`,
+)
 const isSuperAdmin = computed(() => props.session?.user?.role === "super_admin")
 const sessionUserKey = computed(() => props.session?.user?.userKey ?? props.session?.user?.id ?? null)
 const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
@@ -481,6 +483,11 @@ function exportMaskImage() {
 function updateSessionCredits(result: {
   remainingCredits?: number
   usedCredits?: number
+  dailyRemainingCredits?: number
+  dailyUsedCredits?: number
+  dailyGrantedCredits?: number
+  permanentRemainingCredits?: number
+  permanentGrantedCredits?: number
   unlimitedCredits?: boolean
 }) {
   if (result.unlimitedCredits || !Number.isFinite(result.remainingCredits)) return
@@ -489,8 +496,13 @@ function updateSessionCredits(result: {
     ...props.session,
     user: {
       ...props.session.user,
-      remainingCredits: result.remainingCredits,
-      usedCredits: result.usedCredits,
+      remainingCredits: result.remainingCredits ?? props.session.user.remainingCredits,
+      usedCredits: result.usedCredits ?? props.session.user.usedCredits,
+      dailyRemainingCredits: result.dailyRemainingCredits ?? props.session.user.dailyRemainingCredits,
+      dailyUsedCredits: result.dailyUsedCredits ?? props.session.user.dailyUsedCredits,
+      dailyGrantedCredits: result.dailyGrantedCredits ?? props.session.user.dailyGrantedCredits,
+      permanentRemainingCredits: result.permanentRemainingCredits ?? props.session.user.permanentRemainingCredits,
+      permanentGrantedCredits: result.permanentGrantedCredits ?? props.session.user.permanentGrantedCredits,
     },
   })
 }
@@ -777,7 +789,7 @@ watch(
   <div class="run-status cutout-status" aria-label="抠图任务状态">
     <span>{{ sourceImage ? "原图已上传" : "等待上传" }}</span>
     <span>{{ maskDirty ? "已涂抹区域" : "未涂抹" }}</span>
-    <span>{{ isSuperAdmin ? "不限次数" : `今日剩余 ${remainingCredits} 次` }}</span>
+    <span>{{ isSuperAdmin ? "不限次数" : creditLabel }}</span>
     <span>{{ busy ? "抠图中" : "待命" }}</span>
   </div>
 

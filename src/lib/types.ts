@@ -28,6 +28,11 @@ export interface AuthUser {
   remainingCredits?: number;
   usedCredits?: number;
   grantedCredits?: number;
+  dailyRemainingCredits?: number;
+  dailyUsedCredits?: number;
+  dailyGrantedCredits?: number;
+  permanentRemainingCredits?: number;
+  permanentGrantedCredits?: number;
 }
 
 // 登录态接口 `/api/auth/session` 的返回结构。
@@ -48,6 +53,11 @@ export interface AdminUserRow {
   remainingCredits: number;
   usedCredits: number;
   grantedCredits: number;
+  dailyRemainingCredits: number;
+  dailyUsedCredits: number;
+  dailyGrantedCredits: number;
+  permanentRemainingCredits: number;
+  permanentGrantedCredits: number;
   createdAt: number;
   updatedAt: number;
   lastLoginAt: number;
@@ -65,7 +75,7 @@ export interface AccessCodeRow {
   useCount: number;
 }
 
-// 旧兑换码：每日固定额度启用后仅用于后台查看和停用历史兑换码。
+// 兑换码：给已登录用户增加永久生图额度。
 export interface RedeemCodeRow {
   id: string;
   label: string;
@@ -186,6 +196,11 @@ export interface ImageTaskStatus {
   warning?: string | null;
   remainingCredits?: number;
   usedCredits?: number;
+  dailyRemainingCredits?: number;
+  dailyUsedCredits?: number;
+  dailyGrantedCredits?: number;
+  permanentRemainingCredits?: number;
+  permanentGrantedCredits?: number;
   unlimitedCredits?: boolean;
   billedAt?: number;
 }
@@ -220,6 +235,11 @@ export interface CutoutTaskStatus {
   error?: string;
   remainingCredits?: number;
   usedCredits?: number;
+  dailyRemainingCredits?: number;
+  dailyUsedCredits?: number;
+  dailyGrantedCredits?: number;
+  permanentRemainingCredits?: number;
+  permanentGrantedCredits?: number;
   unlimitedCredits?: boolean;
   billedAt?: number;
 }

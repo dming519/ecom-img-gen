@@ -30,6 +30,11 @@ interface CreateTaskPayload extends ErrorPayload {
   status?: string;
   remainingCredits?: number;
   usedCredits?: number;
+  dailyRemainingCredits?: number;
+  dailyUsedCredits?: number;
+  dailyGrantedCredits?: number;
+  permanentRemainingCredits?: number;
+  permanentGrantedCredits?: number;
   unlimitedCredits?: boolean;
 }
 
@@ -179,6 +184,11 @@ export async function createImageTask(
   taskId: string;
   remainingCredits?: number;
   usedCredits?: number;
+  dailyRemainingCredits?: number;
+  dailyUsedCredits?: number;
+  dailyGrantedCredits?: number;
+  permanentRemainingCredits?: number;
+  permanentGrantedCredits?: number;
   unlimitedCredits?: boolean;
 }> {
   const response = await fetchWithRetry(DEFAULT_GENERATE_PATH, {
@@ -203,6 +213,11 @@ export async function createImageTask(
     taskId: payload.taskId,
     remainingCredits: payload.remainingCredits,
     usedCredits: payload.usedCredits,
+    dailyRemainingCredits: payload.dailyRemainingCredits,
+    dailyUsedCredits: payload.dailyUsedCredits,
+    dailyGrantedCredits: payload.dailyGrantedCredits,
+    permanentRemainingCredits: payload.permanentRemainingCredits,
+    permanentGrantedCredits: payload.permanentGrantedCredits,
     unlimitedCredits: payload.unlimitedCredits,
   };
 }
@@ -271,6 +286,11 @@ export async function createCutoutTask(
   taskId: string;
   remainingCredits?: number;
   usedCredits?: number;
+  dailyRemainingCredits?: number;
+  dailyUsedCredits?: number;
+  dailyGrantedCredits?: number;
+  permanentRemainingCredits?: number;
+  permanentGrantedCredits?: number;
   unlimitedCredits?: boolean;
 }> {
   const response = await fetchWithRetry(DEFAULT_CUTOUT_PATH, {
@@ -295,6 +315,11 @@ export async function createCutoutTask(
     taskId: payload.taskId,
     remainingCredits: payload.remainingCredits,
     usedCredits: payload.usedCredits,
+    dailyRemainingCredits: payload.dailyRemainingCredits,
+    dailyUsedCredits: payload.dailyUsedCredits,
+    dailyGrantedCredits: payload.dailyGrantedCredits,
+    permanentRemainingCredits: payload.permanentRemainingCredits,
+    permanentGrantedCredits: payload.permanentGrantedCredits,
     unlimitedCredits: payload.unlimitedCredits,
   };
 }
@@ -307,6 +332,11 @@ export async function createEditTask(
   taskId: string;
   remainingCredits?: number;
   usedCredits?: number;
+  dailyRemainingCredits?: number;
+  dailyUsedCredits?: number;
+  dailyGrantedCredits?: number;
+  permanentRemainingCredits?: number;
+  permanentGrantedCredits?: number;
   unlimitedCredits?: boolean;
 }> {
   const response = await fetchWithRetry(DEFAULT_EDIT_PATH, {
@@ -335,6 +365,11 @@ export async function createEditTask(
     taskId: payload.taskId,
     remainingCredits: payload.remainingCredits,
     usedCredits: payload.usedCredits,
+    dailyRemainingCredits: payload.dailyRemainingCredits,
+    dailyUsedCredits: payload.dailyUsedCredits,
+    dailyGrantedCredits: payload.dailyGrantedCredits,
+    permanentRemainingCredits: payload.permanentRemainingCredits,
+    permanentGrantedCredits: payload.permanentGrantedCredits,
     unlimitedCredits: payload.unlimitedCredits,
   };
 }
@@ -465,7 +500,7 @@ export async function fetchAdminUsers(): Promise<{ users: AdminUserRow[] }> {
 
 export async function updateAdminUser(
   userKey: string,
-  patch: { role?: UserRole },
+  patch: { remainingCredits?: number; role?: UserRole },
 ): Promise<{ user: AdminUserRow }> {
   const response = await fetchWithRetry("/api/admin/users", {
     method: "POST",

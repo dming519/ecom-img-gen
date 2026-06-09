@@ -1,4 +1,5 @@
 import {
+  createRedeemCodeRecord,
   listRedeemCodes,
   updateRedeemCodeRecord,
 } from "../../_lib/redeemCodes";
@@ -76,10 +77,14 @@ export async function handlePost(context: RequestContext) {
       return json({ redeemCode });
     }
 
-    return json(
-      { error: "系统已改为每个注册用户每天 10 次生图机会，不再创建次数兑换码。" },
-      { status: 410 },
-    );
+    const created = await createRedeemCodeRecord(context.env, {
+      label: body.label,
+      code: body.code,
+      credits: body.credits,
+      maxRedemptions: body.maxRedemptions,
+      createdBy: auth.session.user.userKey ?? `${auth.session.user.provider}:${auth.session.user.id}`,
+    });
+    return json(created, { status: 201 });
   } catch (error) {
     return json(
       { error: error instanceof Error ? error.message : String(error) },

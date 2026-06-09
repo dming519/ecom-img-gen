@@ -43,6 +43,7 @@ interface UsageRecord {
   grantedCredits: number;
   dailyUsageDate: string;
   dailyUsedCredits: number;
+  creditModelVersion: number;
   createdAt: number;
   updatedAt: number;
   lastGeneratedAt?: number;
@@ -68,6 +69,7 @@ interface UsageRow {
   granted_credits: number;
   daily_usage_date?: string | null;
   daily_used_credits?: number | null;
+  credit_model_version?: number | null;
   created_at: number;
   updated_at: number;
   last_generated_at?: number | null;
@@ -106,14 +108,25 @@ function getDailyUsageSnapshot(usage: UsageRecord, now = Date.now()) {
   };
 }
 
+function getCreditSnapshot(usage: UsageRecord, now = Date.now()) {
+  const daily = getDailyUsageSnapshot(usage, now);
+  const permanentRemaining = Math.max(0, Math.round(usage.remainingCredits));
+  const permanentGranted = Math.max(0, Math.round(usage.grantedCredits));
+  return {
+    daily,
+    permanentRemaining,
+    permanentGranted,
+    totalRemaining: daily.remaining + permanentRemaining,
+    totalGranted: daily.limit + permanentGranted,
+  };
+}
+
 function normalizeDailyUsage(usage: UsageRecord, now = Date.now()) {
   const snapshot = getDailyUsageSnapshot(usage, now);
   const normalized: UsageRecord = {
     ...usage,
     dailyUsageDate: snapshot.usageDay,
     dailyUsedCredits: snapshot.used,
-    remainingCredits: snapshot.remaining,
-    grantedCredits: snapshot.limit,
   };
   return normalized;
 }
@@ -121,10 +134,20 @@ function normalizeDailyUsage(usage: UsageRecord, now = Date.now()) {
 function dailyUsageChanged(before: UsageRecord, after: UsageRecord) {
   return (
     before.dailyUsageDate !== after.dailyUsageDate ||
-    before.dailyUsedCredits !== after.dailyUsedCredits ||
-    before.remainingCredits !== after.remainingCredits ||
-    before.grantedCredits !== after.grantedCredits
+    before.dailyUsedCredits !== after.dailyUsedCredits
   );
+}
+
+function migrateInitialCreditsToPermanent(usage: UsageRecord): UsageRecord {
+  if (usage.creditModelVersion >= 2) return usage;
+  const granted = Math.max(0, Math.round(usage.grantedCredits));
+  const remaining = Math.max(0, Math.round(usage.remainingCredits));
+  return {
+    ...usage,
+    remainingCredits: Math.max(0, remaining - DAILY_IMAGE_CREDITS),
+    grantedCredits: Math.max(0, granted - DAILY_IMAGE_CREDITS),
+    creditModelVersion: 2,
+  };
 }
 
 function normalizeRole(role: string | undefined): UserRole {
@@ -174,6 +197,7 @@ async function ensureAdminSchema(db: HistoryD1Database) {
       granted_credits INTEGER NOT NULL,
       daily_usage_date TEXT,
       daily_used_credits INTEGER NOT NULL DEFAULT 0,
+      credit_model_version INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       last_generated_at INTEGER
@@ -238,6 +262,11 @@ async function ensureUserUsageDailyColumns(db: HistoryD1Database) {
       .prepare(`ALTER TABLE user_usage ADD COLUMN daily_used_credits INTEGER NOT NULL DEFAULT 0`)
       .run();
   }
+  if (!names.has("credit_model_version")) {
+    await db
+      .prepare(`ALTER TABLE user_usage ADD COLUMN credit_model_version INTEGER NOT NULL DEFAULT 0`)
+      .run();
+  }
 }
 
 export async function requireAdminDb(env: UserEnv, label = "管理数据表") {
@@ -270,6 +299,7 @@ function fromUsageRow(row: UsageRow): UsageRecord {
     grantedCredits: row.granted_credits,
     dailyUsageDate: row.daily_usage_date ?? "",
     dailyUsedCredits: clampDailyUsed(row.daily_used_credits),
+    creditModelVersion: row.credit_model_version ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastGeneratedAt: row.last_generated_at ?? undefined,
@@ -277,7 +307,7 @@ function fromUsageRow(row: UsageRow): UsageRecord {
 }
 
 function toSessionUser(record: UserRecord, usage: UsageRecord): AuthUser {
-  const snapshot = getDailyUsageSnapshot(usage);
+  const snapshot = getCreditSnapshot(usage);
   return {
     provider: record.provider,
     id: record.providerId,
@@ -286,14 +316,19 @@ function toSessionUser(record: UserRecord, usage: UsageRecord): AuthUser {
     email: record.email,
     image: record.image,
     role: record.role,
-    remainingCredits: snapshot.remaining,
-    usedCredits: snapshot.used,
-    grantedCredits: snapshot.limit,
+    remainingCredits: snapshot.totalRemaining,
+    usedCredits: usage.usedCredits,
+    grantedCredits: snapshot.totalGranted,
+    dailyRemainingCredits: snapshot.daily.remaining,
+    dailyUsedCredits: snapshot.daily.used,
+    dailyGrantedCredits: snapshot.daily.limit,
+    permanentRemainingCredits: snapshot.permanentRemaining,
+    permanentGrantedCredits: snapshot.permanentGranted,
   };
 }
 
 function toAdminRow(record: UserRecord, usage: UsageRecord): AdminUserRow {
-  const snapshot = getDailyUsageSnapshot(usage);
+  const snapshot = getCreditSnapshot(usage);
   return {
     userKey: record.userKey,
     provider: record.provider,
@@ -302,9 +337,14 @@ function toAdminRow(record: UserRecord, usage: UsageRecord): AdminUserRow {
     email: record.email,
     image: record.image,
     role: record.role,
-    remainingCredits: snapshot.remaining,
-    usedCredits: snapshot.used,
-    grantedCredits: snapshot.limit,
+    remainingCredits: snapshot.totalRemaining,
+    usedCredits: usage.usedCredits,
+    grantedCredits: snapshot.totalGranted,
+    dailyRemainingCredits: snapshot.daily.remaining,
+    dailyUsedCredits: snapshot.daily.used,
+    dailyGrantedCredits: snapshot.daily.limit,
+    permanentRemainingCredits: snapshot.permanentRemaining,
+    permanentGrantedCredits: snapshot.permanentGranted,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     lastLoginAt: record.lastLoginAt,
@@ -389,7 +429,7 @@ async function readUsageRecord(db: HistoryD1Database, userKey: string) {
   const row = await db
     .prepare(
       `SELECT user_key, remaining_credits, used_credits, granted_credits,
-        daily_usage_date, daily_used_credits,
+        daily_usage_date, daily_used_credits, credit_model_version,
         created_at, updated_at, last_generated_at
        FROM user_usage
        WHERE user_key = ?`,
@@ -404,9 +444,9 @@ async function writeUsageRecord(db: HistoryD1Database, usage: UsageRecord) {
     .prepare(
       `INSERT INTO user_usage
         (user_key, remaining_credits, used_credits, granted_credits,
-         daily_usage_date, daily_used_credits,
+         daily_usage_date, daily_used_credits, credit_model_version,
          created_at, updated_at, last_generated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(user_key)
        DO UPDATE SET
          remaining_credits = excluded.remaining_credits,
@@ -414,6 +454,7 @@ async function writeUsageRecord(db: HistoryD1Database, usage: UsageRecord) {
          granted_credits = excluded.granted_credits,
          daily_usage_date = excluded.daily_usage_date,
          daily_used_credits = excluded.daily_used_credits,
+         credit_model_version = excluded.credit_model_version,
          updated_at = excluded.updated_at,
          last_generated_at = excluded.last_generated_at`,
     )
@@ -424,6 +465,7 @@ async function writeUsageRecord(db: HistoryD1Database, usage: UsageRecord) {
       usage.grantedCredits,
       usage.dailyUsageDate,
       usage.dailyUsedCredits,
+      usage.creditModelVersion,
       usage.createdAt,
       usage.updatedAt,
       usage.lastGeneratedAt ?? null,
@@ -451,8 +493,26 @@ async function readUsage(
 ) {
   const existing = await readUsageRecord(db, userKey);
   if (existing) {
-    const normalized = normalizeDailyUsage(existing, now);
-    if (dailyUsageChanged(existing, normalized)) {
+    let source = existing;
+    if (existing.creditModelVersion < 2) {
+      const kvFallback = await readKvFallbackUsage(env, userKey);
+      if (kvFallback && kvFallback.grantedCredits > existing.grantedCredits) {
+        source = {
+          ...kvFallback,
+          dailyUsageDate: kvFallback.dailyUsageDate ?? "",
+          dailyUsedCredits: clampDailyUsed(kvFallback.dailyUsedCredits),
+          creditModelVersion: kvFallback.creditModelVersion ?? 0,
+        };
+      }
+    }
+    const migrated = migrateInitialCreditsToPermanent(source);
+    const normalized = normalizeDailyUsage(migrated, now);
+    if (
+      dailyUsageChanged(existing, normalized) ||
+      existing.remainingCredits !== normalized.remainingCredits ||
+      existing.grantedCredits !== normalized.grantedCredits ||
+      existing.creditModelVersion !== normalized.creditModelVersion
+    ) {
       await writeUsageRecord(db, normalized);
     }
     return normalized;
@@ -460,11 +520,12 @@ async function readUsage(
   const kvFallback = await readKvFallbackUsage(env, userKey);
   if (kvFallback) {
     const normalized = normalizeDailyUsage(
-      {
+      migrateInitialCreditsToPermanent({
         ...kvFallback,
         dailyUsageDate: kvFallback.dailyUsageDate ?? "",
         dailyUsedCredits: clampDailyUsed(kvFallback.dailyUsedCredits),
-      },
+        creditModelVersion: kvFallback.creditModelVersion ?? 0,
+      }),
       now,
     );
     await writeUsageRecord(db, normalized);
@@ -472,11 +533,12 @@ async function readUsage(
   }
   const created: UsageRecord = {
     userKey,
-    remainingCredits: DAILY_IMAGE_CREDITS,
+    remainingCredits: 0,
     usedCredits: 0,
-    grantedCredits: DAILY_IMAGE_CREDITS,
+    grantedCredits: 0,
     dailyUsageDate: getUsageDay(now),
     dailyUsedCredits: 0,
+    creditModelVersion: 2,
     createdAt: now,
     updatedAt: now,
   };
@@ -625,29 +687,27 @@ export async function consumeImageCreditByUserKey(env: UserEnv, userKey: string)
   }
   const now = Date.now();
   const snapshot = getDailyUsageSnapshot(usage, now);
-  if (snapshot.remaining <= 0) {
-    throw new Error("今日 10 次生图机会已用完，请明天再试。");
+  if (snapshot.remaining <= 0 && usage.remainingCredits <= 0) {
+    throw new Error("今日 10 次生图机会和永久额度都已用完，请明天再试或兑换次数。");
   }
 
+  const useDailyCredit = snapshot.remaining > 0;
   const next: UsageRecord = {
     ...usage,
-    remainingCredits: Math.max(0, snapshot.remaining - 1),
+    remainingCredits: useDailyCredit
+      ? Math.max(0, usage.remainingCredits)
+      : Math.max(0, usage.remainingCredits - 1),
     usedCredits: usage.usedCredits + 1,
-    grantedCredits: DAILY_IMAGE_CREDITS,
     dailyUsageDate: snapshot.usageDay,
-    dailyUsedCredits: snapshot.used + 1,
+    dailyUsedCredits: useDailyCredit ? snapshot.used + 1 : snapshot.used,
     updatedAt: now,
     lastGeneratedAt: now,
   };
   await writeUsageRecord(db, next);
+  const nextUser = toSessionUser(normalizedRecord, next);
 
   return {
-    user: {
-      ...user,
-      remainingCredits: next.remainingCredits,
-      usedCredits: next.dailyUsedCredits,
-      grantedCredits: DAILY_IMAGE_CREDITS,
-    },
+    user: nextUser,
     usage: next,
     unlimited: false,
   };
@@ -666,8 +726,8 @@ export async function requireImageCredit(env: UserEnv, authUser: AuthUser) {
     };
   }
   const snapshot = getDailyUsageSnapshot(managed.usage);
-  if (snapshot.remaining <= 0) {
-    throw new Error("今日 10 次生图机会已用完，请明天再试。");
+  if (snapshot.remaining <= 0 && managed.usage.remainingCredits <= 0) {
+    throw new Error("今日 10 次生图机会和永久额度都已用完，请明天再试或兑换次数。");
   }
   return {
     user: managed.user,
@@ -678,12 +738,21 @@ export async function requireImageCredit(env: UserEnv, authUser: AuthUser) {
 
 export async function grantImageCredits(env: UserEnv, authUser: AuthUser, amount: number) {
   const managed = await hydrateManagedUser(env, authUser);
-  if (!managed.usage) throw new Error("服务端未配置用户次数表");
+  const db = await requireAdminDb(env, "用户次数表");
+  if (!managed.usage || !managed.record) throw new Error("服务端未配置用户次数表");
   const credits = Math.max(1, Math.min(999, Math.round(amount)));
+  const now = Date.now();
+  const next: UsageRecord = {
+    ...managed.usage,
+    remainingCredits: managed.usage.remainingCredits + credits,
+    grantedCredits: managed.usage.grantedCredits + credits,
+    updatedAt: now,
+  };
+  await writeUsageRecord(db, next);
 
   return {
-    user: managed.user,
-    usage: managed.usage,
+    user: toSessionUser(managed.record, next),
+    usage: next,
     granted: credits,
   };
 }
@@ -721,7 +790,7 @@ export async function listManagedUsers(env: UserEnv) {
 export async function updateManagedUser(
   env: UserEnv,
   userKey: string,
-  patch: { role?: UserRole },
+  patch: { remainingCredits?: number; role?: UserRole },
 ) {
   const db = await requireAdminDb(env, "用户表");
   let record = await readUserRecord(db, userKey);
@@ -752,6 +821,16 @@ export async function updateManagedUser(
   }
 
   let usage = await readUsage(env, db, userKey, now);
+  if (Number.isFinite(patch.remainingCredits)) {
+    const nextRemaining = Math.max(0, Math.round(patch.remainingCredits ?? 0));
+    usage = {
+      ...usage,
+      remainingCredits: nextRemaining,
+      grantedCredits: Math.max(usage.grantedCredits, nextRemaining),
+      updatedAt: now,
+    };
+    await writeUsageRecord(db, usage);
+  }
 
   return toAdminRow(nextRecord, usage);
 }
