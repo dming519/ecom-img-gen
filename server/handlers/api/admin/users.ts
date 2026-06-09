@@ -59,7 +59,6 @@ export async function handlePost(context: RequestContext) {
   try {
     const body = (await context.request.json()) as {
       userKey?: string;
-      remainingCredits?: number;
       role?: UserRole;
     };
     const userKey = body.userKey?.trim();
@@ -67,7 +66,6 @@ export async function handlePost(context: RequestContext) {
       return json({ error: "缺少用户标识" }, { status: 400 });
     }
     const user = await updateManagedUser(context.env, userKey, {
-      remainingCredits: body.remainingCredits,
       role: body.role,
     });
     return json({ user });

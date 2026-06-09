@@ -114,7 +114,7 @@ const angleControlsDisabled = computed(() => props.sessionLoading || busy.value)
 const remainingCredits = computed(() =>
   props.session?.user?.role === "super_admin"
     ? "不限次数"
-    : `${props.session?.user?.remainingCredits ?? 0} 张可用`,
+    : `今日剩余 ${props.session?.user?.remainingCredits ?? 0} 次`,
 )
 const generationLabel = computed(() =>
   `${aspectRatio.value === "auto" ? "Auto" : aspectRatio.value} · ${quality.value}`,

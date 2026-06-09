@@ -2,7 +2,6 @@
 import { onBeforeUnmount, ref, shallowRef, watch } from "vue"
 import {
   createAccessCode,
-  createRedeemCode,
   fetchAccessCodes,
   fetchAdminUsers,
   fetchRedeemCodes,
@@ -34,16 +33,10 @@ const redeemCodes = ref<RedeemCodeRow[]>([])
 const busyKey = shallowRef<string | null>(null)
 const loading = shallowRef(false)
 const accessBusy = shallowRef(false)
-const redeemBusy = shallowRef(false)
 const error = shallowRef<string | null>(null)
 const accessLabel = shallowRef("")
 const customCode = shallowRef("")
 const createdCode = shallowRef<string | null>(null)
-const redeemLabel = shallowRef("")
-const customRedeemCode = shallowRef("")
-const redeemCredits = shallowRef(5)
-const redeemMaxUses = shallowRef(1)
-const createdRedeemCode = shallowRef<string | null>(null)
 const failedAvatars = ref(new Set<string>())
 
 async function loadAdminData() {
@@ -89,7 +82,7 @@ onBeforeUnmount(() => {
 
 async function updateUser(
   user: AdminUserRow,
-  patch: { remainingCredits?: number; role?: UserRole },
+  patch: { role?: UserRole },
 ) {
   busyKey.value = user.userKey
   error.value = null
@@ -137,30 +130,6 @@ async function handleUpdateAccessCode(
     error.value = event instanceof Error ? event.message : String(event)
   } finally {
     busyKey.value = null
-  }
-}
-
-async function handleCreateRedeemCode() {
-  redeemBusy.value = true
-  error.value = null
-  createdRedeemCode.value = null
-  try {
-    const payload = await createRedeemCode(
-      redeemLabel.value,
-      redeemCredits.value,
-      redeemMaxUses.value,
-      customRedeemCode.value,
-    )
-    redeemCodes.value = [payload.redeemCode, ...redeemCodes.value]
-    createdRedeemCode.value = payload.code
-    redeemLabel.value = ""
-    customRedeemCode.value = ""
-    redeemCredits.value = 5
-    redeemMaxUses.value = 1
-  } catch (event) {
-    error.value = event instanceof Error ? event.message : String(event)
-  } finally {
-    redeemBusy.value = false
   }
 }
 
@@ -218,10 +187,9 @@ function copyText(value: string) {
               <th>用户</th>
               <th>来源</th>
               <th>角色</th>
-              <th>剩余</th>
-              <th>已用</th>
+              <th>今日剩余</th>
+              <th>今日已用</th>
               <th>最近登录</th>
-              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -257,39 +225,13 @@ function copyText(value: string) {
               </td>
               <td>
                 <span v-if="user.role === 'super_admin'" class="unlimited-pill">不限</span>
-                <input
-                  v-else
-                  :aria-label="`${user.name} 的剩余图片张数`"
-                  type="number"
-                  min="0"
-                  :value="user.remainingCredits"
-                  :disabled="busyKey === user.userKey"
-                  @input="event => {
-                    const nextValue = Number((event.target as HTMLInputElement).value) || 0
-                    users = users.map((item) =>
-                      item.userKey === user.userKey ? { ...item, remainingCredits: nextValue } : item
-                    )
-                  }"
-                  @blur="event => updateUser(user, { remainingCredits: Number((event.target as HTMLInputElement).value) || 0 })"
-                >
+                <span v-else>{{ user.remainingCredits }} / {{ user.grantedCredits }}</span>
               </td>
               <td>{{ user.usedCredits }}</td>
               <td>{{ new Date(user.lastLoginAt).toLocaleString("zh-CN", TIME_FMT) }}</td>
-              <td>
-                <span v-if="user.role === 'super_admin'" class="admin-muted-action">无需调整</span>
-                <button
-                  v-else
-                  class="btn-ghost"
-                  type="button"
-                  :disabled="busyKey === user.userKey"
-                  @click="updateUser(user, { remainingCredits: user.remainingCredits + 5 })"
-                >
-                  +5张
-                </button>
-              </td>
             </tr>
             <tr v-if="!users.length && !loading">
-              <td colspan="7">暂无用户数据</td>
+              <td colspan="6">暂无用户数据</td>
             </tr>
           </tbody>
         </table>
@@ -373,26 +315,10 @@ function copyText(value: string) {
       <section class="access-code-section redeem-code-section">
         <div class="admin-section-head">
           <div>
-            <h3>兑换码</h3>
-            <p>创建给已登录用户使用的次数兑换码，创建后明文只显示一次。</p>
+            <h3>旧兑换码</h3>
+            <p>系统已改为每个注册用户每天 10 次生图机会，旧兑换码仅保留查看和停用。</p>
           </div>
-          <span>{{ redeemCodes.length }} 个兑换码</span>
-        </div>
-
-        <form class="access-code-form redeem-code-form" @submit.prevent="handleCreateRedeemCode">
-          <input v-model="redeemLabel" type="text" placeholder="备注，例如：活动赠送 / 老客补偿" aria-label="兑换码备注">
-          <input v-model="customRedeemCode" type="text" placeholder="自定义兑换码，可留空自动生成" aria-label="自定义兑换码">
-          <input v-model.number="redeemCredits" type="number" min="1" max="999" aria-label="每次增加图片张数">
-          <input v-model.number="redeemMaxUses" type="number" min="1" max="10000" aria-label="可兑换次数">
-          <button class="btn-secondary" type="submit" :disabled="redeemBusy">
-            {{ redeemBusy ? "创建中..." : "创建兑换码" }}
-          </button>
-        </form>
-
-        <div v-if="createdRedeemCode" class="access-code-created">
-          <span>新兑换码</span>
-          <code>{{ createdRedeemCode }}</code>
-          <button class="btn-ghost" type="button" @click="copyText(createdRedeemCode)">复制</button>
+          <span>{{ redeemCodes.length }} 个旧兑换码</span>
         </div>
 
         <div class="admin-table-wrap">
@@ -401,7 +327,7 @@ function copyText(value: string) {
               <tr>
                 <th>备注</th>
                 <th>状态</th>
-                <th>次数</th>
+                <th>原次数</th>
                 <th>兑换进度</th>
                 <th>最近兑换</th>
                 <th>创建时间</th>

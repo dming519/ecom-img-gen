@@ -1,11 +1,6 @@
 import { requireSession } from "../_lib/auth";
 import type { HistoryD1Database } from "../_lib/historyStorage";
-import { redeemCodeRecord } from "../_lib/redeemCodes";
-import {
-  getUserKey,
-  grantImageCredits,
-  type UserKvNamespace,
-} from "../_lib/users";
+import type { UserKvNamespace } from "../_lib/users";
 
 interface RequestContext {
   request: Request;
@@ -36,21 +31,8 @@ export async function handlePost(context: RequestContext) {
     return json({ error: "超级管理员不限次数，无需兑换" }, { status: 400 });
   }
 
-  try {
-    const body = (await context.request.json()) as { code?: string };
-    const userKey = session.user.userKey ?? getUserKey(session.user);
-    const redeemed = await redeemCodeRecord(context.env, body.code ?? "", userKey);
-    const granted = await grantImageCredits(context.env, session.user, redeemed.credits);
-
-    return json({
-      grantedCredits: granted.granted,
-      redeemCode: redeemed.redeemCode,
-      user: granted.user,
-    });
-  } catch (error) {
-    return json(
-      { error: error instanceof Error ? error.message : String(error) },
-      { status: 400 },
-    );
-  }
+  return json(
+    { error: "系统已改为每个注册用户每天 10 次生图机会，兑换码不再增加次数。" },
+    { status: 410 },
+  );
 }

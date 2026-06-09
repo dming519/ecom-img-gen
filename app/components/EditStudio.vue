@@ -587,7 +587,7 @@ watch(
   <div class="run-status cutout-status" aria-label="改图任务状态">
     <span>{{ sourceImage ? "原图已上传" : "等待上传" }}</span>
     <span>{{ maskDirty ? "已涂抹区域" : "未涂抹" }}</span>
-    <span>{{ isSuperAdmin ? "不限次数" : `${remainingCredits} 张可用` }}</span>
+    <span>{{ isSuperAdmin ? "不限次数" : `今日剩余 ${remainingCredits} 次` }}</span>
     <span>{{ busy ? "改图中" : "待命" }}</span>
   </div>
 

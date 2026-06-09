@@ -65,7 +65,7 @@ export interface AccessCodeRow {
   useCount: number;
 }
 
-// 兑换码：登录后给用户增加图片生成次数。
+// 旧兑换码：每日固定额度启用后仅用于后台查看和停用历史兑换码。
 export interface RedeemCodeRow {
   id: string;
   label: string;

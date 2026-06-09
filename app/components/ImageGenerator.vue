@@ -5,7 +5,6 @@ import {
   createImageTask,
   generateDetailPrompts,
   pollImageTask,
-  redeemCredits,
 } from "@/lib/api"
 import {
   dbAdd,
@@ -100,10 +99,7 @@ const session = shallowRef<AuthSession | null>(null)
 const sessionLoading = shallowRef(true)
 const authPopoverOpen = shallowRef(false)
 const accessCode = shallowRef("")
-const redeemCode = shallowRef("")
 const accessBusy = shallowRef(false)
-const redeemBusy = shallowRef(false)
-const redeemMessage = shallowRef<string | null>(null)
 const promptBusy = shallowRef(false)
 const imageBusy = shallowRef(false)
 const draftLoaded = shallowRef(false)
@@ -140,7 +136,6 @@ const controlsDisabled = computed(
   () =>
     sessionLoading.value ||
     accessBusy.value ||
-    redeemBusy.value ||
     promptBusy.value ||
     imageBusy.value ||
     !authenticated.value,
@@ -169,7 +164,7 @@ const creditLabel = computed(() =>
   authenticated.value
     ? isSuperAdmin.value
       ? "不限次数"
-      : `${session.value?.user?.remainingCredits ?? 0} 张可用`
+      : `今日剩余 ${session.value?.user?.remainingCredits ?? 0} 次`
     : "未登录",
 )
 const showUserImage = computed(
@@ -905,30 +900,6 @@ async function handleAccessLogin() {
   }
 }
 
-// 兑换码只增加当前账号的可用次数，不改变登录身份。
-async function handleRedeemCode() {
-  const code = redeemCode.value.trim()
-  if (!code) {
-    redeemMessage.value = "请输入兑换码。"
-    return
-  }
-  error.value = null
-  redeemMessage.value = null
-  redeemBusy.value = true
-  try {
-    const payload = await redeemCredits(code)
-    session.value = session.value
-      ? { ...session.value, authenticated: true, user: payload.user }
-      : { authenticated: true, user: payload.user }
-    redeemCode.value = ""
-    redeemMessage.value = `已增加 ${payload.grantedCredits} 张图片生成机会。`
-  } catch (event) {
-    redeemMessage.value = event instanceof Error ? event.message : String(event)
-  } finally {
-    redeemBusy.value = false
-  }
-}
-
 // 下载时直接使用当前图片 src，可能是 data URL，也可能是服务端文件 URL。
 function handleDownload(index: number) {
   const imageSrc = getPromptImageSrc(prompts.value[index])
@@ -1191,29 +1162,9 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="account-stats">
-                <span>{{ isSuperAdmin ? "不限次数" : `剩余 ${session.user.remainingCredits ?? 0} 张` }}</span>
-                <span>已用 {{ session.user.usedCredits ?? 0 }} 张</span>
+                <span>{{ isSuperAdmin ? "不限次数" : `今日剩余 ${session.user.remainingCredits ?? 0} 次` }}</span>
+                <span>今日已用 {{ session.user.usedCredits ?? 0 }} 次</span>
               </div>
-              <form v-if="!isSuperAdmin" class="redeem-form" @submit.prevent="handleRedeemCode">
-                <label for="redeem-code-popover">兑换码</label>
-                <div class="redeem-form-row">
-                  <input
-                    id="redeem-code-popover"
-                    v-model="redeemCode"
-                    name="redeemCode"
-                    type="text"
-                    placeholder="输入兑换码增加图片张数"
-                    aria-label="兑换码"
-                    autocomplete="one-time-code"
-                    :disabled="redeemBusy"
-                  >
-                  <button class="btn-ghost" type="submit" :disabled="redeemBusy">
-                    <span v-if="redeemBusy" class="btn-spinner" aria-hidden="true" />
-                    {{ redeemBusy ? "兑换中" : "兑换" }}
-                  </button>
-                </div>
-                <p v-if="redeemMessage" class="redeem-message">{{ redeemMessage }}</p>
-              </form>
               <button
                 v-if="isAdmin"
                 class="btn-secondary auth-popover-link"

@@ -1,7 +1,8 @@
 import type { AuthUser, AdminUserRow, UserRole } from "@/lib/types";
 import type { HistoryD1Database } from "./historyStorage";
 
-const INITIAL_IMAGE_CREDITS = 10;
+const DAILY_IMAGE_CREDITS = 10;
+const DAILY_RESET_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 type AuthProvider = AuthUser["provider"];
 
@@ -40,6 +41,8 @@ interface UsageRecord {
   remainingCredits: number;
   usedCredits: number;
   grantedCredits: number;
+  dailyUsageDate: string;
+  dailyUsedCredits: number;
   createdAt: number;
   updatedAt: number;
   lastGeneratedAt?: number;
@@ -63,6 +66,8 @@ interface UsageRow {
   remaining_credits: number;
   used_credits: number;
   granted_credits: number;
+  daily_usage_date?: string | null;
+  daily_used_credits?: number | null;
   created_at: number;
   updated_at: number;
   last_generated_at?: number | null;
@@ -77,6 +82,49 @@ function userRecordKey(userKey: string) {
 
 function usageRecordKey(userKey: string) {
   return `usage:${userKey}`;
+}
+
+function getUsageDay(timestamp = Date.now()) {
+  return new Date(timestamp + DAILY_RESET_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function clampDailyUsed(value: unknown) {
+  return Math.min(
+    DAILY_IMAGE_CREDITS,
+    Math.max(0, Number.isFinite(value) ? Math.round(Number(value)) : 0),
+  );
+}
+
+function getDailyUsageSnapshot(usage: UsageRecord, now = Date.now()) {
+  const usageDay = getUsageDay(now);
+  const used = usage.dailyUsageDate === usageDay ? clampDailyUsed(usage.dailyUsedCredits) : 0;
+  return {
+    usageDay,
+    used,
+    remaining: Math.max(0, DAILY_IMAGE_CREDITS - used),
+    limit: DAILY_IMAGE_CREDITS,
+  };
+}
+
+function normalizeDailyUsage(usage: UsageRecord, now = Date.now()) {
+  const snapshot = getDailyUsageSnapshot(usage, now);
+  const normalized: UsageRecord = {
+    ...usage,
+    dailyUsageDate: snapshot.usageDay,
+    dailyUsedCredits: snapshot.used,
+    remainingCredits: snapshot.remaining,
+    grantedCredits: snapshot.limit,
+  };
+  return normalized;
+}
+
+function dailyUsageChanged(before: UsageRecord, after: UsageRecord) {
+  return (
+    before.dailyUsageDate !== after.dailyUsageDate ||
+    before.dailyUsedCredits !== after.dailyUsedCredits ||
+    before.remainingCredits !== after.remainingCredits ||
+    before.grantedCredits !== after.grantedCredits
+  );
 }
 
 function normalizeRole(role: string | undefined): UserRole {
@@ -124,6 +172,8 @@ async function ensureAdminSchema(db: HistoryD1Database) {
       remaining_credits INTEGER NOT NULL,
       used_credits INTEGER NOT NULL,
       granted_credits INTEGER NOT NULL,
+      daily_usage_date TEXT,
+      daily_used_credits INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       last_generated_at INTEGER
@@ -173,6 +223,21 @@ async function ensureAdminSchema(db: HistoryD1Database) {
   for (const statement of statements) {
     await db.prepare(statement).run();
   }
+
+  await ensureUserUsageDailyColumns(db);
+}
+
+async function ensureUserUsageDailyColumns(db: HistoryD1Database) {
+  const columns = await db.prepare(`PRAGMA table_info(user_usage)`).all<{ name: string }>();
+  const names = new Set((columns.results ?? []).map((column) => column.name));
+  if (!names.has("daily_usage_date")) {
+    await db.prepare(`ALTER TABLE user_usage ADD COLUMN daily_usage_date TEXT`).run();
+  }
+  if (!names.has("daily_used_credits")) {
+    await db
+      .prepare(`ALTER TABLE user_usage ADD COLUMN daily_used_credits INTEGER NOT NULL DEFAULT 0`)
+      .run();
+  }
 }
 
 export async function requireAdminDb(env: UserEnv, label = "管理数据表") {
@@ -203,6 +268,8 @@ function fromUsageRow(row: UsageRow): UsageRecord {
     remainingCredits: row.remaining_credits,
     usedCredits: row.used_credits,
     grantedCredits: row.granted_credits,
+    dailyUsageDate: row.daily_usage_date ?? "",
+    dailyUsedCredits: clampDailyUsed(row.daily_used_credits),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastGeneratedAt: row.last_generated_at ?? undefined,
@@ -210,6 +277,7 @@ function fromUsageRow(row: UsageRow): UsageRecord {
 }
 
 function toSessionUser(record: UserRecord, usage: UsageRecord): AuthUser {
+  const snapshot = getDailyUsageSnapshot(usage);
   return {
     provider: record.provider,
     id: record.providerId,
@@ -218,13 +286,14 @@ function toSessionUser(record: UserRecord, usage: UsageRecord): AuthUser {
     email: record.email,
     image: record.image,
     role: record.role,
-    remainingCredits: usage.remainingCredits,
-    usedCredits: usage.usedCredits,
-    grantedCredits: usage.grantedCredits,
+    remainingCredits: snapshot.remaining,
+    usedCredits: snapshot.used,
+    grantedCredits: snapshot.limit,
   };
 }
 
 function toAdminRow(record: UserRecord, usage: UsageRecord): AdminUserRow {
+  const snapshot = getDailyUsageSnapshot(usage);
   return {
     userKey: record.userKey,
     provider: record.provider,
@@ -233,9 +302,9 @@ function toAdminRow(record: UserRecord, usage: UsageRecord): AdminUserRow {
     email: record.email,
     image: record.image,
     role: record.role,
-    remainingCredits: usage.remainingCredits,
-    usedCredits: usage.usedCredits,
-    grantedCredits: usage.grantedCredits,
+    remainingCredits: snapshot.remaining,
+    usedCredits: snapshot.used,
+    grantedCredits: snapshot.limit,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     lastLoginAt: record.lastLoginAt,
@@ -320,6 +389,7 @@ async function readUsageRecord(db: HistoryD1Database, userKey: string) {
   const row = await db
     .prepare(
       `SELECT user_key, remaining_credits, used_credits, granted_credits,
+        daily_usage_date, daily_used_credits,
         created_at, updated_at, last_generated_at
        FROM user_usage
        WHERE user_key = ?`,
@@ -334,13 +404,16 @@ async function writeUsageRecord(db: HistoryD1Database, usage: UsageRecord) {
     .prepare(
       `INSERT INTO user_usage
         (user_key, remaining_credits, used_credits, granted_credits,
+         daily_usage_date, daily_used_credits,
          created_at, updated_at, last_generated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(user_key)
        DO UPDATE SET
          remaining_credits = excluded.remaining_credits,
          used_credits = excluded.used_credits,
          granted_credits = excluded.granted_credits,
+         daily_usage_date = excluded.daily_usage_date,
+         daily_used_credits = excluded.daily_used_credits,
          updated_at = excluded.updated_at,
          last_generated_at = excluded.last_generated_at`,
     )
@@ -349,6 +422,8 @@ async function writeUsageRecord(db: HistoryD1Database, usage: UsageRecord) {
       usage.remainingCredits,
       usage.usedCredits,
       usage.grantedCredits,
+      usage.dailyUsageDate,
+      usage.dailyUsedCredits,
       usage.createdAt,
       usage.updatedAt,
       usage.lastGeneratedAt ?? null,
@@ -375,17 +450,33 @@ async function readUsage(
   now = Date.now(),
 ) {
   const existing = await readUsageRecord(db, userKey);
-  if (existing) return existing;
+  if (existing) {
+    const normalized = normalizeDailyUsage(existing, now);
+    if (dailyUsageChanged(existing, normalized)) {
+      await writeUsageRecord(db, normalized);
+    }
+    return normalized;
+  }
   const kvFallback = await readKvFallbackUsage(env, userKey);
   if (kvFallback) {
-    await writeUsageRecord(db, kvFallback);
-    return kvFallback;
+    const normalized = normalizeDailyUsage(
+      {
+        ...kvFallback,
+        dailyUsageDate: kvFallback.dailyUsageDate ?? "",
+        dailyUsedCredits: clampDailyUsed(kvFallback.dailyUsedCredits),
+      },
+      now,
+    );
+    await writeUsageRecord(db, normalized);
+    return normalized;
   }
   const created: UsageRecord = {
     userKey,
-    remainingCredits: INITIAL_IMAGE_CREDITS,
+    remainingCredits: DAILY_IMAGE_CREDITS,
     usedCredits: 0,
-    grantedCredits: INITIAL_IMAGE_CREDITS,
+    grantedCredits: DAILY_IMAGE_CREDITS,
+    dailyUsageDate: getUsageDay(now),
+    dailyUsedCredits: 0,
     createdAt: now,
     updatedAt: now,
   };
@@ -532,15 +623,19 @@ export async function consumeImageCreditByUserKey(env: UserEnv, userKey: string)
       unlimited: true,
     };
   }
-  if (usage.remainingCredits <= 0) {
-    throw new Error("本账号图片生成机会已用完，请联系管理员增加额度。");
+  const now = Date.now();
+  const snapshot = getDailyUsageSnapshot(usage, now);
+  if (snapshot.remaining <= 0) {
+    throw new Error("今日 10 次生图机会已用完，请明天再试。");
   }
 
-  const now = Date.now();
   const next: UsageRecord = {
     ...usage,
-    remainingCredits: usage.remainingCredits - 1,
+    remainingCredits: Math.max(0, snapshot.remaining - 1),
     usedCredits: usage.usedCredits + 1,
+    grantedCredits: DAILY_IMAGE_CREDITS,
+    dailyUsageDate: snapshot.usageDay,
+    dailyUsedCredits: snapshot.used + 1,
     updatedAt: now,
     lastGeneratedAt: now,
   };
@@ -550,8 +645,8 @@ export async function consumeImageCreditByUserKey(env: UserEnv, userKey: string)
     user: {
       ...user,
       remainingCredits: next.remainingCredits,
-      usedCredits: next.usedCredits,
-      grantedCredits: next.grantedCredits,
+      usedCredits: next.dailyUsedCredits,
+      grantedCredits: DAILY_IMAGE_CREDITS,
     },
     usage: next,
     unlimited: false,
@@ -570,8 +665,9 @@ export async function requireImageCredit(env: UserEnv, authUser: AuthUser) {
       unlimited: true,
     };
   }
-  if (managed.usage.remainingCredits <= 0) {
-    throw new Error("本账号图片生成机会已用完，请联系管理员增加额度。");
+  const snapshot = getDailyUsageSnapshot(managed.usage);
+  if (snapshot.remaining <= 0) {
+    throw new Error("今日 10 次生图机会已用完，请明天再试。");
   }
   return {
     user: managed.user,
@@ -582,27 +678,12 @@ export async function requireImageCredit(env: UserEnv, authUser: AuthUser) {
 
 export async function grantImageCredits(env: UserEnv, authUser: AuthUser, amount: number) {
   const managed = await hydrateManagedUser(env, authUser);
-  const db = await requireAdminDb(env, "用户次数表");
   if (!managed.usage) throw new Error("服务端未配置用户次数表");
-
   const credits = Math.max(1, Math.min(999, Math.round(amount)));
-  const now = Date.now();
-  const next: UsageRecord = {
-    ...managed.usage,
-    remainingCredits: managed.usage.remainingCredits + credits,
-    grantedCredits: managed.usage.grantedCredits + credits,
-    updatedAt: now,
-  };
-  await writeUsageRecord(db, next);
 
   return {
-    user: {
-      ...managed.user,
-      remainingCredits: next.remainingCredits,
-      usedCredits: next.usedCredits,
-      grantedCredits: next.grantedCredits,
-    },
-    usage: next,
+    user: managed.user,
+    usage: managed.usage,
     granted: credits,
   };
 }
@@ -640,7 +721,7 @@ export async function listManagedUsers(env: UserEnv) {
 export async function updateManagedUser(
   env: UserEnv,
   userKey: string,
-  patch: { remainingCredits?: number; role?: UserRole },
+  patch: { role?: UserRole },
 ) {
   const db = await requireAdminDb(env, "用户表");
   let record = await readUserRecord(db, userKey);
@@ -671,16 +752,6 @@ export async function updateManagedUser(
   }
 
   let usage = await readUsage(env, db, userKey, now);
-  if (Number.isFinite(patch.remainingCredits)) {
-    const nextRemaining = Math.max(0, Math.round(patch.remainingCredits ?? 0));
-    usage = {
-      ...usage,
-      remainingCredits: nextRemaining,
-      grantedCredits: Math.max(usage.grantedCredits, nextRemaining + usage.usedCredits),
-      updatedAt: now,
-    };
-    await writeUsageRecord(db, usage);
-  }
 
   return toAdminRow(nextRecord, usage);
 }
