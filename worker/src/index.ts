@@ -131,6 +131,15 @@ function json(data: unknown, init?: ResponseInit) {
 }
 
 // 上游错误格式不稳定，统一提取一段可读的错误原因。
+function isPromptEcho(value: string) {
+  return (
+    /"prompt"\s*:/i.test(value) ||
+    /referenced_image_ids/i.test(value) ||
+    /data:image\//i.test(value) ||
+    /file_[a-z0-9]+/i.test(value)
+  );
+}
+
 function getUpstreamErrorDetail(text: string) {
   let detail = text.replace(/\s+/g, " ").trim().slice(0, 300);
   try {
@@ -139,6 +148,9 @@ function getUpstreamErrorDetail(text: string) {
     if (payload.message) detail = payload.message;
   } catch {
     // Keep raw response.
+  }
+  if (isPromptEcho(detail)) {
+    return "上游图像服务返回参数错误";
   }
   return detail;
 }
@@ -512,10 +524,99 @@ const LAYER_PRESETS = [
 
 function createLayerPrompt(prompt: string) {
   return [
-    "输出要求：只输出单张 PNG 图片，不要添加解释、不要添加额外文字、不要添加水印。",
-    "分层结果必须适合后续设计软件继续编辑；透明图层必须保留 alpha 通道，非该层内容应完全透明或尽量移除。",
+    "Return exactly one PNG image. Do not add explanations, captions, watermarks, borders, or extra text.",
+    "The result must be usable as an editable design layer. For transparent layers, keep a real alpha channel; pixels outside the requested layer should be transparent.",
     prompt,
   ].join("\n\n");
+}
+
+function createLayerFallbackPrompt(preset: (typeof LAYER_PRESETS)[number]) {
+  const common = [
+    "Use the uploaded ecommerce image as the visual reference.",
+    "Create one clean PNG layer for a design workflow. Keep the original canvas, perspective, placement, and lighting as much as possible.",
+  ];
+
+  if (preset.role === "background") {
+    return [
+      ...common,
+      "Layer target: background plate only. Show the background, base color, texture, scene, and ambient light. Fill covered areas naturally.",
+      "Do not show foreground merchandise, marketing text, labels, icons, hands, or props.",
+    ].join("\n\n");
+  }
+  if (preset.role === "subject") {
+    return [
+      ...common,
+      "Layer target: merchandise subject only. Preserve the real item shape, color, material, logo, label layout, and visible packaging text.",
+      "Use a transparent background. Do not include scene background, marketing copy, decorative stickers, props, or cast shadows.",
+    ].join("\n\n");
+  }
+  if (preset.role === "text") {
+    return [
+      ...common,
+      "Layer target: marketing and layout text only. Preserve text position, color, size, and layout from the reference image.",
+      "Use a transparent background. Do not include the merchandise subject, background, props, or pure decoration.",
+    ].join("\n\n");
+  }
+  if (preset.role === "decoration") {
+    return [
+      ...common,
+      "Layer target: decorative visual elements and props only, such as stickers, icons, cards, geometric shapes, foreground props, and accents.",
+      "Use a transparent background. Do not include the merchandise subject, background plate, or marketing text.",
+    ].join("\n\n");
+  }
+  if (preset.role === "shadow") {
+    return [
+      ...common,
+      "Layer target: shadows and lighting effects only, including cast shadows, reflections, highlights, glow, beams, and soft ambient effects.",
+      "Use a transparent background. Do not include the merchandise subject, text, props, or background texture.",
+    ].join("\n\n");
+  }
+  return [
+    ...common,
+    "Layer target: full composite preview. Recreate the uploaded image content as a complete preview PNG.",
+  ].join("\n\n");
+}
+
+async function createLayerImageWithFallback(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  preset: (typeof LAYER_PRESETS)[number],
+  sourceImage: string,
+  shouldStop: () => Promise<boolean>,
+) {
+  const primary = await createImageRequestWithRetry(
+    baseUrl,
+    apiKey,
+    model,
+    createLayerPrompt(preset.prompt),
+    "1024x1024",
+    [sourceImage],
+    shouldStop,
+  );
+  if (primary.response.ok || primary.response.status !== 400 || (await shouldStop())) {
+    return primary;
+  }
+
+  const fallback = await createImageRequestWithRetry(
+    baseUrl,
+    apiKey,
+    model,
+    createLayerPrompt(createLayerFallbackPrompt(preset)),
+    "1024x1024",
+    [sourceImage],
+    shouldStop,
+  );
+
+  return {
+    ...fallback,
+    attempts: primary.attempts + fallback.attempts,
+    retryErrors: [
+      ...primary.retryErrors,
+      `安全重试前 HTTP ${primary.response.status}: ${getUpstreamErrorDetail(primary.text)}`,
+      ...fallback.retryErrors,
+    ],
+  };
 }
 
 function normalizeAspectRatio(value: unknown): AspectRatio {
@@ -905,13 +1006,12 @@ export class CutoutTasksDO {
         for (let index = 0; index < LAYER_PRESETS.length; index += 1) {
           const preset = LAYER_PRESETS[index];
           if (await shouldStop()) return;
-          const attemptResult = await createImageRequestWithRetry(
+          const attemptResult = await createLayerImageWithFallback(
             baseUrl,
             apiKey,
             model,
-            createLayerPrompt(preset.prompt),
-            "1024x1024",
-            [sourceImage],
+            preset,
+            sourceImage,
             shouldStop,
           );
           if (!attemptResult.response.ok) {
