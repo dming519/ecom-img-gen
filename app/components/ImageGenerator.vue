@@ -163,11 +163,19 @@ const isAdmin = computed(
   () => session.value?.user?.role === "admin" || session.value?.user?.role === "super_admin",
 )
 const isSuperAdmin = computed(() => session.value?.user?.role === "super_admin")
+const dailyRemainingCredits = computed(
+  () => session.value?.user?.dailyRemainingCredits ?? session.value?.user?.remainingCredits ?? 0,
+)
+const permanentRemainingCredits = computed(() => session.value?.user?.permanentRemainingCredits ?? 0)
+const dailyUsedCredits = computed(() => session.value?.user?.dailyUsedCredits ?? 0)
+const dailyRemainingLabel = computed(() => (isSuperAdmin.value ? "不限" : `${dailyRemainingCredits.value} 次`))
+const permanentRemainingLabel = computed(() => (isSuperAdmin.value ? "不限" : `${permanentRemainingCredits.value} 次`))
+const dailyUsedLabel = computed(() => `${dailyUsedCredits.value} 次`)
 const creditLabel = computed(() =>
   authenticated.value
     ? isSuperAdmin.value
       ? "不限次数"
-      : `今日剩余 ${session.value?.user?.dailyRemainingCredits ?? session.value?.user?.remainingCredits ?? 0} 次 · 永久 ${session.value?.user?.permanentRemainingCredits ?? 0} 次`
+      : `今日剩余 ${dailyRemainingCredits.value} 次 · 永久 ${permanentRemainingCredits.value} 次`
     : "未登录",
 )
 const showUserImage = computed(
@@ -1184,9 +1192,19 @@ onBeforeUnmount(() => {
                   </p>
                 </div>
               </div>
-              <div class="account-stats">
-                <span>{{ isSuperAdmin ? "不限次数" : `今日剩余 ${session.user.dailyRemainingCredits ?? session.user.remainingCredits ?? 0} 次 · 永久 ${session.user.permanentRemainingCredits ?? 0} 次` }}</span>
-                <span>今日已用 {{ session.user.dailyUsedCredits ?? 0 }} 次</span>
+              <div class="account-stats" aria-label="账户额度">
+                <div class="account-stat account-stat-primary">
+                  <span>今日剩余</span>
+                  <strong>{{ dailyRemainingLabel }}</strong>
+                </div>
+                <div class="account-stat">
+                  <span>永久额度</span>
+                  <strong>{{ permanentRemainingLabel }}</strong>
+                </div>
+                <div class="account-stat">
+                  <span>今日已用</span>
+                  <strong>{{ dailyUsedLabel }}</strong>
+                </div>
               </div>
               <button
                 v-if="isAdmin"
@@ -1197,7 +1215,7 @@ onBeforeUnmount(() => {
                 后台管理
               </button>
               <a
-                class="btn-ghost auth-link auth-popover-link"
+                class="btn-ghost auth-link auth-popover-link auth-popover-logout"
                 :href="`/api/auth/logout?redirectTo=${encodeURIComponent(authRedirectPath)}`"
               >
                 退出登录
