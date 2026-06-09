@@ -216,18 +216,22 @@ function getOutputLayerCount(item: LayerHistoryItem) {
   return getOutputLayers(item.layers).length
 }
 
-function getLayerSourceKey(layer: LayerResultItem) {
+function getLayerSourceKey(layer: LayerResultItem, dimensions?: ImageDimensions | null) {
   const base64 = layer.base64 ?? ""
   return [
     layer.id,
     layer.imageId ?? "",
+    dimensions ? `${dimensions.width}x${dimensions.height}` : "source-size",
     base64.length,
     base64.slice(0, 48),
     base64.slice(-48),
   ].join(":")
 }
 
-function syncLayerHistoryList(item: LayerHistoryItem) {
+function syncLayerHistoryList(
+  item: LayerHistoryItem,
+  options: { activate?: boolean } = {},
+) {
   const index = history.value.findIndex((historyItem) =>
     item.id != null
       ? historyItem.id === item.id
@@ -235,10 +239,10 @@ function syncLayerHistoryList(item: LayerHistoryItem) {
   )
   if (index >= 0) {
     history.value = history.value.map((historyItem, itemIndex) => (itemIndex === index ? { ...item } : historyItem))
-    activeHistoryIdx.value = index
+    if (options.activate !== false) activeHistoryIdx.value = index
   } else {
     history.value = [...history.value, { ...item }]
-    activeHistoryIdx.value = history.value.length - 1
+    if (options.activate !== false) activeHistoryIdx.value = history.value.length - 1
   }
 }
 
@@ -265,7 +269,10 @@ function updateLayerHistorySnapshot(
   item.updatedAt = Date.now()
 }
 
-async function persistLayer(item: LayerHistoryItem) {
+async function persistLayer(
+  item: LayerHistoryItem,
+  options: { activate?: boolean } = {},
+) {
   try {
     if (item.id == null) {
       const id = await dbAddLayer(item)
@@ -273,7 +280,7 @@ async function persistLayer(item: LayerHistoryItem) {
     } else {
       await dbPutLayer(item)
     }
-    syncLayerHistoryList(item)
+    syncLayerHistoryList(item, options)
   } catch (event) {
     console.warn("分层历史写入失败:", event)
   }
@@ -283,7 +290,7 @@ async function normalizeLayerToWhiteSourceCanvas(
   layer: LayerResultItem,
   dimensions?: ImageDimensions | null,
 ) {
-  const sourceKey = getLayerSourceKey(layer)
+  const sourceKey = getLayerSourceKey(layer, dimensions)
   const cached = normalizedLayerCache.get(sourceKey)
   if (cached) return cached
   const blob = await fetchLayerBlob(layer)
@@ -295,9 +302,11 @@ async function normalizeLayerToWhiteSourceCanvas(
   return normalized
 }
 
-async function normalizeLayerListToWhiteSourceCanvas(sourceLayers: LayerResultItem[]) {
+async function normalizeLayerListToWhiteSourceCanvas(
+  sourceLayers: LayerResultItem[],
+  dimensions: ImageDimensions | null = sourceDimensions.value,
+) {
   const sortedLayers = getOutputLayers(sourceLayers)
-  const dimensions = sourceDimensions.value
   return Promise.all(
     sortedLayers.map((layer) => normalizeLayerToWhiteSourceCanvas(layer, dimensions)),
   )
@@ -729,6 +738,37 @@ function handleDeleteHistory(index: number) {
   }
 }
 
+async function getLayerHistorySourceDimensions(item: LayerHistoryItem) {
+  if (item.sourceDimensions) return item.sourceDimensions
+  let source = item.sourceImage ?? null
+  if (!source && item.sourceImageId) {
+    const [restored] = await dbGetProductImages([item.sourceImageId])
+    source = restored ?? null
+  }
+  return source ? getImageDimensions(source).catch(() => null) : null
+}
+
+async function migrateLegacyLayerHistoryItems(items: LayerHistoryItem[]) {
+  for (const item of items) {
+    if (item.normalizedToSourceSize || !getOutputLayers(item.layers).length) continue
+    try {
+      const dimensions = await getLayerHistorySourceDimensions(item)
+      const normalizedLayers = await normalizeLayerListToWhiteSourceCanvas(item.layers, dimensions)
+      const migrated: LayerHistoryItem = {
+        ...item,
+        sourceDimensions: dimensions ?? item.sourceDimensions,
+        normalizedToSourceSize: true,
+        layerBackground: LAYER_BACKGROUND_COLOR,
+        layers: normalizedLayers,
+        updatedAt: Date.now(),
+      }
+      await persistLayer(migrated, { activate: false })
+    } catch (event) {
+      console.warn("分层历史白底迁移失败:", event)
+    }
+  }
+}
+
 async function handleClearHistory() {
   if (!confirm("确定清空所有分层历史？此操作不可撤销。")) return
   await dbClearLayers()
@@ -751,6 +791,7 @@ async function loadLayerHistoryIfAuthenticated() {
     const items = await dbAllLayers()
     history.value = items
     activeHistoryIdx.value = items.length ? items.length - 1 : -1
+    void migrateLegacyLayerHistoryItems(items)
   } catch (event) {
     console.warn("分层历史读取失败:", event)
   }
