@@ -79,6 +79,7 @@ const history = ref<LayerHistoryItem[]>([])
 const activeHistoryIdx = shallowRef(-1)
 const historyLoadedUserKey = shallowRef<string | null>(null)
 const progress = ref<LayerProgress>(normalizeLayerProgress())
+const normalizedLayerCache = new Map<string, LayerResultItem>()
 
 const LAYER_ROLE_LABEL: Record<LayerResultItem["role"], string> = {
   background: "背景",
@@ -215,6 +216,17 @@ function getOutputLayerCount(item: LayerHistoryItem) {
   return getOutputLayers(item.layers).length
 }
 
+function getLayerSourceKey(layer: LayerResultItem) {
+  const base64 = layer.base64 ?? ""
+  return [
+    layer.id,
+    layer.imageId ?? "",
+    base64.length,
+    base64.slice(0, 48),
+    base64.slice(-48),
+  ].join(":")
+}
+
 function syncLayerHistoryList(item: LayerHistoryItem) {
   const index = history.value.findIndex((historyItem) =>
     item.id != null
@@ -267,10 +279,38 @@ async function persistLayer(item: LayerHistoryItem) {
   }
 }
 
-function syncLayersFromTask(result: Pick<LayerTaskStatus, "layers">, options: { preferPreview?: boolean } = {}) {
+async function normalizeLayerToWhiteSourceCanvas(
+  layer: LayerResultItem,
+  dimensions: ImageDimensions,
+) {
+  const sourceKey = getLayerSourceKey(layer)
+  const cached = normalizedLayerCache.get(sourceKey)
+  if (cached) return cached
+  const blob = await fetchLayerBlob(layer)
+  const normalizedBlob = await drawBlobOnWhiteSourceCanvas(blob, dimensions)
+  const imageId = await dbPutProductImageBlob(normalizedBlob, `${layer.id}.png`)
+  const { base64: _base64, ...rest } = layer
+  const normalized = { ...rest, imageId }
+  normalizedLayerCache.set(sourceKey, normalized)
+  return normalized
+}
+
+async function normalizeLayerListToWhiteSourceCanvas(sourceLayers: LayerResultItem[]) {
+  const sortedLayers = getOutputLayers(sourceLayers)
+  const dimensions = sourceDimensions.value
+  if (!dimensions?.width || !dimensions.height) return sortedLayers
+  return Promise.all(
+    sortedLayers.map((layer) => normalizeLayerToWhiteSourceCanvas(layer, dimensions)),
+  )
+}
+
+async function syncLayersFromTask(
+  result: Pick<LayerTaskStatus, "layers">,
+  options: { preferPreview?: boolean } = {},
+) {
   if (!result.layers) return
-  const sortedLayers = getOutputLayers(result.layers)
-  layersNormalizedToSourceSize.value = false
+  const sortedLayers = await normalizeLayerListToWhiteSourceCanvas(result.layers)
+  layersNormalizedToSourceSize.value = !!sourceDimensions.value
   layers.value = sortedLayers
   const currentLayerExists = sortedLayers.some((layer) => layer.id === selectedLayerId.value)
   if (options.preferPreview) {
@@ -302,6 +342,7 @@ async function handleFileChange(event: Event) {
     sourceImageId.value = await dbPutProductImage(dataUrl)
     layers.value = []
     layersNormalizedToSourceSize.value = false
+    normalizedLayerCache.clear()
     selectedLayerId.value = null
     progress.value = normalizeLayerProgress()
     activeHistoryIdx.value = -1
@@ -349,6 +390,7 @@ async function handleGenerate() {
   abortRef.value = new AbortController()
   layers.value = []
   layersNormalizedToSourceSize.value = false
+  normalizedLayerCache.clear()
   selectedLayerId.value = null
   progress.value = normalizeLayerProgress()
   let historyItem: LayerHistoryItem = {
@@ -374,14 +416,14 @@ async function handleGenerate() {
     updateSessionCredits({ status: "pending", ...created })
     updateLayerHistorySnapshot(historyItem, { status: "running", taskId: created.taskId, error: null })
     await persistLayer(historyItem)
-    const result = await pollLayerTask(created.taskId, undefined, abortRef.value.signal, (next) => {
-      syncLayersFromTask(next)
+    const result = await pollLayerTask(created.taskId, undefined, abortRef.value.signal, async (next) => {
+      await syncLayersFromTask(next)
       if (!next.progress) return
       progress.value = normalizeLayerProgress(next.progress)
       updateLayerHistorySnapshot(historyItem, { status: "running", error: null })
       queuePersistLayer()
     })
-    syncLayersFromTask(result, { preferPreview: result.status === "succeeded" })
+    await syncLayersFromTask(result, { preferPreview: result.status === "succeeded" })
     await persistQueue
     if (result.status === "canceled") {
       updateLayerHistorySnapshot(historyItem, { status: "canceled", error: "分层已中断", taskId: null })
@@ -578,13 +620,7 @@ async function normalizeLayersToWhiteSourceCanvas() {
 
   const currentLayerId = selectedLayerId.value
   const normalizedLayers = await Promise.all(
-    layers.value.map(async (layer) => {
-      const blob = await fetchLayerBlob(layer)
-      const normalizedBlob = await drawBlobOnWhiteSourceCanvas(blob, dimensions)
-      const imageId = await dbPutProductImageBlob(normalizedBlob, `${layer.id}.png`)
-      const { base64: _base64, ...rest } = layer
-      return { ...rest, imageId }
-    }),
+    layers.value.map((layer) => normalizeLayerToWhiteSourceCanvas(layer, dimensions)),
   )
   layers.value = normalizedLayers
   layersNormalizedToSourceSize.value = true
@@ -665,12 +701,18 @@ async function handleSelectHistory(index: number) {
     (sourceImage.value ? await getImageDimensions(sourceImage.value).catch(() => null) : null)
   layers.value = getOutputLayers(item.layers)
   layersNormalizedToSourceSize.value = !!item.normalizedToSourceSize
+  normalizedLayerCache.clear()
   selectedLayerId.value = layers.value[0]?.id ?? null
   progress.value = normalizeLayerProgress({
     done: item.progress?.done ?? layers.value.length,
     total: item.progress?.total,
     current: item.progress?.current ?? "",
   })
+  if (layers.value.length && sourceDimensions.value && !layersNormalizedToSourceSize.value) {
+    await normalizeLayersToWhiteSourceCanvas()
+    updateLayerHistorySnapshot(item)
+    await persistLayer(item)
+  }
   error.value = item.error ?? null
 }
 

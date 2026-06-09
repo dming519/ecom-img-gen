@@ -553,7 +553,7 @@ export async function pollLayerTask(
   taskId: string,
   timeoutMs = 10 * 60 * 1000,
   signal?: AbortSignal,
-  onUpdate?: (payload: LayerTaskStatus) => void,
+  onUpdate?: (payload: LayerTaskStatus) => void | Promise<void>,
 ): Promise<LayerTaskStatus> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -580,7 +580,7 @@ export async function pollLayerTask(
       throw new Error(`查询分层任务失败: HTTP ${response.status}: ${extractError(text)}`);
     }
     const payload = JSON.parse(text) as LayerTaskStatus;
-    onUpdate?.(payload);
+    await onUpdate?.(payload);
     if (
       payload.status === "succeeded" ||
       payload.status === "failed" ||
