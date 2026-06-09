@@ -345,6 +345,12 @@ export interface LayerHistoryItem {
   id?: number;
   sourceImageId?: string;
   sourceImage?: string;
+  sourceDimensions?: {
+    width: number;
+    height: number;
+  };
+  normalizedToSourceSize?: boolean;
+  layerBackground?: string;
   layers: LayerResultItem[];
   status: "running" | "succeeded" | "failed" | "canceled";
   taskId?: string;

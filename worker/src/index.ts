@@ -601,7 +601,7 @@ const LAYER_PRESETS = [
       "只保留原图中真实可见的商品本体，包括包装、瓶身、盒子、商品 Logo、标签版式和商品包装上的真实可见文字。",
       "移除背景、营销文案、装饰贴纸、信息卡片、人物、手、道具、投影和额外场景。",
       "不要美化、修复、补全、重画或重新设计商品；必须尽量保持原商品的形状、比例、颜色、材质、瑕疵、品牌标识和可见文字。",
-      "输出透明背景 PNG，元素保持在原图中的位置和大小，画布比例不变，商品外区域必须是真实透明 alpha。",
+      "输出纯白背景 PNG，元素保持在原图中的位置和大小，画布比例不变，商品外区域必须是纯白色背景，不要透明 alpha。",
     ].join("\n\n"),
   },
   {
@@ -613,7 +613,7 @@ const LAYER_PRESETS = [
       "只保留画面中的营销标题、卖点文案、参数文字、价格文字、标签文字、说明文字、文字框和排版线条。",
       "不要保留商品主体、背景、人物、手、道具或纯装饰图形。商品包装本身印刷的 Logo 和标签文字不属于这一层。",
       "把文字当作图像形状隔离，不要重新写文案，不要纠错，不要翻译，不要改字体，不要改颜色。",
-      "输出透明背景 PNG，文字位置、颜色、字号、排版和画布比例尽量与原图一致；没有文字的区域必须是真实透明 alpha。",
+      "输出纯白背景 PNG，文字位置、颜色、字号、排版和画布比例尽量与原图一致；没有文字的区域必须是纯白色背景，不要透明 alpha。",
     ].join("\n\n"),
   },
   {
@@ -625,7 +625,7 @@ const LAYER_PRESETS = [
       "只保留非商品主体的装饰元素、图标、贴纸、信息卡片、几何形、道具、点缀素材、前景摆件和辅助视觉元素。",
       "不要保留商品主体、背景大色块、营销文字、人物或手。",
       "不要新增装饰，不要重新设计现有装饰；保持元素在原图中的位置、大小、颜色、边缘和透明关系。",
-      "输出透明背景 PNG，没有装饰道具的区域必须是真实透明 alpha。",
+      "输出纯白背景 PNG，没有装饰道具的区域必须是纯白色背景，不要透明 alpha。",
     ].join("\n\n"),
   },
   {
@@ -637,7 +637,7 @@ const LAYER_PRESETS = [
       "只保留原图中已经存在的阴影、投影、反光、高光、光晕、光束、柔光和局部氛围光。",
       "不要保留商品主体、文字、背景纹理、道具或装饰图形。",
       "不要重新打光，不要新增阴影；阴影和光效应保持柔和自然，可用于叠加回原图。",
-      "输出透明背景 PNG，没有阴影光效的区域必须是真实透明 alpha。",
+      "输出纯白背景 PNG，没有阴影光效的区域必须是纯白色背景，不要透明 alpha。",
     ].join("\n\n"),
   },
   {
@@ -697,7 +697,7 @@ function createLayerPrompt(prompt: string) {
     "Use the uploaded image as the only visual source. Keep the original canvas composition, aspect ratio, perspective, placement, and lighting.",
     "Keep the output canvas size and aspect ratio the same as the uploaded image whenever the image API allows it.",
     "Do not crop, zoom, recenter, rotate, stretch, or change the target object's position relative to the original canvas.",
-    "The result must be usable as an editable design layer. For transparent layers, keep a real alpha channel; pixels outside the requested layer must be transparent, not white, gray, checkerboard, or filled with a background.",
+    "The result must be a PNG on a pure white background. Pixels outside the requested layer must be white, not transparent, gray, checkerboard, or filled with invented texture.",
     "Prefer isolating visible original content over redesigning or inventing new content.",
     prompt,
   ].join("\n\n");
@@ -722,28 +722,28 @@ function createLayerFallbackPrompt(preset: (typeof LAYER_PRESETS)[number]) {
     return [
       ...common,
       "Layer target: merchandise subject only. Preserve the real item shape, color, material, logo, label layout, and visible packaging text from the uploaded image.",
-      "Use a transparent background. Do not include scene background, marketing copy, decorative stickers, props, or cast shadows. Do not beautify or redesign the merchandise.",
+      "Use a pure white background. Do not include scene background, marketing copy, decorative stickers, props, or cast shadows. Do not beautify or redesign the merchandise.",
     ].join("\n\n");
   }
   if (preset.role === "text") {
     return [
       ...common,
       "Layer target: marketing and layout text only. Treat text as image shapes. Preserve text position, color, size, and layout from the reference image.",
-      "Use a transparent background. Do not rewrite, correct, translate, or replace the text. Do not include the merchandise subject, background, props, or pure decoration.",
+      "Use a pure white background. Do not rewrite, correct, translate, or replace the text. Do not include the merchandise subject, background, props, or pure decoration.",
     ].join("\n\n");
   }
   if (preset.role === "decoration") {
     return [
       ...common,
       "Layer target: decorative visual elements and props only, such as stickers, icons, cards, geometric shapes, foreground props, and accents.",
-      "Use a transparent background. Do not include the merchandise subject, background plate, or marketing text. Do not invent new decoration.",
+      "Use a pure white background. Do not include the merchandise subject, background plate, or marketing text. Do not invent new decoration.",
     ].join("\n\n");
   }
   if (preset.role === "shadow") {
     return [
       ...common,
       "Layer target: existing shadows and lighting effects only, including cast shadows, reflections, highlights, glow, beams, and soft ambient effects.",
-      "Use a transparent background. Do not include the merchandise subject, text, props, or background texture. Do not create new lighting.",
+      "Use a pure white background. Do not include the merchandise subject, text, props, or background texture. Do not create new lighting.",
     ].join("\n\n");
   }
   return [
@@ -1694,7 +1694,7 @@ export default {
       });
     }
     if (url.pathname === "/layer-task" && request.method === "POST") {
-      // 分层任务入口：复用 CutoutTasksDO，只使用原图生成多张透明 PNG 图层。
+      // 分层任务入口：复用 CutoutTasksDO，只使用原图生成多张白底 PNG 图层。
       const token = env.IMAGE_WORKER_TOKEN?.trim();
       const auth = request.headers.get("Authorization")?.trim();
       if (!token || auth !== `Bearer ${token}`) {

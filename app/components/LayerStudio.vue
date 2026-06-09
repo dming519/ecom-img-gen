@@ -14,6 +14,7 @@ import {
   dbImageFileUrl,
   dbPutLayer,
   dbPutProductImage,
+  dbPutProductImageBlob,
 } from "@/lib/db"
 import type { AuthSession, LayerHistoryItem, LayerResultItem, LayerTaskStatus } from "@/lib/types"
 import Icon from "./Icon.vue"
@@ -30,6 +31,7 @@ const emit = defineEmits<{
 }>()
 
 const MAX_LAYER_IMAGE_BYTES = 10 * 1024 * 1024
+const LAYER_BACKGROUND_COLOR = "#ffffff"
 const fileInputId = "layer-source-file"
 
 interface ImageDimensions {
@@ -59,6 +61,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const sourceImage = shallowRef<string | null>(null)
 const sourceImageId = shallowRef<string | undefined>()
 const sourceDimensions = shallowRef<ImageDimensions | null>(null)
+const layersNormalizedToSourceSize = shallowRef(false)
 const layers = ref<LayerResultItem[]>([])
 const selectedLayerId = shallowRef<string | null>(null)
 const busy = shallowRef(false)
@@ -101,6 +104,9 @@ const progressText = computed(() => {
     ? `${progress.value.current} · ${progress.value.done}/${progress.value.total}`
     : `正在准备分层 · ${progress.value.done}/${progress.value.total}`
 })
+const busyStageLabel = computed(() =>
+  progress.value.current.includes("校准") ? "正在校准图层" : "正在生成图层",
+)
 const sourceDimensionText = computed(() =>
   sourceDimensions.value
     ? `${sourceDimensions.value.width} x ${sourceDimensions.value.height}`
@@ -205,6 +211,9 @@ function updateLayerHistorySnapshot(
 ) {
   item.sourceImageId = sourceImageId.value
   item.sourceImage = sourceImage.value ?? undefined
+  item.sourceDimensions = sourceDimensions.value ?? undefined
+  item.normalizedToSourceSize = layersNormalizedToSourceSize.value
+  item.layerBackground = LAYER_BACKGROUND_COLOR
   item.layers = layers.value.map((layer) => ({ ...layer }))
   item.status = options.status ?? item.status
   item.error = options.error === undefined ? item.error : options.error || undefined
@@ -231,6 +240,7 @@ async function persistLayer(item: LayerHistoryItem) {
 function syncLayersFromTask(result: Pick<LayerTaskStatus, "layers">, options: { preferPreview?: boolean } = {}) {
   if (!result.layers) return
   const sortedLayers = [...result.layers].sort((a, b) => a.index - b.index)
+  layersNormalizedToSourceSize.value = false
   layers.value = sortedLayers
   const currentLayerExists = sortedLayers.some((layer) => layer.id === selectedLayerId.value)
   if (options.preferPreview) {
@@ -263,6 +273,7 @@ async function handleFileChange(event: Event) {
     sourceDimensions.value = await getImageDimensions(dataUrl)
     sourceImageId.value = await dbPutProductImage(dataUrl)
     layers.value = []
+    layersNormalizedToSourceSize.value = false
     selectedLayerId.value = null
     progress.value = { done: 0, total: 6, current: "" }
     activeHistoryIdx.value = -1
@@ -309,6 +320,7 @@ async function handleGenerate() {
   busy.value = true
   abortRef.value = new AbortController()
   layers.value = []
+  layersNormalizedToSourceSize.value = false
   selectedLayerId.value = null
   progress.value = { done: 0, total: 6, current: "" }
   let historyItem: LayerHistoryItem = {
@@ -359,6 +371,14 @@ async function handleGenerate() {
       error.value = result.error || "分层失败"
       return
     }
+    progress.value = {
+      done: Number(progress.value.total || 6),
+      total: Number(progress.value.total || 6),
+      current: "正在校准白底图层",
+    }
+    updateLayerHistorySnapshot(historyItem, { status: "running", error: null })
+    await persistLayer(historyItem)
+    await normalizeLayersToWhiteSourceCanvas()
     updateSessionCredits(result)
     updateLayerHistorySnapshot(historyItem, {
       status: "succeeded",
@@ -430,7 +450,7 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) resolve(blob)
-      else reject(new Error("图层尺寸规范化失败"))
+      else reject(new Error("图层白底规范化失败"))
     }, "image/png")
   })
 }
@@ -501,11 +521,7 @@ async function fetchLayerBlob(layer: LayerResultItem) {
   return response.blob()
 }
 
-async function fetchLayerBytes(layer: LayerResultItem) {
-  const blob = await fetchLayerBlob(layer)
-  const dimensions = sourceDimensions.value
-  if (!dimensions?.width || !dimensions.height) return blobToBytes(blob)
-
+async function drawBlobOnWhiteSourceCanvas(blob: Blob, dimensions: ImageDimensions) {
   const objectUrl = URL.createObjectURL(blob)
   try {
     const image = await loadImage(objectUrl)
@@ -513,13 +529,44 @@ async function fetchLayerBytes(layer: LayerResultItem) {
     canvas.width = dimensions.width
     canvas.height = dimensions.height
     const context = canvas.getContext("2d")
-    if (!context) throw new Error("浏览器不支持图层尺寸规范化")
-    context.clearRect(0, 0, dimensions.width, dimensions.height)
+    if (!context) throw new Error("浏览器不支持图层白底规范化")
+    context.fillStyle = LAYER_BACKGROUND_COLOR
+    context.fillRect(0, 0, dimensions.width, dimensions.height)
     context.drawImage(image, 0, 0, dimensions.width, dimensions.height)
-    return blobToBytes(await canvasToBlob(canvas))
+    return canvasToBlob(canvas)
   } finally {
     URL.revokeObjectURL(objectUrl)
   }
+}
+
+async function normalizeLayersToWhiteSourceCanvas() {
+  const dimensions = sourceDimensions.value
+  if (!dimensions?.width || !dimensions.height || layersNormalizedToSourceSize.value) return
+
+  const currentLayerId = selectedLayerId.value
+  const normalizedLayers = await Promise.all(
+    layers.value.map(async (layer) => {
+      if (layer.role === "preview") return layer
+      const blob = await fetchLayerBlob(layer)
+      const normalizedBlob = await drawBlobOnWhiteSourceCanvas(blob, dimensions)
+      const imageId = await dbPutProductImageBlob(normalizedBlob, `${layer.id}.png`)
+      const { base64: _base64, ...rest } = layer
+      return { ...rest, imageId }
+    }),
+  )
+  layers.value = normalizedLayers
+  layersNormalizedToSourceSize.value = true
+  selectedLayerId.value = normalizedLayers.some((layer) => layer.id === currentLayerId)
+    ? currentLayerId
+    : normalizedLayers.find((layer) => layer.role === "preview")?.id ?? normalizedLayers[0]?.id ?? null
+}
+
+async function fetchLayerBytes(layer: LayerResultItem) {
+  const blob = await fetchLayerBlob(layer)
+  const dimensions = sourceDimensions.value
+  if (!dimensions?.width || !dimensions.height) return blobToBytes(blob)
+
+  return blobToBytes(await drawBlobOnWhiteSourceCanvas(blob, dimensions))
 }
 
 async function handleDownloadZip() {
@@ -538,6 +585,7 @@ async function handleDownloadZip() {
       sourceImageId: sourceImageId.value,
       sourceDimensions: sourceDimensions.value,
       normalizedToSourceSize: !!sourceDimensions.value,
+      layerBackground: LAYER_BACKGROUND_COLOR,
       layers: layers.value.map(({ base64: _base64, ...layer }) => layer),
     }
     const zip = createZip([
@@ -581,8 +629,10 @@ async function handleSelectHistory(index: number) {
   } else {
     sourceImage.value = item.sourceImage ?? null
   }
-  sourceDimensions.value = sourceImage.value ? await getImageDimensions(sourceImage.value).catch(() => null) : null
+  sourceDimensions.value = item.sourceDimensions ??
+    (sourceImage.value ? await getImageDimensions(sourceImage.value).catch(() => null) : null)
   layers.value = [...item.layers].sort((a, b) => a.index - b.index)
+  layersNormalizedToSourceSize.value = !!item.normalizedToSourceSize
   selectedLayerId.value =
     layers.value.find((layer) => layer.role === "preview")?.id ?? layers.value[0]?.id ?? null
   progress.value = {
@@ -690,7 +740,7 @@ watch(
         </div>
         <div class="cutout-help layer-output-note">
           <strong>输出内容</strong>
-          <p>自动拆出背景、商品主体、文字、装饰道具和阴影光效；预览层保留原图，结果可打包为 ZIP。</p>
+          <p>自动拆出背景、商品主体、文字、装饰道具和阴影光效；结果统一为白底同尺寸 PNG，可打包为 ZIP。</p>
         </div>
       </div>
       <div v-if="error" class="alert cutout-alert">{{ error }}</div>
@@ -739,7 +789,7 @@ watch(
         </template>
         <div v-else-if="busy" class="busy-card">
           <span class="busy-orbit" aria-hidden="true" />
-          <strong>正在生成图层</strong>
+          <strong>{{ busyStageLabel }}</strong>
           <p>
             {{
               progress.current
@@ -759,7 +809,7 @@ watch(
           <div class="layer-progress-copy">
             <span class="layer-progress-dot" aria-hidden="true" />
             <div>
-              <strong>正在生成图层</strong>
+              <strong>{{ busyStageLabel }}</strong>
               <small>{{ progressText }}</small>
             </div>
             <em>{{ progressPercent }}%</em>
@@ -941,13 +991,7 @@ watch(
   height: auto;
   min-height: 420px;
   max-height: 100%;
-  background:
-    linear-gradient(45deg, rgba(15, 23, 42, 0.06) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(15, 23, 42, 0.06) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(15, 23, 42, 0.06) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(15, 23, 42, 0.06) 75%);
-  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
-  background-size: 20px 20px;
+  background: #fff;
   border: 1px solid rgba(174, 184, 199, 0.62);
   border-radius: var(--radius-panel);
   display: grid;
@@ -1102,14 +1146,7 @@ watch(
   height: 54px;
   border-radius: 6px;
   border: 1px solid rgba(174, 184, 199, 0.52);
-  background:
-    linear-gradient(45deg, rgba(148, 163, 184, 0.12) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(148, 163, 184, 0.12) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(148, 163, 184, 0.12) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(148, 163, 184, 0.12) 75%),
-    #fff;
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
-  background-size: 16px 16px;
+  background: #fff;
   display: grid;
   place-items: center;
   overflow: hidden;

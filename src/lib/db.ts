@@ -418,16 +418,23 @@ export async function dbPutCutoutDraft(
   return "active";
 }
 
-// 把一张 data URL 图片存到服务端，返回 imageId。之后历史记录只保存 imageId。
-export async function dbPutProductImage(dataUrl: string): Promise<string> {
-  const blob = dataUrlToBlob(dataUrl);
+// 把一张 Blob 图片用文件流存到服务端，返回 imageId。
+export async function dbPutProductImageBlob(
+  blob: Blob,
+  filename = blob.type === "image/jpeg" ? "image.jpg" : "image.png",
+): Promise<string> {
   const formData = new FormData();
-  formData.append("image", blob, blob.type === "image/jpeg" ? "image.jpg" : "image.png");
+  formData.append("image", blob, filename);
   const payload = await requestJson<{ id: string }>("/api/history/image", {
     method: "POST",
     body: formData,
   });
   return payload.id;
+}
+
+// 把一张 data URL 图片存到服务端，返回 imageId。之后历史记录只保存 imageId。
+export async function dbPutProductImage(dataUrl: string): Promise<string> {
+  return dbPutProductImageBlob(dataUrlToBlob(dataUrl));
 }
 
 // 根据多个 imageId 批量取回可直接放进 <img> 的图片文件 URL。
