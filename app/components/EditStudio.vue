@@ -390,7 +390,7 @@ async function handleGenerate() {
     return
   }
   if (!sourceImage.value || !sourceImageId.value) {
-    error.value = "请先上传一张需要改图的产品图片。"
+    error.value = "请先上传一张需要改图的商品图片。"
     return
   }
   const instruction = editInstruction.value.trim()
@@ -606,7 +606,7 @@ watch(
   <div class="cutout-grid edit-grid">
     <aside class="studio-panel cutout-panel cutout-source-panel edit-source-panel">
       <div class="panel-heading">
-        <h2>产品原图</h2>
+        <h2>商品原图</h2>
         <span class="panel-count">改图</span>
       </div>
       <div class="cutout-panel-body">
@@ -616,11 +616,11 @@ watch(
           :disabled="controlsDisabled"
           @click="fileInputRef?.click()"
         >
-          <img v-if="sourceImage" :src="sourceImage" alt="待改图产品原图">
+          <img v-if="sourceImage" :src="sourceImage" alt="待改图商品原图">
           <span v-else>
             <Icon name="upload" />
-            <strong>上传产品图片</strong>
-            <small>建议使用产品清晰、主体完整的图片</small>
+            <strong>上传商品图片</strong>
+            <small>建议使用商品清晰、主体完整的图片</small>
           </span>
         </button>
         <input ref="fileInputRef" type="file" accept="image/*" hidden @change="handleFileChange">
@@ -701,7 +701,7 @@ watch(
             ref="maskCanvasRef"
             class="cutout-mask-canvas"
             :style="canvasStyle"
-            aria-label="涂抹需要修改的产品区域"
+            aria-label="涂抹需要修改的商品区域"
             @pointerenter="handlePointerEnter"
             @pointerdown="handlePointerDown"
             @pointermove="handlePointerMove"

@@ -81,7 +81,7 @@ export async function handlePost(context: RequestContext) {
   const maskImageId = normalizeImageId(body.maskImageId);
   const instruction = normalizeInstruction(body.instruction);
   if (!sourceImageId) {
-    return json({ error: "请上传需要改图的产品图片" }, { status: 400 });
+    return json({ error: "请上传需要改图的商品图片" }, { status: 400 });
   }
   if (!maskImageId) {
     return json({ error: "请先涂抹需要修改的区域" }, { status: 400 });
@@ -104,13 +104,13 @@ export async function handlePost(context: RequestContext) {
   }
   const [sourceImage, maskImage] = storedImages;
   if (!sourceImage) {
-    return json({ error: "产品原图不存在或无权访问" }, { status: 400 });
+    return json({ error: "商品原图不存在或无权访问" }, { status: 400 });
   }
   if (!maskImage) {
     return json({ error: "涂抹区域不存在或无权访问" }, { status: 400 });
   }
   if (!isDataImage(sourceImage)) {
-    return json({ error: "请上传需要改图的产品图片" }, { status: 400 });
+    return json({ error: "请上传需要改图的商品图片" }, { status: 400 });
   }
   if (!isDataImage(maskImage)) {
     return json({ error: "请先涂抹需要修改的区域" }, { status: 400 });

@@ -216,7 +216,7 @@ export async function handlePost(context: RequestContext) {
     }
   }
   if (storedImages.some((image) => !image)) {
-    return json({ error: "产品参考图不存在或无权访问" }, { status: 400 });
+    return json({ error: "商品参考图不存在或无权访问" }, { status: 400 });
   }
   const images = storedImages.filter((image): image is string => !!image).slice(0, 8);
   const aspectRatio = normalizeAspectRatio(body.aspectRatio);
@@ -237,8 +237,8 @@ export async function handlePost(context: RequestContext) {
       {
         error:
           mode === "multi-view"
-            ? "请上传产品参考图后再生成多视角产品图。"
-            : "请上传产品参考图后再生成详情图。系统已禁止纯文案生成，以保证产品外观一致。",
+            ? "请上传商品参考图后再生成多视角商品图。"
+            : "请上传商品参考图后再生成详情图。系统已禁止纯文案生成，以保证商品外观一致。",
       },
       { status: 400 },
     );

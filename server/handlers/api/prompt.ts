@@ -112,7 +112,7 @@ export async function handlePost(context: RequestContext) {
     }
   }
   if (storedImages.some((image) => !image)) {
-    return json({ error: "产品参考图不存在或无权访问" }, { status: 400 });
+    return json({ error: "商品参考图不存在或无权访问" }, { status: 400 });
   }
   const productImages = normalizeProductImages(
     storedImages.filter((image): image is string => !!image),
@@ -120,13 +120,13 @@ export async function handlePost(context: RequestContext) {
 
   // 这些校验直接返回 400，属于用户输入问题，不需要派发到 Worker。
   if (!name) {
-    return json({ error: "请输入产品名称" }, { status: 400 });
+    return json({ error: "请输入商品名称" }, { status: 400 });
   }
   if (!sellingPoints) {
-    return json({ error: "请输入产品核心卖点和功效" }, { status: 400 });
+    return json({ error: "请输入商品核心卖点和功效" }, { status: 400 });
   }
   if (!productImages.length) {
-    return json({ error: "请至少上传一张产品图片" }, { status: 400 });
+    return json({ error: "请至少上传一张商品图片" }, { status: 400 });
   }
 
   const kv = context.env.TASKS_KV;
@@ -164,18 +164,18 @@ export async function handlePost(context: RequestContext) {
 
   // userText 是本次商品资料；DETAIL_PROMPT_TEMPLATE 是稳定的系统模板。
   const userText = [
-    "请严格根据系统模板和上传产品图生成商品详情图文案。",
+    "请严格根据系统模板和上传商品图生成商品详情图文案。",
     "",
-    `产品名称：${name}`,
+    `商品名称：${name}`,
     `图片数量：${imageCount}`,
-    "产品核心卖点和功效：",
+    "商品核心卖点和功效：",
     sellingPoints,
     "",
     "输出格式要求：只返回 JSON，不要 Markdown，不要解释。",
-    `JSON 结构：{"prompts":[{"title":"第1张：产品主图 / 核心卖点总览","prompt":"完整可直接用于 GPT-Image-2 的单张详情图文案"}]}`,
+    `JSON 结构：{"prompts":[{"title":"第1张：商品主图 / 核心卖点总览","prompt":"完整可直接用于 GPT-Image-2 的单张详情图文案"}]}`,
     "prompt 字段如需分段，必须使用 \\n 表示换行，保留清晰的段落结构。",
     "生成前先识别商品所属品类，并按该品类详情页侧重点规划每张图主题；title 要体现该张图的品类化模块，而不是机械套用固定五段式。",
-    "参考图是产品事实来源，但不是每张图都必须完整展示参考图商品；可以根据该张图主题提取参考图里的材质、纹理、色彩、局部结构、包装标签、工艺细节、图案元素或使用状态。",
+    "参考图是商品事实来源，但不是每张图都必须完整展示参考图商品；可以根据该张图主题提取参考图里的材质、纹理、色彩、局部结构、包装标签、工艺细节、图案元素或使用状态。",
     `prompts 数组长度必须等于 ${imageCount}。每个 prompt 必须是完整单张图片生成提示词，并包含统一视觉系统、构图、中文文案、4:5 竖版、参考图一致性或参考图特征提取要求。不要输出“负面提示词”或“Negative Prompt”段落。`,
   ].join("\n");
 

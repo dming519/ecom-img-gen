@@ -285,9 +285,9 @@ async function imageSrcToDataUrl(src: string) {
   const value = src.trim()
   if (value.startsWith("data:image/")) return value
   const response = await fetch(value, { credentials: "same-origin", cache: "no-store" })
-  if (!response.ok) throw new Error("产品参考图读取失败，请重新上传图片。")
+  if (!response.ok) throw new Error("商品参考图读取失败，请重新上传图片。")
   const blob = await response.blob()
-  if (!blob.type.startsWith("image/")) throw new Error("产品参考图格式无效，请重新上传图片。")
+  if (!blob.type.startsWith("image/")) throw new Error("商品参考图格式无效，请重新上传图片。")
   return blobToDataUrl(blob)
 }
 
@@ -302,18 +302,18 @@ async function ensureProductImageIds() {
     .filter((image) => image.length <= MAX_PROMPT_IMAGE_CHARS)
   const total = validDataUrls.reduce((sum, image) => sum + image.length, 0)
   if (missing.length && validDataUrls.length !== missing.length) {
-    throw new Error("产品参考图过大或格式无效，请重新上传图片。")
+    throw new Error("商品参考图过大或格式无效，请重新上传图片。")
   }
   if (total > MAX_PROMPT_IMAGE_TOTAL_CHARS) {
-    throw new Error("产品参考图总大小过大，请减少图片数量或重新上传后再生成。")
+    throw new Error("商品参考图总大小过大，请减少图片数量或重新上传后再生成。")
   }
   const uploadedIds = await Promise.all(validDataUrls.map((image) => dbPutProductImage(image)))
   missing.forEach((item, index) => {
     nextIds[item.index] = uploadedIds[index] ?? ""
   })
   const ids = nextIds.filter(Boolean).slice(0, images.length)
-  if (!ids.length) throw new Error("请至少上传一张产品参考图。")
-  if (ids.length !== images.length) throw new Error("产品参考图保存失败，请重新上传后再试。")
+  if (!ids.length) throw new Error("请至少上传一张商品参考图。")
+  if (ids.length !== images.length) throw new Error("商品参考图保存失败，请重新上传后再试。")
   productImageIds.value = ids
   return ids
 }
@@ -471,15 +471,15 @@ function validateProduct() {
     return false
   }
   if (!productName.value.trim()) {
-    error.value = "请输入产品名称。"
+    error.value = "请输入商品名称。"
     return false
   }
   if (!sellingPoints.value.trim()) {
-    error.value = "请输入产品核心卖点和功效。"
+    error.value = "请输入商品核心卖点和功效。"
     return false
   }
   if (!productImages.value.length) {
-    error.value = "请至少上传一张产品参考图。系统已禁止纯文案生成，以保证产品外观一致。"
+    error.value = "请至少上传一张商品参考图。系统已禁止纯文案生成，以保证商品外观一致。"
     return false
   }
   return true
@@ -842,7 +842,7 @@ function handleSelectHistory(idx: number) {
       .then((images) => {
         productImages.value = images.slice(0, 8)
       })
-      .catch((event) => console.warn("产品参考图恢复失败:", event))
+      .catch((event) => console.warn("商品参考图恢复失败:", event))
   }
   prompts.value = item.prompts.map(resetInterruptedPrompt)
   if (item.generation?.aspectRatio && ASPECT_RATIO_VALUES.includes(item.generation.aspectRatio)) {
@@ -1007,7 +1007,7 @@ onMounted(() => {
             .then((images) => {
               productImages.value = images.slice(0, 8)
             })
-            .catch((event) => console.warn("产品参考图恢复失败:", event))
+            .catch((event) => console.warn("商品参考图恢复失败:", event))
         }
       }
     } catch {
@@ -1250,7 +1250,7 @@ onBeforeUnmount(() => {
       <div class="studio-grid">
         <aside class="studio-panel input-rail">
           <div class="panel-heading">
-            <h2>产品资料</h2>
+            <h2>商品资料</h2>
             <button
               type="button"
               class="inline-action panel-reset-action"
@@ -1264,7 +1264,7 @@ onBeforeUnmount(() => {
           <div class="input-rail-body">
             <div class="form-grid">
               <div>
-                <label for="product-name">产品名称</label>
+                <label for="product-name">商品名称</label>
                 <input
                   id="product-name"
                   v-model="productName"
@@ -1285,7 +1285,7 @@ onBeforeUnmount(() => {
             />
 
             <div class="field-row-head">
-              <label for="product-images">产品参考图</label>
+              <label for="product-images">商品参考图</label>
               <button
                 v-if="productImages.length > 0"
                 type="button"
@@ -1305,16 +1305,16 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="prompt-thumb-preview"
-                  :aria-label="`查看产品图 ${index + 1}`"
+                  :aria-label="`查看商品图 ${index + 1}`"
                   @click="lightboxSrc = src"
                 >
-                  <img :src="src" :alt="`产品图 ${index + 1}`">
+                  <img :src="src" :alt="`商品图 ${index + 1}`">
                 </button>
                 <button
                   type="button"
                   class="prompt-thumb-del"
                   :disabled="controlsDisabled"
-                  :aria-label="`移除产品图 ${index + 1}`"
+                  :aria-label="`移除商品图 ${index + 1}`"
                   @click="productImages = productImages.filter((_, i) => i !== index); productImageIds = productImageIds.filter((_, i) => i !== index)"
                 >
                   <Icon name="close" />
@@ -1335,7 +1335,7 @@ onBeforeUnmount(() => {
               ref="fileInputRef"
               name="productImages"
               type="file"
-              aria-label="上传产品参考图"
+              aria-label="上传商品参考图"
               accept="image/*"
               multiple
               hidden
@@ -1405,7 +1405,7 @@ onBeforeUnmount(() => {
             <div v-if="promptBusy" class="busy-card">
               <span class="busy-orbit" aria-hidden="true" />
               <strong>正在生成详情图方案</strong>
-              <p>系统正在分析产品资料和参考图。</p>
+              <p>系统正在分析商品资料和参考图。</p>
             </div>
             <div v-else-if="!activePrompt" class="empty">生成详情图方案后可在这里逐张生成图片。</div>
             <template v-else>

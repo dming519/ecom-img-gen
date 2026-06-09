@@ -141,7 +141,7 @@ async function ensureDataImage(value: string) {
 
 async function ensureCutoutSourceImageId() {
   if (sourceImageId.value) return sourceImageId.value
-  if (!sourceImage.value) throw new Error("请先上传一张包含产品的图片。")
+  if (!sourceImage.value) throw new Error("请先上传一张包含商品的图片。")
   const dataUrl = await ensureDataImage(sourceImage.value)
   const id = await dbPutProductImage(dataUrl)
   sourceImageId.value = id
@@ -454,7 +454,7 @@ function handleClearMask() {
 function exportMaskImage() {
   const maskCanvas = maskCanvasRef.value
   if (!maskCanvas || !hasMaskPixels(maskCanvas)) {
-    throw new Error("请先涂抹需要抠出的产品区域。")
+    throw new Error("请先涂抹需要抠出的商品区域。")
   }
   const output = document.createElement("canvas")
   output.width = maskCanvas.width
@@ -515,7 +515,7 @@ async function handleGenerate() {
     return
   }
   if (!sourceImage.value) {
-    error.value = "请先上传一张包含产品的图片。"
+    error.value = "请先上传一张包含商品的图片。"
     return
   }
   let apiMaskImage: string
@@ -796,7 +796,7 @@ watch(
   <div class="cutout-grid">
     <aside class="studio-panel cutout-panel cutout-source-panel">
       <div class="panel-heading">
-        <h2>产品原图</h2>
+        <h2>商品原图</h2>
         <span class="panel-count">上传</span>
       </div>
       <div class="cutout-panel-body">
@@ -806,11 +806,11 @@ watch(
           :disabled="controlsDisabled"
           @click="fileInputRef?.click()"
         >
-          <img v-if="sourceImage" :src="sourceImage" alt="待抠图产品原图">
+          <img v-if="sourceImage" :src="sourceImage" alt="待抠图商品原图">
           <span v-else>
             <Icon name="upload" />
-            <strong>上传产品图片</strong>
-            <small>建议使用产品清晰、主体完整的图片</small>
+            <strong>上传商品图片</strong>
+            <small>建议使用商品清晰、主体完整的图片</small>
           </span>
         </button>
         <input ref="fileInputRef" type="file" accept="image/*" hidden @change="handleFileChange">
@@ -826,7 +826,7 @@ watch(
         </div>
         <div class="cutout-help">
           <strong>操作逻辑</strong>
-          <p>用画笔覆盖需要抠出的产品本体，系统会基于原图和涂抹区域生成白底产品图。</p>
+          <p>用画笔覆盖需要抠出的商品本体，系统会基于原图和涂抹区域生成白底商品图。</p>
         </div>
       </div>
       <div v-if="error" class="alert cutout-alert">{{ error }}</div>
@@ -882,7 +882,7 @@ watch(
             ref="maskCanvasRef"
             class="cutout-mask-canvas"
             :style="canvasStyle"
-            aria-label="涂抹需要抠出的产品区域"
+            aria-label="涂抹需要抠出的商品区域"
             @pointerenter="handlePointerEnter"
             @pointerdown="handlePointerDown"
             @pointermove="handlePointerMove"
@@ -903,12 +903,12 @@ watch(
           />
           <div v-if="!sourceImage" class="cutout-canvas-empty">
             <Icon name="cutout" />
-            <span>上传图片后在这里涂抹产品</span>
+            <span>上传图片后在这里涂抹商品</span>
           </div>
           <div v-if="busy" class="cutout-busy-layer">
             <span class="busy-orbit" aria-hidden="true" />
             <strong>正在抠图</strong>
-            <p>正在提取涂抹产品并补全遮挡部分。</p>
+            <p>正在提取涂抹商品并补全遮挡部分。</p>
           </div>
         </div>
       </div>
@@ -937,7 +937,7 @@ watch(
       <div class="cutout-result-stage">
         <template v-if="resultSrc">
           <button type="button" class="cutout-result-image" @click="emit('zoom', resultSrc)">
-            <img :src="resultSrc" alt="白底产品抠图结果">
+            <img :src="resultSrc" alt="白底商品抠图结果">
           </button>
           <div class="stage-actions">
             <button type="button" class="btn-ghost" @click="handleDownload">
@@ -952,7 +952,7 @@ watch(
         </template>
         <div v-else class="stage-placeholder cutout-result-empty">
           <Icon name="image" class="icon-large" />
-          <div class="icon-hint">抠图结果会生成白底产品图</div>
+          <div class="icon-hint">抠图结果会生成白底商品图</div>
         </div>
       </div>
     </section>
@@ -980,7 +980,7 @@ watch(
             <strong>
               {{
                 item.status === "succeeded"
-                  ? "白底产品图"
+                  ? "白底商品图"
                   : item.status === "failed"
                     ? "抠图失败"
                     : item.status === "canceled"

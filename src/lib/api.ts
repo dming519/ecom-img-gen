@@ -94,7 +94,7 @@ export async function generateDetailPrompts(
     productImageIds: options.productImageIds,
   });
   if (body.length > MAX_PROMPT_PAYLOAD_CHARS) {
-    throw new Error("产品参考图数据过大，请减少图片数量或重新上传后再生成。");
+    throw new Error("商品参考图数据过大，请减少图片数量或重新上传后再生成。");
   }
 
   const response = await fetchWithRetry(DEFAULT_PROMPT_PATH, {

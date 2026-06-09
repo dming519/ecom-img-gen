@@ -77,10 +77,10 @@ export async function handlePost(context: RequestContext) {
   const sourceImageId = normalizeImageId(body.sourceImageId);
   const maskImageId = normalizeImageId(body.maskImageId);
   if (!sourceImageId) {
-    return json({ error: "请上传需要抠图的产品图片" }, { status: 400 });
+    return json({ error: "请上传需要抠图的商品图片" }, { status: 400 });
   }
   if (!maskImageId) {
-    return json({ error: "请先涂抹需要抠出的产品区域" }, { status: 400 });
+    return json({ error: "请先涂抹需要抠出的商品区域" }, { status: 400 });
   }
   let storedImages: Array<string | null>;
   try {
@@ -96,7 +96,7 @@ export async function handlePost(context: RequestContext) {
   }
   const [sourceImage, maskImage] = storedImages;
   if (!sourceImage) {
-    return json({ error: "产品原图不存在或无权访问" }, { status: 400 });
+    return json({ error: "商品原图不存在或无权访问" }, { status: 400 });
   }
   if (!maskImage) {
     return json({ error: "涂抹区域不存在或无权访问" }, { status: 400 });
@@ -104,10 +104,10 @@ export async function handlePost(context: RequestContext) {
 
   // sourceImage 是原图，maskImage 是黑白选择区，二者缺一不可。
   if (!isDataImage(sourceImage)) {
-    return json({ error: "请上传需要抠图的产品图片" }, { status: 400 });
+    return json({ error: "请上传需要抠图的商品图片" }, { status: 400 });
   }
   if (!isDataImage(maskImage)) {
-    return json({ error: "请先涂抹需要抠出的产品区域" }, { status: 400 });
+    return json({ error: "请先涂抹需要抠出的商品区域" }, { status: 400 });
   }
 
   let creditResult: Awaited<ReturnType<typeof requireImageCredit>>;

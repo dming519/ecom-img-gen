@@ -232,20 +232,20 @@ async function getGenerationImageIds() {
     .filter((image) => image.startsWith("data:image/"))
     .filter((image) => image.length <= MAX_REFERENCE_IMAGE_CHARS)
   const total = uploadImages.reduce((sum, image) => sum + image.length, 0)
-  if (!images.length) throw new Error("请至少上传一张产品参考图。")
+  if (!images.length) throw new Error("请至少上传一张商品参考图。")
   if (missing.length && uploadImages.length !== missing.length) {
-    throw new Error("产品参考图过大或格式无效，请重新上传图片。")
+    throw new Error("商品参考图过大或格式无效，请重新上传图片。")
   }
   if (total > MAX_REFERENCE_IMAGE_TOTAL_CHARS) {
-    throw new Error("产品参考图总大小过大，请减少图片数量或重新上传后再生成。")
+    throw new Error("商品参考图总大小过大，请减少图片数量或重新上传后再生成。")
   }
   const uploadedIds = await Promise.all(uploadImages.map((image) => dbPutProductImage(image)))
   missing.forEach((item, index) => {
     nextIds[item.index] = uploadedIds[index] ?? ""
   })
   const ids = nextIds.filter(Boolean).slice(0, images.length)
-  if (!ids.length) throw new Error("请至少上传一张产品参考图。")
-  if (ids.length !== images.length) throw new Error("产品参考图保存失败，请重新上传后再试。")
+  if (!ids.length) throw new Error("请至少上传一张商品参考图。")
+  if (ids.length !== images.length) throw new Error("商品参考图保存失败，请重新上传后再试。")
   productImageIds.value = ids
   return ids
 }
@@ -279,11 +279,11 @@ function updateSessionCredits(result: {
 
 function validateGeneration() {
   if (!props.authenticated) {
-    error.value = "请先登录后再生成多视角产品图。"
+    error.value = "请先登录后再生成多视角商品图。"
     return false
   }
   if (!productImages.value.length) {
-    error.value = "请至少上传一张产品参考图。"
+    error.value = "请至少上传一张商品参考图。"
     return false
   }
   return true
@@ -462,7 +462,7 @@ function handleDownload(item: MultiViewItem) {
   <div class="multi-view-grid">
     <aside class="studio-panel input-rail multi-view-input">
       <div class="panel-heading">
-        <h2>产品资料</h2>
+        <h2>商品资料</h2>
         <button
           type="button"
           class="inline-action panel-reset-action"
@@ -475,7 +475,7 @@ function handleDownload(item: MultiViewItem) {
 
       <div class="input-rail-body multi-view-input-body">
         <div class="field-row-head">
-          <label for="multi-view-images">产品参考图</label>
+          <label for="multi-view-images">商品参考图</label>
           <button
             v-if="productImages.length > 0"
             type="button"
@@ -495,16 +495,16 @@ function handleDownload(item: MultiViewItem) {
             <button
               type="button"
               class="prompt-thumb-preview"
-              :aria-label="`查看产品参考图 ${index + 1}`"
+              :aria-label="`查看商品参考图 ${index + 1}`"
               @click="emit('zoom', src)"
             >
-              <img :src="src" :alt="`产品参考图 ${index + 1}`">
+              <img :src="src" :alt="`商品参考图 ${index + 1}`">
             </button>
             <button
               type="button"
               class="prompt-thumb-del"
               :disabled="controlsDisabled"
-              :aria-label="`移除产品参考图 ${index + 1}`"
+              :aria-label="`移除商品参考图 ${index + 1}`"
               @click="removeReferenceImage(index)"
             >
               <Icon name="close" />
@@ -524,7 +524,7 @@ function handleDownload(item: MultiViewItem) {
           id="multi-view-images"
           ref="fileInputRef"
           type="file"
-          aria-label="上传产品参考图"
+          aria-label="上传商品参考图"
           accept="image/*"
           multiple
           hidden
@@ -532,7 +532,7 @@ function handleDownload(item: MultiViewItem) {
         >
 
         <div class="multi-view-note">
-          <strong>白底产品图</strong>
+          <strong>白底商品图</strong>
           <p>系统自动分配标准角度，只输出商品本体。参考图越多，背面、侧面和底部越稳定。</p>
         </div>
 
