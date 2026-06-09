@@ -54,8 +54,8 @@ const EXPECTED_LAYER_ROWS: Array<Omit<LayerDisplayRow, "state" | "layer">> = [
   { id: "text", name: "文字层", role: "text", index: 2 },
   { id: "decoration", name: "装饰道具层", role: "decoration", index: 3 },
   { id: "shadow-light", name: "阴影光效层", role: "shadow", index: 4 },
-  { id: "preview", name: "原图预览", role: "preview", index: 5 },
 ]
+const EXPECTED_LAYER_COUNT = EXPECTED_LAYER_ROWS.length
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const sourceImage = shallowRef<string | null>(null)
@@ -74,7 +74,7 @@ const activeHistoryIdx = shallowRef(-1)
 const historyLoadedUserKey = shallowRef<string | null>(null)
 const progress = ref<{ done: number; total: number; current: string }>({
   done: 0,
-  total: 6,
+  total: EXPECTED_LAYER_COUNT,
   current: "",
 })
 
@@ -120,13 +120,12 @@ const layerPreviewFrameStyle = computed(() =>
 const selectedLayer = computed(() =>
   layers.value.find((layer) => layer.id === selectedLayerId.value) ?? layers.value[0] ?? null,
 )
-const previewLayer = computed(() =>
-  selectedLayer.value ?? layers.value.find((layer) => layer.role === "preview") ?? null,
-)
+const previewLayer = computed(() => selectedLayer.value)
 const previewSrc = computed(() => (previewLayer.value ? getLayerSrc(previewLayer.value) : null))
-const canDownloadZip = computed(() => !busy.value && layers.value.length > 0)
+const outputLayerCount = computed(() => getOutputLayers(layers.value).length)
+const canDownloadZip = computed(() => !busy.value && outputLayerCount.value > 0)
 const layerRows = computed<LayerDisplayRow[]>(() => {
-  const sortedLayers = [...layers.value].sort((a, b) => a.index - b.index)
+  const sortedLayers = getOutputLayers(layers.value)
   if (!busy.value) {
     return sortedLayers.map((layer) => ({
       id: layer.id,
@@ -185,6 +184,17 @@ function getLayerRoleLabel(role: LayerResultItem["role"]) {
   return LAYER_ROLE_LABEL[role] ?? "图层"
 }
 
+function getOutputLayers(sourceLayers: LayerResultItem[]) {
+  return sourceLayers
+    .filter((layer) => layer.role !== "preview")
+    .sort((a, b) => a.index - b.index)
+    .map((layer, index) => ({ ...layer, index }))
+}
+
+function getOutputLayerCount(item: LayerHistoryItem) {
+  return getOutputLayers(item.layers).length
+}
+
 function syncLayerHistoryList(item: LayerHistoryItem) {
   const index = history.value.findIndex((historyItem) =>
     item.id != null
@@ -214,7 +224,7 @@ function updateLayerHistorySnapshot(
   item.sourceDimensions = sourceDimensions.value ?? undefined
   item.normalizedToSourceSize = layersNormalizedToSourceSize.value
   item.layerBackground = LAYER_BACKGROUND_COLOR
-  item.layers = layers.value.map((layer) => ({ ...layer }))
+  item.layers = getOutputLayers(layers.value)
   item.status = options.status ?? item.status
   item.error = options.error === undefined ? item.error : options.error || undefined
   item.model = options.model ?? item.model
@@ -239,14 +249,12 @@ async function persistLayer(item: LayerHistoryItem) {
 
 function syncLayersFromTask(result: Pick<LayerTaskStatus, "layers">, options: { preferPreview?: boolean } = {}) {
   if (!result.layers) return
-  const sortedLayers = [...result.layers].sort((a, b) => a.index - b.index)
+  const sortedLayers = getOutputLayers(result.layers)
   layersNormalizedToSourceSize.value = false
   layers.value = sortedLayers
   const currentLayerExists = sortedLayers.some((layer) => layer.id === selectedLayerId.value)
   if (options.preferPreview) {
-    selectedLayerId.value =
-      sortedLayers.find((layer) => layer.role === "preview")?.id ??
-      (currentLayerExists ? selectedLayerId.value : sortedLayers[0]?.id ?? null)
+    selectedLayerId.value = currentLayerExists ? selectedLayerId.value : sortedLayers[0]?.id ?? null
     return
   }
   if (!currentLayerExists) {
@@ -275,7 +283,7 @@ async function handleFileChange(event: Event) {
     layers.value = []
     layersNormalizedToSourceSize.value = false
     selectedLayerId.value = null
-    progress.value = { done: 0, total: 6, current: "" }
+    progress.value = { done: 0, total: EXPECTED_LAYER_COUNT, current: "" }
     activeHistoryIdx.value = -1
   } catch (uploadError) {
     error.value = uploadError instanceof Error ? uploadError.message : String(uploadError)
@@ -322,7 +330,7 @@ async function handleGenerate() {
   layers.value = []
   layersNormalizedToSourceSize.value = false
   selectedLayerId.value = null
-  progress.value = { done: 0, total: 6, current: "" }
+  progress.value = { done: 0, total: EXPECTED_LAYER_COUNT, current: "" }
   let historyItem: LayerHistoryItem = {
     sourceImageId: sourceImageId.value,
     sourceImage: sourceImage.value ?? undefined,
@@ -351,7 +359,7 @@ async function handleGenerate() {
       if (!next.progress) return
       progress.value = {
         done: Number(next.progress.done ?? 0),
-        total: Number(next.progress.total ?? 6),
+        total: Number(next.progress.total ?? EXPECTED_LAYER_COUNT),
         current: next.progress.current ?? "",
       }
       updateLayerHistorySnapshot(historyItem, { status: "running", error: null })
@@ -372,8 +380,8 @@ async function handleGenerate() {
       return
     }
     progress.value = {
-      done: Number(progress.value.total || 6),
-      total: Number(progress.value.total || 6),
+      done: Number(progress.value.total || EXPECTED_LAYER_COUNT),
+      total: Number(progress.value.total || EXPECTED_LAYER_COUNT),
       current: "正在校准白底图层",
     }
     updateLayerHistorySnapshot(historyItem, { status: "running", error: null })
@@ -532,7 +540,16 @@ async function drawBlobOnWhiteSourceCanvas(blob: Blob, dimensions: ImageDimensio
     if (!context) throw new Error("浏览器不支持图层白底规范化")
     context.fillStyle = LAYER_BACKGROUND_COLOR
     context.fillRect(0, 0, dimensions.width, dimensions.height)
-    context.drawImage(image, 0, 0, dimensions.width, dimensions.height)
+    context.imageSmoothingEnabled = true
+    context.imageSmoothingQuality = "high"
+    const imageWidth = image.naturalWidth || image.width
+    const imageHeight = image.naturalHeight || image.height
+    const scale = Math.min(dimensions.width / imageWidth, dimensions.height / imageHeight)
+    const drawWidth = imageWidth * scale
+    const drawHeight = imageHeight * scale
+    const drawX = (dimensions.width - drawWidth) / 2
+    const drawY = (dimensions.height - drawHeight) / 2
+    context.drawImage(image, drawX, drawY, drawWidth, drawHeight)
     return canvasToBlob(canvas)
   } finally {
     URL.revokeObjectURL(objectUrl)
@@ -546,7 +563,6 @@ async function normalizeLayersToWhiteSourceCanvas() {
   const currentLayerId = selectedLayerId.value
   const normalizedLayers = await Promise.all(
     layers.value.map(async (layer) => {
-      if (layer.role === "preview") return layer
       const blob = await fetchLayerBlob(layer)
       const normalizedBlob = await drawBlobOnWhiteSourceCanvas(blob, dimensions)
       const imageId = await dbPutProductImageBlob(normalizedBlob, `${layer.id}.png`)
@@ -558,7 +574,7 @@ async function normalizeLayersToWhiteSourceCanvas() {
   layersNormalizedToSourceSize.value = true
   selectedLayerId.value = normalizedLayers.some((layer) => layer.id === currentLayerId)
     ? currentLayerId
-    : normalizedLayers.find((layer) => layer.role === "preview")?.id ?? normalizedLayers[0]?.id ?? null
+    : normalizedLayers[0]?.id ?? null
 }
 
 async function fetchLayerBytes(layer: LayerResultItem) {
@@ -574,8 +590,9 @@ async function handleDownloadZip() {
   zipBusy.value = true
   error.value = null
   try {
+    const outputLayers = getOutputLayers(layers.value)
     const imageEntries = await Promise.all(
-      layers.value.map(async (layer, index) => ({
+      outputLayers.map(async (layer, index) => ({
         name: `${String(index + 1).padStart(2, "0")}-${layer.id}.png`,
         data: await fetchLayerBytes(layer),
       })),
@@ -586,7 +603,7 @@ async function handleDownloadZip() {
       sourceDimensions: sourceDimensions.value,
       normalizedToSourceSize: !!sourceDimensions.value,
       layerBackground: LAYER_BACKGROUND_COLOR,
-      layers: layers.value.map(({ base64: _base64, ...layer }) => layer),
+      layers: outputLayers.map(({ base64: _base64, ...layer }) => layer),
     }
     const zip = createZip([
       ...imageEntries,
@@ -609,8 +626,7 @@ async function handleDownloadZip() {
 }
 
 function getLayerHistoryCover(item: LayerHistoryItem) {
-  const layer = item.layers.find((entry) => entry.role === "preview" && (entry.imageId || entry.base64)) ??
-    item.layers.find((entry) => entry.imageId || entry.base64)
+  const layer = getOutputLayers(item.layers).find((entry) => entry.imageId || entry.base64)
   if (!layer) return null
   if (layer.base64) return `data:image/png;base64,${layer.base64}`
   if (layer.imageId) return dbImageFileUrl(layer.imageId)
@@ -631,13 +647,16 @@ async function handleSelectHistory(index: number) {
   }
   sourceDimensions.value = item.sourceDimensions ??
     (sourceImage.value ? await getImageDimensions(sourceImage.value).catch(() => null) : null)
-  layers.value = [...item.layers].sort((a, b) => a.index - b.index)
+  layers.value = getOutputLayers(item.layers)
   layersNormalizedToSourceSize.value = !!item.normalizedToSourceSize
-  selectedLayerId.value =
-    layers.value.find((layer) => layer.role === "preview")?.id ?? layers.value[0]?.id ?? null
+  selectedLayerId.value = layers.value[0]?.id ?? null
+  const historyProgressTotal = Math.min(
+    Math.max(Number(item.progress?.total ?? EXPECTED_LAYER_COUNT), 1),
+    EXPECTED_LAYER_COUNT,
+  )
   progress.value = {
-    done: Number(item.progress?.done ?? layers.value.length),
-    total: Number(item.progress?.total ?? 6),
+    done: Math.min(Number(item.progress?.done ?? layers.value.length), historyProgressTotal),
+    total: historyProgressTotal,
     current: item.progress?.current ?? "",
   }
   error.value = item.error ?? null
@@ -694,7 +713,7 @@ watch(
 <template>
   <div class="run-status cutout-status" aria-label="分层任务状态">
     <span>{{ sourceImage ? "原图已上传" : "等待上传" }}</span>
-    <span>{{ layers.length ? `${layers.length} 个图层` : "未分层" }}</span>
+    <span>{{ outputLayerCount ? `${outputLayerCount} 个图层` : "未分层" }}</span>
     <span>{{ isSuperAdmin ? "不限次数" : creditLabel }}</span>
     <span>{{ busy ? "分层中" : "待命" }}</span>
   </div>
@@ -824,7 +843,7 @@ watch(
     <aside class="studio-panel cutout-panel cutout-result-panel layer-list-panel">
       <div class="panel-heading">
         <h2>图层列表</h2>
-        <span class="panel-count">{{ busy ? `${progress.done}/${progress.total}` : `${layers.length} 个` }}</span>
+        <span class="panel-count">{{ busy ? `${progress.done}/${progress.total}` : `${outputLayerCount} 个` }}</span>
       </div>
       <div class="cutout-panel-body layer-list-body">
         <div v-if="layerRows.length" class="layer-list">
@@ -896,7 +915,7 @@ watch(
                       : "处理中"
               }}
             </strong>
-            <p>{{ item.error || `${item.layers.length} 个图层` }}</p>
+            <p>{{ item.error || `${getOutputLayerCount(item)} 个图层` }}</p>
             <small>{{ new Date(item.createdAt).toLocaleString() }}</small>
           </div>
         </button>

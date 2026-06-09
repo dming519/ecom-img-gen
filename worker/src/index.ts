@@ -640,14 +640,6 @@ const LAYER_PRESETS = [
       "输出纯白背景 PNG，没有阴影光效的区域必须是纯白色背景，不要透明 alpha。",
     ].join("\n\n"),
   },
-  {
-    id: "preview",
-    name: "原图预览",
-    role: "preview",
-    prompt: [
-      "直接使用用户上传原图作为分层预览，不需要调用模型重新生成。",
-    ].join("\n\n"),
-  },
 ] as const;
 
 type LayerPreset = (typeof LAYER_PRESETS)[number];
@@ -748,7 +740,7 @@ function createLayerFallbackPrompt(preset: (typeof LAYER_PRESETS)[number]) {
   }
   return [
     ...common,
-    "Layer target: source preview. Keep the uploaded image unchanged.",
+    "Layer target: requested layer only. Keep the uploaded image composition as the reference.",
   ].join("\n\n");
 }
 
@@ -1181,8 +1173,7 @@ export class CutoutTasksDO {
         const layers: GeneratedLayerItem[] = [];
         const sourceDimensions = getImageDimensions(sourceImage);
         const layerImageSize = resolveLayerImageSize(sourceImage);
-        const modelLayerPresets = LAYER_PRESETS.filter((preset) => preset.role !== "preview");
-        const previewPreset = LAYER_PRESETS.find((preset) => preset.role === "preview");
+        const modelLayerPresets = LAYER_PRESETS;
         const progressTotal = LAYER_PRESETS.length;
         let progressDone = 0;
         const writeLayerTask = async (
@@ -1274,22 +1265,6 @@ export class CutoutTasksDO {
           progressDone += 1;
 
           await writeLayerTask("running", { current: `${preset.name}已完成` });
-        }
-
-        if (previewPreset) {
-          const previewLayer: GeneratedLayerItem = {
-            id: previewPreset.id,
-            name: previewPreset.name,
-            role: previewPreset.role,
-            index: LAYER_PRESETS.findIndex((item) => item.id === previewPreset.id),
-          };
-          if (body.sourceImageId) {
-            previewLayer.imageId = body.sourceImageId;
-          } else {
-            previewLayer.base64 = sourceImage.replace(/^data:image\/[^;]+;base64,/, "");
-          }
-          layers.push(previewLayer);
-          progressDone = progressTotal;
         }
 
         await writeLayerTask("succeeded", {
