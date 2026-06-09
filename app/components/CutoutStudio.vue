@@ -42,6 +42,7 @@ const sourceImage = shallowRef<string | null>(null)
 const sourceImageId = shallowRef<string | undefined>()
 const resultImageId = shallowRef<string | undefined>()
 const resultBase64 = shallowRef<string | null>(null)
+const cutoutTarget = shallowRef("")
 const history = ref<CutoutHistoryItem[]>([])
 const activeHistoryIdx = shallowRef(-1)
 const brushSize = shallowRef(34)
@@ -84,6 +85,7 @@ const resultSrc = computed(() =>
       ? dbImageFileUrl(resultImageId.value)
       : null,
 )
+const normalizedCutoutTarget = computed(() => cutoutTarget.value.trim().replace(/\s+/g, " ").slice(0, 160))
 const canvasStyle = computed(() =>
   canvasSize.value.width && canvasSize.value.height
     ? {
@@ -262,6 +264,7 @@ async function persistCurrentDraft(
   const nextSourceImageId = overrides.sourceImageId ?? sourceImageId.value
   const nextResultBase64 = hasResultOverride ? overrides.resultBase64 : resultBase64.value
   const nextResultImageId = hasResultImageOverride ? overrides.resultImageId : resultImageId.value
+  const nextTarget = overrides.target ?? normalizedCutoutTarget.value
   if (!nextSourceImageId && !maskImageId && !nextResultBase64 && !nextResultImageId) return
   try {
     const draft = {
@@ -269,6 +272,7 @@ async function persistCurrentDraft(
       maskImageId,
       resultImageId: nextResultImageId,
       resultBase64: nextResultBase64,
+      target: nextTarget,
       brushSize: overrides.brushSize ?? brushSize.value,
       mode: overrides.mode ?? mode.value,
       canvasZoom: overrides.canvasZoom ?? canvasZoom.value,
@@ -325,6 +329,7 @@ async function handleFileChange(event: Event) {
       maskImageId: undefined,
       resultImageId: undefined,
       resultBase64: null,
+      target: normalizedCutoutTarget.value,
       brushSize: brushSize.value,
       mode: mode.value,
       canvasZoom: 1,
@@ -533,6 +538,7 @@ async function handleGenerate() {
   let item: CutoutHistoryItem = {
     sourceImageId: sourceImageId.value,
     sourceImage: sourceImage.value,
+    target: normalizedCutoutTarget.value,
     status: "running",
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -550,7 +556,11 @@ async function handleGenerate() {
 
     // createCutoutTask 只负责派发任务，真正结果要通过 pollCutoutTask 查询。
     const created = await createCutoutTask(
-      { sourceImageId: apiSourceImageId, maskImageId: taskMaskImageId },
+      {
+        sourceImageId: apiSourceImageId,
+        maskImageId: taskMaskImageId,
+        target: normalizedCutoutTarget.value,
+      },
       abortRef.value.signal,
     )
     taskIdRef.value = created.taskId
@@ -636,6 +646,7 @@ async function handleSelectHistory(index: number) {
   const item = history.value[index]
   if (!item) return
   activeHistoryIdx.value = index
+  cutoutTarget.value = item.target ?? ""
   resultImageId.value = item.resultImageId
   resultBase64.value = item.resultBase64 ?? null
   error.value = item.error ?? null
@@ -644,6 +655,7 @@ async function handleSelectHistory(index: number) {
     maskImageId: item.maskImageId,
     resultImageId: item.resultImageId,
     resultBase64: item.resultBase64 ?? null,
+    target: item.target ?? "",
     brushSize: brushSize.value,
     mode: mode.value,
     canvasZoom: canvasZoom.value,
@@ -737,6 +749,7 @@ async function loadCutoutDraftIfAuthenticated() {
     mode.value = draft.mode === "eraser" ? "eraser" : "brush"
     resultImageId.value = draft.resultImageId
     resultBase64.value = draft.resultBase64 ?? null
+    cutoutTarget.value = draft.target ?? ""
     const [sourceImages, maskImages] = await Promise.all([
       draft.sourceImageId ? dbGetProductImages([draft.sourceImageId]) : Promise.resolve([]),
       draft.maskImageId ? dbGetProductImages([draft.maskImageId]) : Promise.resolve([]),
@@ -824,9 +837,20 @@ watch(
             查看原图
           </button>
         </div>
+        <label class="cutout-target-field">
+          <span>抠图目标</span>
+          <input
+            v-model="cutoutTarget"
+            type="text"
+            maxlength="160"
+            :disabled="controlsDisabled"
+            placeholder="例如：瓶子、鞋子、包装盒"
+            @blur="persistCurrentDraft({ target: normalizedCutoutTarget })"
+          >
+        </label>
         <div class="cutout-help">
           <strong>操作逻辑</strong>
-          <p>用画笔覆盖需要抠出的商品本体，系统会基于原图和涂抹区域生成白底商品图。</p>
+          <p>用画笔覆盖需要抠出的商品本体，可填写目标让系统优先提取指定对象。</p>
         </div>
       </div>
       <div v-if="error" class="alert cutout-alert">{{ error }}</div>
@@ -988,7 +1012,7 @@ watch(
                       : "处理中"
               }}
             </strong>
-            <p>{{ item.error || "包含原图、涂抹区域和抠图结果。" }}</p>
+            <p>{{ item.error || item.target || "包含原图、涂抹区域和抠图结果。" }}</p>
             <small>{{ new Date(item.createdAt).toLocaleString() }}</small>
           </div>
         </button>

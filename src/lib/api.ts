@@ -299,7 +299,11 @@ export async function createCutoutTask(
   const response = await fetchWithRetry(DEFAULT_CUTOUT_PATH, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(options),
+    body: JSON.stringify({
+      sourceImageId: options.sourceImageId,
+      maskImageId: options.maskImageId,
+      target: options.target,
+    }),
     signal,
   });
 

@@ -35,7 +35,8 @@ function getItemSrc(item: DetailPromptItem) {
   <div v-if="!prompts.length" class="stage">
     <div class="stage-empty-card">
       <Icon name="image" class="icon-large" />
-      <div class="icon-hint">商品详情图将在这里逐张生成</div>
+      <div class="icon-hint">您的商品详情图将在这里呈现</div>
+      <p class="empty-tip">先填写商品资料并生成方案，然后点击"批量生成详情图"</p>
     </div>
   </div>
 
@@ -60,6 +61,7 @@ function getItemSrc(item: DetailPromptItem) {
         <template v-if="busy && (active?.status === 'running' || active?.status === 'queued')">
           <div class="spinner" />
           <div class="loading-hint">正在生成：{{ active?.title }}</div>
+          <p class="loading-progress">预计需要 15-30 秒，请稍候...</p>
         </template>
         <template v-else-if="active?.status === 'failed'">
           <Icon name="warning" class="icon-large" />

@@ -225,6 +225,7 @@ export type MultiViewHistoryStatus =
 export interface CreateCutoutTaskOptions {
   sourceImageId: string;
   maskImageId: string;
+  target?: string;
 }
 
 // 创建局部改图任务需要原图、涂抹区域和用户输入的修改内容。
@@ -287,6 +288,7 @@ export interface CutoutHistoryItem {
   sourceImageId?: string;
   maskImageId?: string;
   resultImageId?: string;
+  target?: string;
   sourceImage?: string;
   maskImage?: string;
   resultBase64?: string;
@@ -372,6 +374,7 @@ export interface CutoutDraft {
   maskImageId?: string;
   resultImageId?: string;
   resultBase64?: string | null;
+  target?: string;
   brushSize?: number;
   mode?: "brush" | "eraser";
   canvasZoom?: number;

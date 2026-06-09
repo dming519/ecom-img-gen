@@ -8,6 +8,7 @@ import { getUserKey, requireImageCredit, type UserKvNamespace } from "../_lib/us
 interface CutoutRequestBody {
   sourceImageId?: string;
   maskImageId?: string;
+  target?: string;
 }
 
 // 抠图接口同样采用“创建任务 + 前端轮询”的异步模式。
@@ -47,6 +48,10 @@ function normalizeImageId(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
+function normalizeCutoutTarget(value: unknown) {
+  return typeof value === "string" ? value.trim().replace(/\s+/g, " ").slice(0, 160) : "";
+}
+
 // POST /api/cutout：创建白底抠图任务。
 export async function handlePost(context: RequestContext) {
   const session = await requireSession(context.request, context.env);
@@ -76,6 +81,7 @@ export async function handlePost(context: RequestContext) {
   const userKey = getUserKey(session.user);
   const sourceImageId = normalizeImageId(body.sourceImageId);
   const maskImageId = normalizeImageId(body.maskImageId);
+  const target = normalizeCutoutTarget(body.target);
   if (!sourceImageId) {
     return json({ error: "请上传需要抠图的商品图片" }, { status: 400 });
   }
@@ -147,6 +153,7 @@ export async function handlePost(context: RequestContext) {
         taskId,
         sourceImage,
         maskImage,
+        cutoutTarget: target,
         userKey,
       }),
     });

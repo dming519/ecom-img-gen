@@ -1091,10 +1091,6 @@ onBeforeUnmount(() => {
           <Icon name="brand" />
           <span>首页</span>
         </a>
-        <button type="button" class="creative-tab" disabled>
-          <Icon name="image" />
-          <span>主图</span>
-        </button>
         <a
           href="/image/"
           :class="['creative-tab', { 'is-active': studioMode === 'image' }]"
@@ -1140,10 +1136,6 @@ onBeforeUnmount(() => {
           <Icon name="text" />
           <span>分层</span>
         </a>
-        <button type="button" class="creative-tab" disabled>
-          <Icon name="video" />
-          <span>视频</span>
-        </button>
       </nav>
 
       <div class="top-actions">
@@ -1275,7 +1267,11 @@ onBeforeUnmount(() => {
         <span>{{ productImages.length ? `${productImages.length} 张参考图` : "未上传参考图" }}</span>
         <span>{{ creditLabel }}</span>
         <span>{{ generationLabel }}</span>
-        <span>{{ imageBusy ? "生成中" : "待命" }}</span>
+        <span v-if="imageBusy" class="status-generating">
+          <span class="status-pulse" aria-hidden="true"></span>
+          生成中 {{ activePromptIndex + 1 }}/{{ prompts.length }}
+        </span>
+        <span v-else>待命</span>
       </div>
 
       <div class="studio-grid">
@@ -1301,7 +1297,7 @@ onBeforeUnmount(() => {
                   v-model="productName"
                   type="text"
                   :disabled="controlsDisabled"
-                  placeholder="例如：玻尿酸修护精华"
+                  placeholder="示例：玻尿酸修护精华液 | 真皮沙发双人座 | 儿童智能手表"
                 >
               </div>
             </div>
@@ -1312,11 +1308,11 @@ onBeforeUnmount(() => {
               v-model="sellingPoints"
               class="selling-points"
               :disabled="controlsDisabled"
-              placeholder="输入核心卖点、适用人群、规格信息、购买理由"
+              placeholder="请输入商品核心卖点、适用人群、规格信息和购买理由。&#10;&#10;示例：&#10;• 深层补水：玻尿酸微分子渗透技术&#10;• 修护屏障：神经酰胺+角鲨烷双重修护&#10;• 适合人群：敏感肌、干燥肌、熟龄肌&#10;• 规格：30ml 旅行装 / 50ml 标准装&#10;• 使用感：清爽不油腻，快速吸收"
             />
 
             <div class="field-row-head">
-              <label for="product-images">商品参考图</label>
+              <label for="product-images">商品参考图 <span class="field-hint">(至少1张，最多8张)</span></label>
               <button
                 v-if="productImages.length > 0"
                 type="button"
@@ -1419,7 +1415,7 @@ onBeforeUnmount(() => {
           <div class="input-action-bar">
             <button type="button" class="btn-primary" :disabled="controlsDisabled" @click="handleGeneratePrompts">
               <span v-if="promptBusy" class="btn-spinner" aria-hidden="true" />
-              {{ promptBusy ? "正在生成方案..." : "生成详情图方案" }}
+              {{ promptBusy ? "AI 生成方案中..." : "生成详情图方案" }}
             </button>
             <div v-if="error" class="alert">{{ error }}</div>
           </div>
@@ -1436,7 +1432,7 @@ onBeforeUnmount(() => {
             <div v-if="promptBusy" class="busy-card">
               <span class="busy-orbit" aria-hidden="true" />
               <strong>正在生成详情图方案</strong>
-              <p>系统正在分析商品资料和参考图。</p>
+              <p>AI 正在分析商品资料和参考图，预计需要 10-20 秒...</p>
             </div>
             <div v-else-if="!activePrompt" class="empty">生成详情图方案后可在这里逐张生成图片。</div>
             <template v-else>
@@ -1503,7 +1499,7 @@ onBeforeUnmount(() => {
                 @click="handleGenerateImages"
               >
                 <span v-if="imageBusy" class="btn-spinner" aria-hidden="true" />
-                {{ imageBusy ? "正在逐张生成..." : "批量生成详情图" }}
+                {{ imageBusy ? `生成中 (${activePromptIndex + 1}/${prompts.length})` : "批量生成详情图" }}
               </button>
               <button
                 v-if="!imageBusy"
