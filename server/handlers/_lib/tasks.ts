@@ -93,39 +93,64 @@ function stripTaskBase64(task: TaskRecord) {
   return rest;
 }
 
+async function convertTaskLayerBase64(context: TaskRequestContext, task: TaskRecord) {
+  if (!Array.isArray(task.layers) || !task.userKey) {
+    return { task, changed: false };
+  }
+
+  let changed = false;
+  const layers = await Promise.all(
+    task.layers.map(async (layer) => {
+      if (!layer || typeof layer !== "object") return layer;
+      const item = layer as Record<string, unknown>;
+      if (typeof item.imageId === "string" && item.imageId) {
+        const { base64: _base64, ...rest } = item;
+        return rest;
+      }
+      if (typeof item.base64 !== "string") return item;
+      const imageId = await storeHistoryImage(context.env, task.userKey!, item.base64);
+      changed = true;
+      const { base64: _base64, ...rest } = item;
+      return { ...rest, imageId };
+    }),
+  );
+
+  return {
+    task: { ...task, layers },
+    changed,
+  };
+}
+
 async function ensureTaskImageId(
   context: TaskRequestContext,
   kv: TaskKvNamespace,
   key: string,
   task: TaskRecord,
+  rawTask?: string,
 ) {
-  if (task.status === "succeeded" && Array.isArray(task.layers) && task.userKey) {
-    let changed = false;
-    const layers = await Promise.all(
-      task.layers.map(async (layer) => {
-        if (!layer || typeof layer !== "object") return layer;
-        const item = layer as Record<string, unknown>;
-        if (typeof item.imageId === "string" && item.imageId) {
-          const { base64: _base64, ...rest } = item;
-          return rest;
+  if (Array.isArray(task.layers) && task.userKey) {
+    let converted = await convertTaskLayerBase64(context, task);
+    if (converted.changed) {
+      const latestRaw = await kv.get(key).catch(() => null);
+      if (latestRaw && latestRaw !== rawTask) {
+        try {
+          const latestTask = parseTaskRecord(latestRaw);
+          if (Array.isArray(latestTask.layers) && latestTask.userKey) {
+            converted = await convertTaskLayerBase64(context, latestTask);
+          }
+        } catch {
+          // Keep the already converted snapshot.
         }
-        if (typeof item.base64 !== "string") return item;
-        const imageId = await storeHistoryImage(context.env, task.userKey!, item.base64);
-        changed = true;
-        const { base64: _base64, ...rest } = item;
-        return { ...rest, imageId };
-      }),
-    );
-    if (changed) {
+      }
+
       const nextTask = stripTaskBase64({
-        ...task,
-        layers,
+        ...converted.task,
         updatedAt: Date.now(),
       });
       await kv.put(key, JSON.stringify(nextTask), { expirationTtl: 3600 });
       return nextTask;
     }
-    return stripTaskBase64({ ...task, layers });
+    return stripTaskBase64(converted.task);
   }
 
   if (task.status !== "succeeded" || typeof task.base64 !== "string") {
@@ -217,7 +242,7 @@ export async function handleTaskStatusRequest(
 
   let responseTask: TaskRecord;
   try {
-    responseTask = await ensureTaskImageId(context, access.kv, key, normalized);
+    responseTask = await ensureTaskImageId(context, access.kv, key, normalized, rawTask);
   } catch (error) {
     return json(
       {

@@ -522,6 +522,47 @@ const LAYER_PRESETS = [
   },
 ] as const;
 
+type LayerPreset = (typeof LAYER_PRESETS)[number];
+
+interface GeneratedLayerItem {
+  id: LayerPreset["id"];
+  name: LayerPreset["name"];
+  role: LayerPreset["role"];
+  index: number;
+  imageId?: string;
+  base64?: string;
+}
+
+function getStoredLayerImageIds(rawTask: string | null) {
+  const imageIds = new Map<string, string>();
+  if (!rawTask) return imageIds;
+  try {
+    const task = JSON.parse(rawTask) as { layers?: unknown };
+    if (!Array.isArray(task.layers)) return imageIds;
+    for (const layer of task.layers) {
+      if (!layer || typeof layer !== "object") continue;
+      const item = layer as Record<string, unknown>;
+      if (typeof item.id === "string" && typeof item.imageId === "string" && item.imageId) {
+        imageIds.set(item.id, item.imageId);
+      }
+    }
+  } catch {
+    // Keep the generated layer payload if the previous task snapshot is unreadable.
+  }
+  return imageIds;
+}
+
+async function mergeStoredLayerImageIds(env: Env, taskKey: string, layers: GeneratedLayerItem[]) {
+  const rawTask = await env.TASKS_KV.get(taskKey).catch(() => null);
+  const imageIds = getStoredLayerImageIds(rawTask);
+  return layers.map((layer) => {
+    const imageId = layer.imageId || imageIds.get(layer.id);
+    if (!imageId) return layer;
+    const { base64: _base64, ...rest } = layer;
+    return { ...rest, imageId };
+  });
+}
+
 function createLayerPrompt(prompt: string) {
   return [
     "Return exactly one PNG image. Do not add explanations, captions, watermarks, borders, or extra text.",
@@ -1002,7 +1043,36 @@ export class CutoutTasksDO {
       // 抠图、改图和详情图共用取消检查逻辑。
       const shouldStop = () => isImageTaskCanceled(this.env, taskKey);
       if (taskType === "layer") {
-        const layers = [];
+        const layers: GeneratedLayerItem[] = [];
+        const writeLayerTask = async (
+          status: "running" | "succeeded" | "failed",
+          options: {
+            current?: string;
+            error?: string;
+            model?: string;
+            manifest?: { sourceImageId?: string; createdAt?: number };
+          } = {},
+        ) => {
+          const persistedLayers = await mergeStoredLayerImageIds(this.env, taskKey, layers);
+          const record: Record<string, unknown> = {
+            status,
+            userKey,
+            sourceImageId: body.sourceImageId,
+            progress: {
+              done: layers.length,
+              total: LAYER_PRESETS.length,
+              current: options.current ?? "",
+            },
+            createdAt: now,
+            updatedAt: Date.now(),
+          };
+          if (persistedLayers.length) record.layers = persistedLayers;
+          if (options.error) record.error = options.error;
+          if (options.model) record.model = options.model;
+          if (options.manifest) record.manifest = options.manifest;
+          await this.env.TASKS_KV.put(taskKey, JSON.stringify(record), { expirationTtl: 3600 });
+        };
+
         for (let index = 0; index < LAYER_PRESETS.length; index += 1) {
           const preset = LAYER_PRESETS[index];
           if (await shouldStop()) return;
@@ -1016,18 +1086,10 @@ export class CutoutTasksDO {
           );
           if (!attemptResult.response.ok) {
             if (await shouldStop()) return;
-            await this.env.TASKS_KV.put(
-              taskKey,
-              JSON.stringify({
-                status: "failed",
-                userKey,
-                sourceImageId: body.sourceImageId,
-                createdAt: now,
-                updatedAt: Date.now(),
-                error: formatImageAttemptFailure(`分层-${preset.name}`, attemptResult),
-              }),
-              { expirationTtl: 3600 },
-            );
+            await writeLayerTask("failed", {
+              current: preset.name,
+              error: formatImageAttemptFailure(`分层-${preset.name}`, attemptResult),
+            });
             return;
           }
 
@@ -1036,36 +1098,20 @@ export class CutoutTasksDO {
             payload = JSON.parse(attemptResult.text) as ImagesPayload;
           } catch {
             if (await shouldStop()) return;
-            await this.env.TASKS_KV.put(
-              taskKey,
-              JSON.stringify({
-                status: "failed",
-                userKey,
-                sourceImageId: body.sourceImageId,
-                createdAt: now,
-                updatedAt: Date.now(),
-                error: `分层-${preset.name} 返回了无法解析的 JSON`,
-              }),
-              { expirationTtl: 3600 },
-            );
+            await writeLayerTask("failed", {
+              current: preset.name,
+              error: `分层-${preset.name} 返回了无法解析的 JSON`,
+            });
             return;
           }
 
           const result = payload.data?.[0]?.b64_json;
           if (!result) {
             if (await shouldStop()) return;
-            await this.env.TASKS_KV.put(
-              taskKey,
-              JSON.stringify({
-                status: "failed",
-                userKey,
-                sourceImageId: body.sourceImageId,
-                createdAt: now,
-                updatedAt: Date.now(),
-                error: `API 返回成功但未包含${preset.name}结果`,
-              }),
-              { expirationTtl: 3600 },
-            );
+            await writeLayerTask("failed", {
+              current: preset.name,
+              error: `API 返回成功但未包含${preset.name}结果`,
+            });
             return;
           }
 
@@ -1077,41 +1123,17 @@ export class CutoutTasksDO {
             base64: result,
           });
 
-          await this.env.TASKS_KV.put(
-            taskKey,
-            JSON.stringify({
-              status: "running",
-              userKey,
-              sourceImageId: body.sourceImageId,
-              progress: {
-                done: layers.length,
-                total: LAYER_PRESETS.length,
-                current: preset.name,
-              },
-              createdAt: now,
-              updatedAt: Date.now(),
-            }),
-            { expirationTtl: 3600 },
-          );
+          await writeLayerTask("running", { current: preset.name });
         }
 
-        await this.env.TASKS_KV.put(
-          taskKey,
-          JSON.stringify({
-            status: "succeeded",
-            userKey,
+        await writeLayerTask("succeeded", {
+          current: "完成",
+          model,
+          manifest: {
             sourceImageId: body.sourceImageId,
-            createdAt: now,
-            updatedAt: Date.now(),
-            model,
-            layers,
-            manifest: {
-              sourceImageId: body.sourceImageId,
-              createdAt: Date.now(),
-            },
-          }),
-          { expirationTtl: 3600 },
-        );
+            createdAt: Date.now(),
+          },
+        });
 
         await this.state.storage.delete("task");
         return;

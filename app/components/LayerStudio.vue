@@ -68,6 +68,7 @@ const previewLayer = computed(() =>
   selectedLayer.value ?? layers.value.find((layer) => layer.role === "preview") ?? null,
 )
 const previewSrc = computed(() => (previewLayer.value ? getLayerSrc(previewLayer.value) : null))
+const canDownloadZip = computed(() => !busy.value && layers.value.length > 0)
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -86,6 +87,22 @@ function getLayerSrc(layer: LayerResultItem) {
 
 function getLayerRoleLabel(role: LayerResultItem["role"]) {
   return LAYER_ROLE_LABEL[role] ?? "图层"
+}
+
+function syncLayersFromTask(result: Pick<LayerTaskStatus, "layers">, options: { preferPreview?: boolean } = {}) {
+  if (!result.layers) return
+  const sortedLayers = [...result.layers].sort((a, b) => a.index - b.index)
+  layers.value = sortedLayers
+  const currentLayerExists = sortedLayers.some((layer) => layer.id === selectedLayerId.value)
+  if (options.preferPreview) {
+    selectedLayerId.value =
+      sortedLayers.find((layer) => layer.role === "preview")?.id ??
+      (currentLayerExists ? selectedLayerId.value : sortedLayers[0]?.id ?? null)
+    return
+  }
+  if (!currentLayerExists) {
+    selectedLayerId.value = sortedLayers[0]?.id ?? null
+  }
 }
 
 async function handleFileChange(event: Event) {
@@ -155,6 +172,7 @@ async function handleGenerate() {
     taskIdRef.value = created.taskId
     updateSessionCredits({ status: "pending", ...created })
     const result = await pollLayerTask(created.taskId, undefined, abortRef.value.signal, (next) => {
+      syncLayersFromTask(next)
       if (!next.progress) return
       progress.value = {
         done: Number(next.progress.done ?? 0),
@@ -162,6 +180,7 @@ async function handleGenerate() {
         current: next.progress.current ?? "",
       }
     })
+    syncLayersFromTask(result, { preferPreview: result.status === "succeeded" })
     if (result.status === "canceled") {
       error.value = "分层已中断"
       return
@@ -171,9 +190,6 @@ async function handleGenerate() {
       return
     }
     updateSessionCredits(result)
-    layers.value = (result.layers ?? []).sort((a, b) => a.index - b.index)
-    selectedLayerId.value =
-      layers.value.find((layer) => layer.role === "preview")?.id ?? layers.value[0]?.id ?? null
     if (!layers.value.length) error.value = "分层任务未返回图层"
   } catch (generateError) {
     if (generateError instanceof DOMException && generateError.name === "AbortError") {
@@ -294,7 +310,7 @@ async function fetchLayerBytes(layer: LayerResultItem) {
 }
 
 async function handleDownloadZip() {
-  if (!layers.value.length) return
+  if (!canDownloadZip.value) return
   zipBusy.value = true
   error.value = null
   try {
@@ -411,9 +427,9 @@ async function handleDownloadZip() {
             <img :src="previewSrc" :alt="previewLayer?.name ?? '分层预览'">
           </button>
           <div class="stage-actions">
-            <button type="button" class="btn-ghost" :disabled="zipBusy" @click="handleDownloadZip">
+            <button type="button" class="btn-ghost" :disabled="!canDownloadZip || zipBusy" @click="handleDownloadZip">
               <Icon name="download" />
-              {{ zipBusy ? "打包中" : "下载 ZIP" }}
+              {{ zipBusy ? "打包中" : busy ? "完成后下载" : "下载 ZIP" }}
             </button>
             <button type="button" class="btn-ghost" @click="emit('zoom', previewSrc)">
               <Icon name="zoom" />
