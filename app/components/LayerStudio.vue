@@ -41,11 +41,25 @@ const progress = ref<{ done: number; total: number; current: string }>({
   current: "",
 })
 
+const LAYER_ROLE_LABEL: Record<LayerResultItem["role"], string> = {
+  background: "背景",
+  subject: "商品",
+  text: "文字",
+  decoration: "装饰",
+  shadow: "光影",
+  preview: "预览",
+  other: "其他",
+}
+
 const isSuperAdmin = computed(() => props.session?.user?.role === "super_admin")
 const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
 const creditLabel = computed(() =>
   `今日剩余 ${props.session?.user?.dailyRemainingCredits ?? props.session?.user?.remainingCredits ?? 0} 次 · 永久 ${props.session?.user?.permanentRemainingCredits ?? 0} 次`,
 )
+const progressPercent = computed(() => {
+  if (!progress.value.total) return 0
+  return Math.min(100, Math.max(0, Math.round((progress.value.done / progress.value.total) * 100)))
+})
 const selectedLayer = computed(() =>
   layers.value.find((layer) => layer.id === selectedLayerId.value) ?? layers.value[0] ?? null,
 )
@@ -67,6 +81,10 @@ function getLayerSrc(layer: LayerResultItem) {
   if (layer.base64) return `data:image/png;base64,${layer.base64}`
   if (layer.imageId) return dbImageFileUrl(layer.imageId)
   return null
+}
+
+function getLayerRoleLabel(role: LayerResultItem["role"]) {
+  return LAYER_ROLE_LABEL[role] ?? "图层"
 }
 
 async function handleFileChange(event: Event) {
@@ -319,39 +337,41 @@ async function handleDownloadZip() {
     <span>{{ busy ? "分层中" : "待命" }}</span>
   </div>
 
-  <div class="layer-grid">
-    <aside class="studio-panel cutout-panel layer-source-panel">
+  <div class="cutout-grid layer-grid">
+    <aside class="studio-panel cutout-panel cutout-source-panel layer-source-panel">
       <div class="panel-heading">
-        <h2>上传图片</h2>
+        <h2>商品图片</h2>
         <span class="panel-count">分层源图</span>
       </div>
-      <button
-        type="button"
-        :class="['cutout-upload-zone', { 'has-image': sourceImage }]"
-        :disabled="controlsDisabled"
-        @click="fileInputRef?.click()"
-      >
-        <img v-if="sourceImage" :src="sourceImage" alt="待分层原图">
-        <span v-else>
-          <Icon name="upload" />
-          <strong>上传图片</strong>
-          <small>支持商品图、详情图、主图或海报图</small>
-        </span>
-      </button>
-      <input ref="fileInputRef" type="file" accept="image/*" hidden @change="handleFileChange">
-      <div class="cutout-source-actions">
-        <button type="button" class="btn-ghost" :disabled="controlsDisabled" @click="fileInputRef?.click()">
-          <Icon name="upload" />
-          更换图片
+      <div class="cutout-panel-body layer-source-body">
+        <button
+          type="button"
+          :class="['cutout-upload-zone', { 'has-image': sourceImage }]"
+          :disabled="controlsDisabled"
+          @click="fileInputRef?.click()"
+        >
+          <img v-if="sourceImage" :src="sourceImage" alt="待分层原图">
+          <span v-else>
+            <Icon name="upload" />
+            <strong>上传商品图片</strong>
+            <small>支持商品图、详情图、主图或海报图</small>
+          </span>
         </button>
-        <button type="button" class="btn-ghost" :disabled="!sourceImage" @click="sourceImage && emit('zoom', sourceImage)">
-          <Icon name="zoom" />
-          查看原图
-        </button>
-      </div>
-      <div class="cutout-help">
-        <strong>输出内容</strong>
-        <p>系统会自动拆出背景、商品主体、文字、装饰道具、阴影光效和合成预览，并打包为 ZIP。</p>
+        <input ref="fileInputRef" type="file" accept="image/*" hidden @change="handleFileChange">
+        <div class="cutout-source-actions">
+          <button type="button" class="btn-ghost" :disabled="controlsDisabled" @click="fileInputRef?.click()">
+            <Icon name="upload" />
+            更换图片
+          </button>
+          <button type="button" class="btn-ghost" :disabled="!sourceImage" @click="sourceImage && emit('zoom', sourceImage)">
+            <Icon name="zoom" />
+            查看原图
+          </button>
+        </div>
+        <div class="cutout-help layer-output-note">
+          <strong>输出内容</strong>
+          <p>自动拆出背景、商品主体、文字、装饰道具、阴影光效和合成预览，并打包为 ZIP。</p>
+        </div>
       </div>
       <div v-if="error" class="alert cutout-alert">{{ error }}</div>
       <div class="cutout-action-bar">
@@ -371,12 +391,12 @@ async function handleDownloadZip() {
       </div>
     </aside>
 
-    <section class="studio-panel cutout-panel layer-preview-panel">
+    <section class="studio-panel cutout-panel cutout-result-panel layer-preview-panel">
       <div class="panel-heading">
         <h2>图层预览</h2>
-        <span class="panel-count">{{ previewSrc ? "已生成" : "预览" }}</span>
+        <span class="panel-count">{{ previewLayer?.name ?? "预览" }}</span>
       </div>
-      <div class="layer-preview-stage">
+      <div class="cutout-result-stage layer-preview-stage">
         <template v-if="previewSrc">
           <button type="button" class="layer-preview-image" @click="emit('zoom', previewSrc)">
             <img :src="previewSrc" :alt="previewLayer?.name ?? '分层预览'">
@@ -402,38 +422,43 @@ async function handleDownloadZip() {
                 : "系统正在识别画面结构。"
             }}
           </p>
+          <div class="layer-progress" aria-hidden="true">
+            <span :style="{ width: `${progressPercent}%` }" />
+          </div>
         </div>
         <div v-else class="stage-placeholder cutout-result-empty">
           <Icon name="text" class="icon-large" />
-          <div class="icon-hint">分层结果会在这里预览</div>
+          <div class="icon-hint">上传图片后预览分层结果</div>
         </div>
       </div>
     </section>
 
-    <aside class="studio-panel cutout-panel layer-list-panel">
+    <aside class="studio-panel cutout-panel cutout-result-panel layer-list-panel">
       <div class="panel-heading">
         <h2>图层列表</h2>
         <span class="panel-count">{{ layers.length }} 个</span>
       </div>
-      <div v-if="layers.length" class="layer-list">
-        <button
-          v-for="layer in layers"
-          :key="layer.id"
-          type="button"
-          :class="['layer-row', { 'is-active': selectedLayer?.id === layer.id }]"
-          @click="selectedLayerId = layer.id"
-        >
-          <span class="layer-thumb">
-            <img v-if="getLayerSrc(layer)" :src="getLayerSrc(layer)!" :alt="layer.name">
-          </span>
-          <span>
-            <strong>{{ layer.name }}</strong>
-            <small>{{ layer.role }}</small>
-          </span>
-        </button>
-      </div>
-      <div v-else class="empty">
-        上传图片并开始分层后，这里会显示可下载图层。
+      <div class="cutout-panel-body layer-list-body">
+        <div v-if="layers.length" class="layer-list">
+          <button
+            v-for="layer in layers"
+            :key="layer.id"
+            type="button"
+            :class="['layer-row', { 'is-active': selectedLayer?.id === layer.id }]"
+            @click="selectedLayerId = layer.id"
+          >
+            <span class="layer-thumb">
+              <img v-if="getLayerSrc(layer)" :src="getLayerSrc(layer)!" :alt="layer.name">
+            </span>
+            <span class="layer-row-copy">
+              <strong>{{ layer.name }}</strong>
+              <small>第 {{ layer.index + 1 }} 层 · {{ getLayerRoleLabel(layer.role) }}</small>
+            </span>
+          </button>
+        </div>
+        <div v-else class="empty layer-list-empty">
+          上传图片并开始分层后，这里会显示可下载图层。
+        </div>
       </div>
     </aside>
   </div>
@@ -441,23 +466,36 @@ async function handleDownloadZip() {
 
 <style scoped>
 .layer-grid {
-  display: grid;
-  grid-template-columns: minmax(260px, 0.8fr) minmax(360px, 1.25fr) minmax(260px, 0.9fr);
-  gap: 16px;
+  grid-template-columns: minmax(292px, 348px) minmax(460px, 1fr) minmax(300px, 400px);
+}
+
+.layer-source-body {
+  display: block;
+}
+
+.layer-source-panel .cutout-upload-zone {
+  min-height: 254px;
+}
+
+.layer-source-panel .cutout-upload-zone img {
+  max-height: 300px;
+}
+
+.layer-output-note {
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(255, 255, 255, 0.52)),
+    var(--bg-soft);
 }
 
 .layer-preview-stage {
-  min-height: 520px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 14px;
+  align-content: stretch;
+  gap: 12px;
 }
 
 .layer-preview-image {
-  min-height: 440px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
   background:
     linear-gradient(45deg, rgba(15, 23, 42, 0.06) 25%, transparent 25%),
     linear-gradient(-45deg, rgba(15, 23, 42, 0.06) 25%, transparent 25%),
@@ -465,45 +503,93 @@ async function handleDownloadZip() {
     linear-gradient(-45deg, transparent 75%, rgba(15, 23, 42, 0.06) 75%);
   background-position: 0 0, 0 10px, 10px -10px, -10px 0;
   background-size: 20px 20px;
+  border: 1px solid rgba(174, 184, 199, 0.62);
+  border-radius: var(--radius-panel);
   display: grid;
   place-items: center;
-  padding: 18px;
+  overflow: hidden;
+  padding: 14px;
   cursor: zoom-in;
 }
 
 .layer-preview-image img {
-  max-width: 100%;
-  max-height: 440px;
+  max-width: calc(100% - 12px);
+  max-height: calc(100% - 12px);
   object-fit: contain;
+}
+
+.layer-progress {
+  width: min(260px, 100%);
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(23, 105, 255, 0.12);
+}
+
+.layer-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--teal));
+  transition: width 0.2s var(--ease);
+}
+
+.layer-list-body {
+  display: grid;
+  align-content: start;
 }
 
 .layer-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .layer-row {
   display: grid;
-  grid-template-columns: 58px 1fr;
+  grid-template-columns: 54px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
-  border: 1px solid var(--line);
+  min-height: 72px;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px;
-  background: #fff;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.18)),
+    var(--bg-soft);
+  color: inherit;
   text-align: left;
+  transition:
+    transform 0.16s var(--ease),
+    border-color 0.16s var(--ease),
+    box-shadow 0.16s var(--ease),
+    background 0.16s var(--ease);
+}
+
+.layer-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(23, 105, 255, 0.36);
+  background: #fff;
 }
 
 .layer-row.is-active {
-  border-color: rgba(30, 94, 255, 0.42);
-  box-shadow: 0 0 0 3px rgba(30, 94, 255, 0.08);
+  border-color: var(--accent);
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.1);
 }
 
 .layer-thumb {
-  width: 58px;
-  height: 58px;
+  width: 54px;
+  height: 54px;
   border-radius: 6px;
-  background: #f7f8fb;
+  border: 1px solid rgba(174, 184, 199, 0.52);
+  background:
+    linear-gradient(45deg, rgba(148, 163, 184, 0.12) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(148, 163, 184, 0.12) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(148, 163, 184, 0.12) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(148, 163, 184, 0.12) 75%),
+    #fff;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -515,14 +601,30 @@ async function handleDownloadZip() {
   object-fit: contain;
 }
 
-.layer-row strong,
-.layer-row small {
+.layer-row-copy,
+.layer-row-copy strong,
+.layer-row-copy small {
   display: block;
+  min-width: 0;
 }
 
-.layer-row small {
+.layer-row-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-row-copy small {
   color: var(--muted);
-  margin-top: 3px;
+  margin-top: 5px;
+  font-size: 0.74rem;
+}
+
+.layer-list-empty {
+  min-height: 220px;
 }
 
 @media (max-width: 1180px) {
@@ -530,13 +632,12 @@ async function handleDownloadZip() {
     grid-template-columns: 1fr;
   }
 
-  .layer-preview-stage,
   .layer-preview-image {
-    min-height: 320px;
+    min-height: 340px;
   }
 
   .layer-preview-image img {
-    max-height: 320px;
+    max-height: 340px;
   }
 }
 </style>
