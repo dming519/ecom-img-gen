@@ -32,9 +32,33 @@ const emit = defineEmits<{
 const MAX_LAYER_IMAGE_BYTES = 10 * 1024 * 1024
 const fileInputId = "layer-source-file"
 
+interface ImageDimensions {
+  width: number
+  height: number
+}
+
+interface LayerDisplayRow {
+  id: string
+  name: string
+  role: LayerResultItem["role"]
+  index: number
+  layer?: LayerResultItem
+  state: "done" | "running" | "pending"
+}
+
+const EXPECTED_LAYER_ROWS: Array<Omit<LayerDisplayRow, "state" | "layer">> = [
+  { id: "background", name: "背景层", role: "background", index: 0 },
+  { id: "main-subject", name: "商品主体", role: "subject", index: 1 },
+  { id: "text", name: "文字层", role: "text", index: 2 },
+  { id: "decoration", name: "装饰道具层", role: "decoration", index: 3 },
+  { id: "shadow-light", name: "阴影光效层", role: "shadow", index: 4 },
+  { id: "preview", name: "原图预览", role: "preview", index: 5 },
+]
+
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const sourceImage = shallowRef<string | null>(null)
 const sourceImageId = shallowRef<string | undefined>()
+const sourceDimensions = shallowRef<ImageDimensions | null>(null)
 const layers = ref<LayerResultItem[]>([])
 const selectedLayerId = shallowRef<string | null>(null)
 const busy = shallowRef(false)
@@ -71,6 +95,22 @@ const progressPercent = computed(() => {
   if (!progress.value.total) return 0
   return Math.min(100, Math.max(0, Math.round((progress.value.done / progress.value.total) * 100)))
 })
+const progressText = computed(() => {
+  if (!busy.value) return "待命"
+  return progress.value.current
+    ? `${progress.value.current} · ${progress.value.done}/${progress.value.total}`
+    : `正在准备分层 · ${progress.value.done}/${progress.value.total}`
+})
+const sourceDimensionText = computed(() =>
+  sourceDimensions.value
+    ? `${sourceDimensions.value.width} x ${sourceDimensions.value.height}`
+    : "原图尺寸",
+)
+const layerPreviewFrameStyle = computed(() =>
+  sourceDimensions.value
+    ? { aspectRatio: `${sourceDimensions.value.width} / ${sourceDimensions.value.height}` }
+    : undefined,
+)
 const selectedLayer = computed(() =>
   layers.value.find((layer) => layer.id === selectedLayerId.value) ?? layers.value[0] ?? null,
 )
@@ -79,6 +119,28 @@ const previewLayer = computed(() =>
 )
 const previewSrc = computed(() => (previewLayer.value ? getLayerSrc(previewLayer.value) : null))
 const canDownloadZip = computed(() => !busy.value && layers.value.length > 0)
+const layerRows = computed<LayerDisplayRow[]>(() => {
+  const sortedLayers = [...layers.value].sort((a, b) => a.index - b.index)
+  if (!busy.value) {
+    return sortedLayers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      role: layer.role,
+      index: layer.index,
+      layer,
+      state: "done",
+    }))
+  }
+
+  return EXPECTED_LAYER_ROWS.map((row) => {
+    const layer = sortedLayers.find((item) => item.id === row.id)
+    if (layer) return { ...row, layer, state: "done" }
+    return {
+      ...row,
+      state: progress.value.current.includes(row.name) ? "running" : "pending",
+    }
+  })
+})
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -87,6 +149,24 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error)
     reader.readAsDataURL(file)
   })
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error("图片尺寸读取失败"))
+    image.decoding = "async"
+    image.src = src
+  })
+}
+
+async function getImageDimensions(src: string): Promise<ImageDimensions> {
+  const image = await loadImage(src)
+  return {
+    width: image.naturalWidth || image.width,
+    height: image.naturalHeight || image.height,
+  }
 }
 
 function getLayerSrc(layer: LayerResultItem) {
@@ -180,6 +260,7 @@ async function handleFileChange(event: Event) {
   try {
     const dataUrl = await fileToDataUrl(file)
     sourceImage.value = dataUrl
+    sourceDimensions.value = await getImageDimensions(dataUrl)
     sourceImageId.value = await dbPutProductImage(dataUrl)
     layers.value = []
     selectedLayerId.value = null
@@ -187,6 +268,7 @@ async function handleFileChange(event: Event) {
     activeHistoryIdx.value = -1
   } catch (uploadError) {
     error.value = uploadError instanceof Error ? uploadError.message : String(uploadError)
+    sourceDimensions.value = null
   } finally {
     if (fileInputRef.value) fileInputRef.value.value = ""
   }
@@ -219,6 +301,9 @@ async function handleGenerate() {
   if (!sourceImageId.value) {
     error.value = "请先上传需要分层的图片。"
     return
+  }
+  if (!sourceDimensions.value && sourceImage.value) {
+    sourceDimensions.value = await getImageDimensions(sourceImage.value).catch(() => null)
   }
 
   busy.value = true
@@ -341,6 +426,15 @@ async function blobToBytes(blob: Blob) {
   return new Uint8Array(await blob.arrayBuffer())
 }
 
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob)
+      else reject(new Error("图层尺寸规范化失败"))
+    }, "image/png")
+  })
+}
+
 function createZip(entries: Array<{ name: string; data: Uint8Array }>) {
   const chunks: Uint8Array[] = []
   const central: Uint8Array[] = []
@@ -399,12 +493,33 @@ function createZip(entries: Array<{ name: string; data: Uint8Array }>) {
   return new Blob(parts, { type: "application/zip" })
 }
 
-async function fetchLayerBytes(layer: LayerResultItem) {
+async function fetchLayerBlob(layer: LayerResultItem) {
   const src = getLayerSrc(layer)
   if (!src) throw new Error(`${layer.name} 缺少图片`)
   const response = await fetch(src, { cache: "no-store" })
   if (!response.ok) throw new Error(`${layer.name} 读取失败`)
-  return blobToBytes(await response.blob())
+  return response.blob()
+}
+
+async function fetchLayerBytes(layer: LayerResultItem) {
+  const blob = await fetchLayerBlob(layer)
+  const dimensions = sourceDimensions.value
+  if (!dimensions?.width || !dimensions.height) return blobToBytes(blob)
+
+  const objectUrl = URL.createObjectURL(blob)
+  try {
+    const image = await loadImage(objectUrl)
+    const canvas = document.createElement("canvas")
+    canvas.width = dimensions.width
+    canvas.height = dimensions.height
+    const context = canvas.getContext("2d")
+    if (!context) throw new Error("浏览器不支持图层尺寸规范化")
+    context.clearRect(0, 0, dimensions.width, dimensions.height)
+    context.drawImage(image, 0, 0, dimensions.width, dimensions.height)
+    return blobToBytes(await canvasToBlob(canvas))
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
 }
 
 async function handleDownloadZip() {
@@ -421,6 +536,8 @@ async function handleDownloadZip() {
     const manifest = {
       createdAt: new Date().toISOString(),
       sourceImageId: sourceImageId.value,
+      sourceDimensions: sourceDimensions.value,
+      normalizedToSourceSize: !!sourceDimensions.value,
       layers: layers.value.map(({ base64: _base64, ...layer }) => layer),
     }
     const zip = createZip([
@@ -464,6 +581,7 @@ async function handleSelectHistory(index: number) {
   } else {
     sourceImage.value = item.sourceImage ?? null
   }
+  sourceDimensions.value = sourceImage.value ? await getImageDimensions(sourceImage.value).catch(() => null) : null
   layers.value = [...item.layers].sort((a, b) => a.index - b.index)
   selectedLayerId.value =
     layers.value.find((layer) => layer.role === "preview")?.id ?? layers.value[0]?.id ?? null
@@ -596,11 +714,16 @@ watch(
     <section class="studio-panel cutout-panel cutout-result-panel layer-preview-panel">
       <div class="panel-heading">
         <h2>图层预览</h2>
-        <span class="panel-count">{{ previewLayer?.name ?? "预览" }}</span>
+        <span class="panel-count">{{ previewLayer?.name ?? sourceDimensionText }}</span>
       </div>
       <div class="cutout-result-stage layer-preview-stage">
         <template v-if="previewSrc">
-          <button type="button" class="layer-preview-image" @click="emit('zoom', previewSrc)">
+          <button
+            type="button"
+            class="layer-preview-image"
+            :style="layerPreviewFrameStyle"
+            @click="emit('zoom', previewSrc)"
+          >
             <img :src="previewSrc" :alt="previewLayer?.name ?? '分层预览'">
           </button>
           <div class="stage-actions">
@@ -632,29 +755,57 @@ watch(
           <Icon name="text" class="icon-large" />
           <div class="icon-hint">上传图片后预览分层结果</div>
         </div>
+        <div v-if="busy && previewSrc" class="layer-progress-overlay" role="status" aria-live="polite">
+          <div class="layer-progress-copy">
+            <span class="layer-progress-dot" aria-hidden="true" />
+            <div>
+              <strong>正在生成图层</strong>
+              <small>{{ progressText }}</small>
+            </div>
+            <em>{{ progressPercent }}%</em>
+          </div>
+          <div class="layer-progress" aria-hidden="true">
+            <span :style="{ width: `${progressPercent}%` }" />
+          </div>
+        </div>
       </div>
     </section>
 
     <aside class="studio-panel cutout-panel cutout-result-panel layer-list-panel">
       <div class="panel-heading">
         <h2>图层列表</h2>
-        <span class="panel-count">{{ layers.length }} 个</span>
+        <span class="panel-count">{{ busy ? `${progress.done}/${progress.total}` : `${layers.length} 个` }}</span>
       </div>
       <div class="cutout-panel-body layer-list-body">
-        <div v-if="layers.length" class="layer-list">
+        <div v-if="layerRows.length" class="layer-list">
           <button
-            v-for="layer in layers"
-            :key="layer.id"
+            v-for="row in layerRows"
+            :key="row.id"
             type="button"
-            :class="['layer-row', { 'is-active': selectedLayer?.id === layer.id }]"
-            @click="selectedLayerId = layer.id"
+            :class="[
+              'layer-row',
+              `is-${row.state}`,
+              { 'is-active': row.layer && selectedLayer?.id === row.layer.id },
+            ]"
+            :disabled="!row.layer"
+            @click="row.layer && (selectedLayerId = row.layer.id)"
           >
             <span class="layer-thumb">
-              <img v-if="getLayerSrc(layer)" :src="getLayerSrc(layer)!" :alt="layer.name">
+              <img v-if="row.layer && getLayerSrc(row.layer)" :src="getLayerSrc(row.layer)!" :alt="row.layer.name">
+              <span v-else-if="row.state === 'running'" class="layer-mini-spinner" aria-hidden="true" />
+              <span v-else class="layer-thumb-placeholder" aria-hidden="true" />
             </span>
             <span class="layer-row-copy">
-              <strong>{{ layer.name }}</strong>
-              <small>第 {{ layer.index + 1 }} 层 · {{ getLayerRoleLabel(layer.role) }}</small>
+              <strong>{{ row.layer?.name ?? row.name }}</strong>
+              <small>
+                {{
+                  row.layer
+                    ? `第 ${row.layer.index + 1} 层 · ${getLayerRoleLabel(row.layer.role)}`
+                    : row.state === "running"
+                      ? "正在生成"
+                      : "等待生成"
+                }}
+              </small>
             </span>
           </button>
         </div>
@@ -780,14 +931,16 @@ watch(
 }
 
 .layer-preview-stage {
+  position: relative;
   align-content: stretch;
   gap: 12px;
 }
 
 .layer-preview-image {
   width: 100%;
-  height: 100%;
+  height: auto;
   min-height: 420px;
+  max-height: 100%;
   background:
     linear-gradient(45deg, rgba(15, 23, 42, 0.06) 25%, transparent 25%),
     linear-gradient(-45deg, rgba(15, 23, 42, 0.06) 25%, transparent 25%),
@@ -826,6 +979,68 @@ watch(
   transition: width 0.2s var(--ease);
 }
 
+.layer-progress-overlay {
+  position: absolute;
+  right: 18px;
+  bottom: 74px;
+  left: 18px;
+  display: grid;
+  gap: 9px;
+  padding: 12px 13px;
+  border: 1px solid rgba(170, 183, 200, 0.72);
+  border-radius: var(--radius-panel);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(10px);
+  z-index: 2;
+}
+
+.layer-progress-copy {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.layer-progress-copy strong,
+.layer-progress-copy small {
+  display: block;
+  min-width: 0;
+}
+
+.layer-progress-copy strong {
+  color: var(--text);
+  font-size: 0.84rem;
+  line-height: 1.2;
+}
+
+.layer-progress-copy small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text-sub);
+  font-size: 0.74rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-progress-copy em {
+  color: var(--accent-ink);
+  font-style: normal;
+  font-size: 0.78rem;
+  font-weight: 820;
+}
+
+.layer-progress-dot,
+.layer-mini-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(23, 105, 255, 0.22);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: spin 0.72s linear infinite;
+}
+
 .layer-list-body {
   display: grid;
   align-content: start;
@@ -857,16 +1072,29 @@ watch(
     background 0.16s var(--ease);
 }
 
-.layer-row:hover {
+.layer-row:hover:not(:disabled) {
   transform: translateY(-1px);
   border-color: rgba(23, 105, 255, 0.36);
   background: #fff;
+}
+
+.layer-row:disabled {
+  cursor: default;
 }
 
 .layer-row.is-active {
   border-color: var(--accent);
   background: #fff;
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.1);
+}
+
+.layer-row.is-running {
+  border-color: rgba(23, 105, 255, 0.34);
+  background: #f7fbff;
+}
+
+.layer-row.is-pending {
+  opacity: 0.72;
 }
 
 .layer-thumb {
@@ -891,6 +1119,14 @@ watch(
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+.layer-thumb-placeholder {
+  width: 18px;
+  height: 18px;
+  border: 1px dashed rgba(119, 131, 153, 0.62);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.68);
 }
 
 .layer-row-copy,

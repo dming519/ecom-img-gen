@@ -241,13 +241,8 @@ function getImageDimensions(dataUrl: string) {
   }
 }
 
-function resolveLayerImageSize(sourceImage: string): ImageSize {
-  const dimensions = getImageDimensions(sourceImage);
-  if (!dimensions) return "auto";
-  const ratio = dimensions.width / dimensions.height;
-  if (ratio > 1.18) return "1536x1024";
-  if (ratio < 0.85) return "1024x1536";
-  return "1024x1024";
+function resolveLayerImageSize(_sourceImage: string): ImageSize {
+  return "auto";
 }
 
 function json(data: unknown, init?: ResponseInit) {
@@ -700,6 +695,7 @@ function createLayerPrompt(prompt: string) {
   return [
     "Return exactly one PNG image. Do not add explanations, captions, watermarks, borders, or extra text.",
     "Use the uploaded image as the only visual source. Keep the original canvas composition, aspect ratio, perspective, placement, and lighting.",
+    "Keep the output canvas size and aspect ratio the same as the uploaded image whenever the image API allows it.",
     "Do not crop, zoom, recenter, rotate, stretch, or change the target object's position relative to the original canvas.",
     "The result must be usable as an editable design layer. For transparent layers, keep a real alpha channel; pixels outside the requested layer must be transparent, not white, gray, checkerboard, or filled with a background.",
     "Prefer isolating visible original content over redesigning or inventing new content.",
@@ -711,6 +707,7 @@ function createLayerFallbackPrompt(preset: (typeof LAYER_PRESETS)[number]) {
   const common = [
     "Use the uploaded ecommerce image as the visual reference.",
     "Create one clean PNG layer for a design workflow. Keep the original canvas, aspect ratio, perspective, placement, and lighting as much as possible.",
+    "Keep the output canvas size and aspect ratio the same as the uploaded image whenever the image API allows it.",
     "Do not crop, recenter, zoom, stretch, rotate, or redesign visible elements.",
   ];
 
@@ -1226,6 +1223,7 @@ export class CutoutTasksDO {
         for (const preset of modelLayerPresets) {
           const index = LAYER_PRESETS.findIndex((item) => item.id === preset.id);
           if (await shouldStop()) return;
+          await writeLayerTask("running", { current: `正在生成${preset.name}` });
           const attemptResult = await createLayerImageWithFallback(
             baseUrl,
             apiKey,
@@ -1275,7 +1273,7 @@ export class CutoutTasksDO {
           });
           progressDone += 1;
 
-          await writeLayerTask("running", { current: preset.name });
+          await writeLayerTask("running", { current: `${preset.name}已完成` });
         }
 
         if (previewPreset) {
