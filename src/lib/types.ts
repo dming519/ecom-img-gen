@@ -248,7 +248,7 @@ export interface CreateLayerTaskOptions {
 export interface LayerResultItem {
   id: string;
   name: string;
-  role: "background" | "subject" | "text" | "decoration" | "shadow" | "preview" | "other";
+  role: "background" | "subject" | "person" | "text" | "decoration" | "shadow" | "preview" | "other";
   index: number;
   imageId?: string;
 }
@@ -265,6 +265,12 @@ export interface CutoutTaskStatus {
     renderSize?: ImageSize;
     sourceImageId?: string;
     createdAt?: number;
+    layerPlan?: Array<{
+      id: string;
+      name: string;
+      role: LayerResultItem["role"];
+      index: number;
+    }>;
   };
   progress?: {
     done?: number;

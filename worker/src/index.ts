@@ -635,78 +635,185 @@ function createEditPrompt(instruction: string) {
   ].join("\n\n");
 }
 
-const LAYER_PRESETS = [
-  {
-    id: "background",
-    name: "背景层",
-    role: "background",
-    prompt: [
-      "你正在执行电商图片分层任务。请基于上传图片生成“背景补全层”。",
-      "把商品主体、营销文字、Logo、图标、贴纸、人物、手、道具和前景装饰视为需要移除的前景元素。",
-      "输出只包含背景、底色、场景、纹理、远景和环境光；被前景遮挡的区域用周围背景自然补全，不能出现糊块、重复纹理或明显接缝。",
-      "保持原图构图、透视、光影方向、画面比例和完整画布，不要重新设计背景风格。",
-      "输出为一张普通 PNG 背景板，不需要透明。",
-    ].join("\n\n"),
-  },
-  {
-    id: "main-subject",
-    name: "商品主体",
-    role: "subject",
-    prompt: [
-      "你正在执行电商图片分层任务。请基于上传图片隔离“商品主体层”。",
-      "只保留原图中真实可见的商品本体，包括包装、瓶身、盒子、商品 Logo、标签版式和商品包装上的真实可见文字。",
-      "移除背景、营销文案、装饰贴纸、信息卡片、人物、手、道具、投影和额外场景。",
-      "不要美化、修复、补全、重画或重新设计商品；必须尽量保持原商品的形状、比例、颜色、材质、瑕疵、品牌标识和可见文字。",
-      "输出纯白背景 PNG，元素保持在原图中的位置和大小，画布比例不变，商品外区域必须是纯白色背景，不要透明 alpha。",
-    ].join("\n\n"),
-  },
-  {
-    id: "text",
-    name: "文字层",
-    role: "text",
-    prompt: [
-      "你正在执行电商图片分层任务。请基于上传图片隔离“文字层”。",
-      "只保留画面中的营销标题、卖点文案、参数文字、价格文字、标签文字、说明文字、文字框和排版线条。",
-      "不要保留商品主体、背景、人物、手、道具或纯装饰图形。商品包装本身印刷的 Logo 和标签文字不属于这一层。",
-      "把文字当作图像形状隔离，不要重新写文案，不要纠错，不要翻译，不要改字体，不要改颜色。",
-      "输出纯白背景 PNG，文字位置、颜色、字号、排版和画布比例尽量与原图一致；没有文字的区域必须是纯白色背景，不要透明 alpha。",
-    ].join("\n\n"),
-  },
-  {
-    id: "decoration",
-    name: "装饰道具层",
-    role: "decoration",
-    prompt: [
-      "你正在执行电商图片分层任务。请基于上传图片隔离“装饰道具层”。",
-      "只保留非商品主体的装饰元素、图标、贴纸、信息卡片、几何形、道具、点缀素材、前景摆件和辅助视觉元素。",
-      "不要保留商品主体、背景大色块、营销文字、人物或手。",
-      "不要新增装饰，不要重新设计现有装饰；保持元素在原图中的位置、大小、颜色、边缘和透明关系。",
-      "输出纯白背景 PNG，没有装饰道具的区域必须是纯白色背景，不要透明 alpha。",
-    ].join("\n\n"),
-  },
-  {
-    id: "shadow-light",
-    name: "阴影光效层",
-    role: "shadow",
-    prompt: [
-      "你正在执行电商图片分层任务。请基于上传图片隔离“阴影光效层”。",
-      "只保留原图中已经存在的阴影、投影、反光、高光、光晕、光束、柔光和局部氛围光。",
-      "不要保留商品主体、文字、背景纹理、道具或装饰图形。",
-      "不要重新打光，不要新增阴影；阴影和光效应保持柔和自然，可用于叠加回原图。",
-      "输出纯白背景 PNG，没有阴影光效的区域必须是纯白色背景，不要透明 alpha。",
-    ].join("\n\n"),
-  },
-] as const;
+type LayerRole = "background" | "subject" | "person" | "text" | "decoration" | "shadow" | "other";
 
-type LayerPreset = (typeof LAYER_PRESETS)[number];
+interface LayerPlanItem {
+  id: string;
+  name: string;
+  role: LayerRole;
+  target: string;
+  prompt: string;
+  index: number;
+}
 
 interface GeneratedLayerItem {
-  id: LayerPreset["id"];
-  name: LayerPreset["name"];
-  role: LayerPreset["role"];
+  id: string;
+  name: string;
+  role: LayerRole;
   index: number;
   imageId?: string;
   base64?: string;
+}
+
+function parseJsonObject(text: string) {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  return JSON.parse(fenced || trimmed) as Record<string, unknown>;
+}
+
+function normalizeLayerRole(value: unknown): LayerRole {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (["background", "bg", "scene"].includes(text) || text.includes("背景")) return "background";
+  if (
+    ["subject", "product", "merchandise", "item"].includes(text) ||
+    text.includes("商品") ||
+    text.includes("主体")
+  ) {
+    return "subject";
+  }
+  if (
+    ["person", "model", "human", "hand", "body"].includes(text) ||
+    text.includes("人物") ||
+    text.includes("模特") ||
+    text.includes("人像") ||
+    text.includes("手部")
+  ) {
+    return "person";
+  }
+  if (["text", "copy", "typography"].includes(text) || text.includes("文字") || text.includes("文案")) return "text";
+  if (
+    ["decoration", "prop", "props", "sticker", "icon"].includes(text) ||
+    text.includes("装饰") ||
+    text.includes("道具") ||
+    text.includes("贴纸") ||
+    text.includes("图标")
+  ) {
+    return "decoration";
+  }
+  if (
+    ["shadow", "light", "lighting", "reflection"].includes(text) ||
+    text.includes("阴影") ||
+    text.includes("光效") ||
+    text.includes("反光")
+  ) {
+    return "shadow";
+  }
+  return "other";
+}
+
+function normalizeLayerId(name: string, role: LayerRole, index: number, usedIds: Set<string>) {
+  const base =
+    name
+      .normalize("NFKD")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || `${role}-${index + 1}`;
+  let id = base;
+  let suffix = 2;
+  while (usedIds.has(id)) {
+    id = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(id);
+  return id;
+}
+
+function createLayerPlanSystemTemplate() {
+  return [
+    "你是电商图片分层规划专家。你只负责分析上传图片应该拆成哪些可编辑图层，不生成图片。",
+    "必须动态识别图片内容，不能固定输出背景层、商品主体、文字层、装饰道具层、阴影光效层这五类。",
+    "只规划真实存在且有编辑价值的图层；不要规划空图层。图片里没有文字就不要输出文字层，没有道具就不要输出道具层。",
+    "如果图片里有模特、人物、手部、人体、穿戴展示，要根据画面关系规划人物/模特/手部相关图层。穿戴商品无法从模特身体自然分离时，可规划“模特与商品主体层”。",
+    "商品包装上的真实印刷 Logo、标签和包装文字属于商品主体，不属于营销文字层。画面外加的标题、卖点、价格、参数、贴纸文案才属于文字层。",
+    "推荐输出 2 到 7 个图层，最多 8 个。常见角色只能从 background、subject、person、text、decoration、shadow、other 中选择。",
+    "每个图层必须包含 name、role、target、prompt。target 用一句话描述这一层要保留的画面对象；prompt 给后续图像模型使用，必须具体说明只隔离该对象、白底、保持原图位置和比例。",
+    "只返回 JSON，不要解释，不要 Markdown。格式：{\"layers\":[{\"name\":\"商品主体层\",\"role\":\"subject\",\"target\":\"原图中的商品包装和瓶身\",\"prompt\":\"只保留...\"}]}",
+  ].join("\n\n");
+}
+
+function createLayerPlanUserText(dimensions: { width: number; height: number } | null, aspectRatio: LayerAspectRatio) {
+  const sourceSize = dimensions ? `${dimensions.width}x${dimensions.height}` : "未知尺寸";
+  return [
+    `请分析这张电商图片适合拆成哪些图层。原图尺寸：${sourceSize}，生成比例标准：${aspectRatio}。`,
+    "重点判断是否存在：商品主体、模特/人物/手部、背景、画面外加营销文字、装饰图形/贴纸/道具、独立阴影/光效、其他需要单独编辑的对象。",
+    "只输出实际存在且值得单独编辑的图层计划。",
+  ].join("\n");
+}
+
+function normalizeLayerPlanPayload(payload: Record<string, unknown>) {
+  const rawLayers = Array.isArray(payload.layers) ? payload.layers : [];
+  const usedIds = new Set<string>();
+  const layers = rawLayers
+    .slice(0, 8)
+    .map((raw, index): LayerPlanItem | null => {
+      if (!raw || typeof raw !== "object") return null;
+      const item = raw as Record<string, unknown>;
+      const name = String(item.name ?? "").trim().slice(0, 32);
+      const target = String(item.target ?? item.description ?? "").trim().slice(0, 240);
+      const prompt = String(item.prompt ?? "").trim().slice(0, 900);
+      if (!name || !target || !prompt) return null;
+      const role = normalizeLayerRole(item.role);
+      return {
+        id: normalizeLayerId(String(item.id ?? name), role, index, usedIds),
+        name,
+        role,
+        target,
+        prompt,
+        index,
+      };
+    })
+    .filter((item): item is LayerPlanItem => !!item);
+
+  if (!layers.length) {
+    throw new Error("分层规划失败：模型未返回可生成的图层清单");
+  }
+  return layers;
+}
+
+async function createDynamicLayerPlan(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  sourceImage: string,
+  dimensions: { width: number; height: number } | null,
+  aspectRatio: LayerAspectRatio,
+) {
+  const response = await createPromptRequest(
+    baseUrl,
+    apiKey,
+    model,
+    createLayerPlanSystemTemplate(),
+    createLayerPlanUserText(dimensions, aspectRatio),
+    [sourceImage],
+  );
+  const text = await response.text();
+  if (!response.ok) {
+    let detail = summarizeRawText(text);
+    try {
+      const payload = JSON.parse(text) as ChatCompletionPayload;
+      if (payload.error?.message) detail = payload.error.message;
+      if (payload.message) detail = payload.message;
+    } catch {
+      // Keep raw response.
+    }
+    throw new Error(`分层规划失败: HTTP ${response.status}: ${detail}`);
+  }
+
+  let content = "";
+  try {
+    content = extractChatContent(text);
+  } catch (error) {
+    throw new Error(`分层规划失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!content) throw new Error("分层规划失败：模型未返回规划内容");
+
+  try {
+    return normalizeLayerPlanPayload(parseJsonObject(content));
+  } catch (error) {
+    throw new Error(
+      `分层规划失败：模型未按 JSON 图层清单返回（${error instanceof Error ? error.message : String(error)}）`,
+    );
+  }
 }
 
 function getStoredLayerImageIds(rawTask: string | null) {
@@ -767,105 +874,41 @@ function createLayerPrompt(
   ].join("\n\n");
 }
 
-function createLayerFallbackPrompt(
-  preset: (typeof LAYER_PRESETS)[number],
-  aspectRatio: LayerAspectRatio,
-  size: ImageSize,
-  dimensions: { width: number; height: number } | null,
-) {
-  const common = [
-    describeLayerCanvas(aspectRatio, size, dimensions),
-    "Use the uploaded ecommerce image as the visual reference.",
-    "Create one clean PNG layer for a design workflow. Keep the original canvas, aspect ratio, perspective, placement, and lighting as much as possible.",
-    "Keep the output canvas size and aspect ratio the same as the uploaded image whenever the image API allows it.",
-    "Fill the whole supported output ratio with the original composition. Do not return a centered square layer with white side margins.",
-    "Do not crop, recenter, zoom, stretch, rotate, or redesign visible elements.",
-  ];
-
-  if (preset.role === "background") {
-    return [
-      ...common,
-      "Layer target: background plate only. Remove foreground merchandise, marketing text, labels, icons, hands, and props. Fill covered areas naturally using nearby background texture and lighting.",
-      "Do not show foreground elements and do not change the original background style.",
-    ].join("\n\n");
-  }
-  if (preset.role === "subject") {
-    return [
-      ...common,
-      "Layer target: merchandise subject only. Preserve the real item shape, color, material, logo, label layout, and visible packaging text from the uploaded image.",
-      "Use a pure white background. Do not include scene background, marketing copy, decorative stickers, props, or cast shadows. Do not beautify or redesign the merchandise.",
-    ].join("\n\n");
-  }
-  if (preset.role === "text") {
-    return [
-      ...common,
-      "Layer target: marketing and layout text only. Treat text as image shapes. Preserve text position, color, size, and layout from the reference image.",
-      "Use a pure white background. Do not rewrite, correct, translate, or replace the text. Do not include the merchandise subject, background, props, or pure decoration.",
-    ].join("\n\n");
-  }
-  if (preset.role === "decoration") {
-    return [
-      ...common,
-      "Layer target: decorative visual elements and props only, such as stickers, icons, cards, geometric shapes, foreground props, and accents.",
-      "Use a pure white background. Do not include the merchandise subject, background plate, or marketing text. Do not invent new decoration.",
-    ].join("\n\n");
-  }
-  if (preset.role === "shadow") {
-    return [
-      ...common,
-      "Layer target: existing shadows and lighting effects only, including cast shadows, reflections, highlights, glow, beams, and soft ambient effects.",
-      "Use a pure white background. Do not include the merchandise subject, text, props, or background texture. Do not create new lighting.",
-    ].join("\n\n");
-  }
+function createLayerExtractionPrompt(layer: LayerPlanItem) {
   return [
-    ...common,
-    "Layer target: requested layer only. Keep the uploaded image composition as the reference.",
+    `Layer name: ${layer.name}`,
+    `Layer role: ${layer.role}`,
+    `Layer target: ${layer.target}`,
+    layer.prompt,
+    "Only isolate this planned layer. Do not include objects that belong to other planned layers.",
+    "Keep this layer in its original position, scale, perspective, color, texture, edge quality, and relationship to the full canvas.",
+    "If this layer is a person/model/hand layer, preserve the visible person/model/hand exactly as in the source unless the planned target explicitly says the worn product must stay combined with the model.",
+    "If this layer is a product/subject layer, preserve the real merchandise, packaging, logo, label layout, and visible packaging text. Do not redesign, beautify, or replace it.",
+    "If this layer is text, treat text as image shapes. Do not rewrite, translate, correct, or change the typography.",
+    "If the planned target is not visible or cannot be isolated, return a pure white full-canvas PNG instead of inventing content.",
   ].join("\n\n");
 }
 
-async function createLayerImageWithFallback(
+async function createLayerImage(
   baseUrl: string,
   apiKey: string,
   model: string,
-  preset: (typeof LAYER_PRESETS)[number],
+  layer: LayerPlanItem,
   sourceImage: string,
   size: ImageSize,
   aspectRatio: LayerAspectRatio,
   dimensions: { width: number; height: number } | null,
   shouldStop: () => Promise<boolean>,
 ) {
-  const primary = await createImageRequestWithRetry(
+  return createImageRequestWithRetry(
     baseUrl,
     apiKey,
     model,
-    createLayerPrompt(preset.prompt, aspectRatio, size, dimensions),
+    createLayerPrompt(createLayerExtractionPrompt(layer), aspectRatio, size, dimensions),
     size,
     [sourceImage],
     shouldStop,
   );
-  if (primary.response.ok || primary.response.status !== 400 || (await shouldStop())) {
-    return primary;
-  }
-
-  const fallback = await createImageRequestWithRetry(
-    baseUrl,
-    apiKey,
-    model,
-    createLayerPrompt(createLayerFallbackPrompt(preset, aspectRatio, size, dimensions), aspectRatio, size, dimensions),
-    size,
-    [sourceImage],
-    shouldStop,
-  );
-
-  return {
-    ...fallback,
-    attempts: primary.attempts + fallback.attempts,
-    retryErrors: [
-      ...primary.retryErrors,
-      `安全重试前 HTTP ${primary.response.status}: ${getUpstreamErrorDetail(primary.text)}`,
-      ...fallback.retryErrors,
-    ],
-  };
 }
 
 function normalizeAspectRatio(value: unknown): AspectRatio {
@@ -1257,8 +1300,11 @@ export class CutoutTasksDO {
         const sourceDimensions = normalizeSourceDimensions(body.sourceDimensions) ?? parsedSourceDimensions;
         const layerAspectRatio = normalizeLayerAspectRatio(body.layerAspectRatio) ?? resolveLayerAspectRatio(sourceDimensions);
         const layerImageSize = resolveLayerImageSize(layerAspectRatio);
-        const modelLayerPresets = LAYER_PRESETS;
-        const progressTotal = LAYER_PRESETS.length;
+        const planApiKey = this.env.PROMPT_API_KEY?.trim() || apiKey;
+        const planBaseUrl = this.env.PROMPT_BASE_URL?.trim() || baseUrl;
+        const planModel = this.env.PROMPT_MODEL?.trim() || model;
+        let layerPlan: LayerPlanItem[] = [];
+        let progressTotal = 1;
         let progressDone = 0;
         const writeLayerTask = async (
           status: "running" | "succeeded" | "failed",
@@ -1277,6 +1323,22 @@ export class CutoutTasksDO {
           } = {},
         ) => {
           const persistedLayers = await mergeStoredLayerImageIds(this.env, taskKey, layers);
+          const layerPlanManifest = layerPlan.length
+            ? {
+                sourceImageId: body.sourceImageId,
+                width: sourceDimensions?.width,
+                height: sourceDimensions?.height,
+                aspectRatio: layerAspectRatio,
+                renderSize: layerImageSize,
+                createdAt: now,
+                layerPlan: layerPlan.map((layer) => ({
+                  id: layer.id,
+                  name: layer.name,
+                  role: layer.role,
+                  index: layer.index,
+                })),
+              }
+            : null;
           const record: Record<string, unknown> = {
             status,
             userKey,
@@ -1294,19 +1356,32 @@ export class CutoutTasksDO {
           if (persistedLayers.length) record.layers = persistedLayers;
           if (options.error) record.error = options.error;
           if (options.model) record.model = options.model;
-          if (options.manifest) record.manifest = options.manifest;
+          if (options.manifest || layerPlanManifest) {
+            record.manifest = { ...(layerPlanManifest ?? {}), ...(options.manifest ?? {}) };
+          }
           await this.env.TASKS_KV.put(taskKey, JSON.stringify(record), { expirationTtl: 3600 });
         };
 
-        for (const preset of modelLayerPresets) {
-          const index = LAYER_PRESETS.findIndex((item) => item.id === preset.id);
+        await writeLayerTask("running", { current: "正在识别图层结构" });
+        layerPlan = await createDynamicLayerPlan(
+          planBaseUrl,
+          planApiKey,
+          planModel,
+          sourceImage,
+          sourceDimensions,
+          layerAspectRatio,
+        );
+        progressTotal = layerPlan.length;
+        await writeLayerTask("running", { current: `已规划 ${progressTotal} 个图层` });
+
+        for (const layer of layerPlan) {
           if (await shouldStop()) return;
-          await writeLayerTask("running", { current: `正在生成${preset.name}` });
-          const attemptResult = await createLayerImageWithFallback(
+          await writeLayerTask("running", { current: `正在生成${layer.name}` });
+          const attemptResult = await createLayerImage(
             baseUrl,
             apiKey,
             model,
-            preset,
+            layer,
             sourceImage,
             layerImageSize,
             layerAspectRatio,
@@ -1316,8 +1391,8 @@ export class CutoutTasksDO {
           if (!attemptResult.response.ok) {
             if (await shouldStop()) return;
             await writeLayerTask("failed", {
-              current: preset.name,
-              error: formatImageAttemptFailure(`分层-${preset.name}`, attemptResult),
+              current: layer.name,
+              error: formatImageAttemptFailure(`分层-${layer.name}`, attemptResult),
             });
             return;
           }
@@ -1328,8 +1403,8 @@ export class CutoutTasksDO {
           } catch {
             if (await shouldStop()) return;
             await writeLayerTask("failed", {
-              current: preset.name,
-              error: `分层-${preset.name} 返回了无法解析的 JSON`,
+              current: layer.name,
+              error: `分层-${layer.name} 返回了无法解析的 JSON`,
             });
             return;
           }
@@ -1338,22 +1413,22 @@ export class CutoutTasksDO {
           if (!result) {
             if (await shouldStop()) return;
             await writeLayerTask("failed", {
-              current: preset.name,
-              error: `API 返回成功但未包含${preset.name}结果`,
+              current: layer.name,
+              error: `API 返回成功但未包含${layer.name}结果`,
             });
             return;
           }
 
           layers.push({
-            id: preset.id,
-            name: preset.name,
-            role: preset.role,
-            index,
+            id: layer.id,
+            name: layer.name,
+            role: layer.role,
+            index: layer.index,
             base64: result,
           });
           progressDone += 1;
 
-          await writeLayerTask("running", { current: `${preset.name}已完成` });
+          await writeLayerTask("running", { current: `${layer.name}已完成` });
         }
 
         await writeLayerTask("succeeded", {

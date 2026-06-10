@@ -54,21 +54,13 @@ interface LayerProgress {
   current: string
 }
 
-const EXPECTED_LAYER_ROWS: Array<Omit<LayerDisplayRow, "state" | "layer">> = [
-  { id: "background", name: "背景层", role: "background", index: 0 },
-  { id: "main-subject", name: "商品主体", role: "subject", index: 1 },
-  { id: "text", name: "文字层", role: "text", index: 2 },
-  { id: "decoration", name: "装饰道具层", role: "decoration", index: 3 },
-  { id: "shadow-light", name: "阴影光效层", role: "shadow", index: 4 },
-]
-const EXPECTED_LAYER_COUNT = EXPECTED_LAYER_ROWS.length
-
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const sourceImage = shallowRef<string | null>(null)
 const sourceImageId = shallowRef<string | undefined>()
 const sourceDimensions = shallowRef<ImageDimensions | null>(null)
 const layersNormalizedToSourceSize = shallowRef(false)
 const layers = ref<LayerResultItem[]>([])
+const plannedLayerRows = ref<Array<Omit<LayerDisplayRow, "state" | "layer">>>([])
 const selectedLayerId = shallowRef<string | null>(null)
 const busy = shallowRef(false)
 const zipBusy = shallowRef(false)
@@ -84,6 +76,7 @@ const normalizedLayerCache = new Map<string, LayerResultItem>()
 const LAYER_ROLE_LABEL: Record<LayerResultItem["role"], string> = {
   background: "背景",
   subject: "商品",
+  person: "人物",
   text: "文字",
   decoration: "装饰",
   shadow: "光影",
@@ -108,7 +101,11 @@ const progressText = computed(() => {
     : `正在准备分层 · ${progress.value.done}/${progress.value.total}`
 })
 const busyStageLabel = computed(() =>
-  progress.value.current.includes("校准") ? "正在校准图层" : "正在生成图层",
+  progress.value.current.includes("识别") || progress.value.current.includes("规划")
+    ? "正在识别图层"
+    : progress.value.current.includes("校准")
+      ? "正在校准图层"
+      : "正在生成图层",
 )
 const sourceDimensionText = computed(() =>
   sourceDimensions.value
@@ -140,7 +137,17 @@ const layerRows = computed<LayerDisplayRow[]>(() => {
     }))
   }
 
-  return EXPECTED_LAYER_ROWS.map((row) => {
+  if (!plannedLayerRows.value.length) {
+    return [{
+      id: "planning",
+      name: "识别图层中",
+      role: "other",
+      index: 0,
+      state: "running",
+    }]
+  }
+
+  return plannedLayerRows.value.map((row) => {
     const layer = sortedLayers.find((item) => item.id === row.id)
     if (layer) return { ...row, layer, state: "done" }
     return {
@@ -151,10 +158,11 @@ const layerRows = computed<LayerDisplayRow[]>(() => {
 })
 
 function normalizeLayerProgress(raw?: Partial<LayerProgress>): LayerProgress {
-  const rawTotal = Number(raw?.total ?? EXPECTED_LAYER_COUNT)
+  const fallbackTotal = plannedLayerRows.value.length || 1
+  const rawTotal = Number(raw?.total ?? fallbackTotal)
   const total = Math.min(
-    Math.max(Number.isFinite(rawTotal) ? Math.round(rawTotal) : EXPECTED_LAYER_COUNT, 1),
-    EXPECTED_LAYER_COUNT,
+    Math.max(Number.isFinite(rawTotal) ? Math.round(rawTotal) : fallbackTotal, 1),
+    12,
   )
   const rawDone = Number(raw?.done ?? 0)
   const done = Math.min(
@@ -213,6 +221,20 @@ function getOutputLayers(sourceLayers: LayerResultItem[]) {
 
 function getOutputLayerCount(item: LayerHistoryItem) {
   return getOutputLayers(item.layers).length
+}
+
+function syncPlannedLayerRows(result: Pick<LayerTaskStatus, "manifest">) {
+  const plan = result.manifest?.layerPlan
+  if (!Array.isArray(plan) || !plan.length) return
+  plannedLayerRows.value = plan
+    .filter((item) => item.id && item.name && item.role !== "preview")
+    .sort((a, b) => a.index - b.index)
+    .map((item, index) => ({
+      id: item.id,
+      name: item.name,
+      role: item.role,
+      index,
+    }))
 }
 
 function resolveLayerAspectRatio(dimensions?: ImageDimensions | null): LayerAspectRatio {
@@ -322,9 +344,10 @@ async function normalizeLayerListToWhiteSourceCanvas(
 }
 
 async function syncLayersFromTask(
-  result: Pick<LayerTaskStatus, "layers">,
+  result: Pick<LayerTaskStatus, "layers" | "manifest">,
   options: { preferPreview?: boolean } = {},
 ) {
+  syncPlannedLayerRows(result)
   if (!result.layers) return
   const sortedLayers = await normalizeLayerListToWhiteSourceCanvas(result.layers)
   layersNormalizedToSourceSize.value = true
@@ -358,6 +381,7 @@ async function handleFileChange(event: Event) {
     sourceDimensions.value = await getImageDimensions(dataUrl)
     sourceImageId.value = await dbPutProductImage(dataUrl)
     layers.value = []
+    plannedLayerRows.value = []
     layersNormalizedToSourceSize.value = false
     normalizedLayerCache.clear()
     selectedLayerId.value = null
@@ -406,6 +430,7 @@ async function handleGenerate() {
   busy.value = true
   abortRef.value = new AbortController()
   layers.value = []
+  plannedLayerRows.value = []
   layersNormalizedToSourceSize.value = false
   normalizedLayerCache.clear()
   selectedLayerId.value = null
@@ -458,8 +483,8 @@ async function handleGenerate() {
       return
     }
     progress.value = normalizeLayerProgress({
-      done: EXPECTED_LAYER_COUNT,
-      total: EXPECTED_LAYER_COUNT,
+      done: progress.value.total || outputLayerCount.value || 1,
+      total: progress.value.total || outputLayerCount.value || 1,
       current: "正在校准白底图层",
     })
     updateLayerHistorySnapshot(historyItem, { status: "running", error: null })
@@ -719,6 +744,12 @@ async function handleSelectHistory(index: number) {
   sourceDimensions.value = item.sourceDimensions ??
     (sourceImage.value ? await getImageDimensions(sourceImage.value).catch(() => null) : null)
   layers.value = getOutputLayers(item.layers)
+  plannedLayerRows.value = layers.value.map((layer) => ({
+    id: layer.id,
+    name: layer.name,
+    role: layer.role,
+    index: layer.index,
+  }))
   layersNormalizedToSourceSize.value = true
   normalizedLayerCache.clear()
   selectedLayerId.value = layers.value[0]?.id ?? null
@@ -827,7 +858,7 @@ watch(
         </div>
         <div class="cutout-help layer-output-note">
           <strong>输出内容</strong>
-          <p>自动拆出背景、商品主体、文字、装饰道具和阴影光效；结果统一为白底同尺寸 PNG，可打包为 ZIP。</p>
+          <p>系统先识别画面结构，再按实际内容拆出适合的图层；结果统一为白底同尺寸 PNG，可打包为 ZIP。</p>
         </div>
       </div>
       <div v-if="error" class="alert cutout-alert">{{ error }}</div>
