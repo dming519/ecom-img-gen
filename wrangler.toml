@@ -2,6 +2,10 @@ name = "ecom-img-gen"
 pages_build_output_dir = "dist"
 compatibility_date = "2026-06-07"
 
+[vars]
+LLM_MODEL = "gpt-5.5"
+LLM_BASE_URL = "https://sub2api.easyauto.app"
+
 [[kv_namespaces]]
 binding = "TASKS_KV"
 id = "6a7ee075ab4b4cbe9cfd80ed9fb0b40a"

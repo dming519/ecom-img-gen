@@ -16,12 +16,12 @@
 - [ ] 已执行 `cd worker`
 - [x] 已执行 `npx wrangler deploy`
 - [x] 已记录 Worker URL
-- [ ] 已配置 `IMAGE_API_KEY`
-- [ ] 已配置 `IMAGE_BASE_URL`
-- [ ] 已配置 `IMAGE_MODEL`
-- [ ] 已配置 `LLM_API_KEY`
-- [ ] 已配置 `LLM_BASE_URL`
-- [ ] 已配置 `LLM_MODEL`
+- [ ] 已配置 Secret `IMAGE_API_KEY`
+- [x] 已配置明文变量 `IMAGE_BASE_URL`
+- [x] 已配置明文变量 `IMAGE_MODEL`
+- [ ] 已配置 Secret `LLM_API_KEY`
+- [x] 已配置明文变量 `LLM_BASE_URL`
+- [x] 已配置明文变量 `LLM_MODEL`
 - [ ] 已配置 `IMAGE_WORKER_TOKEN`
 
 ## Pages
@@ -33,7 +33,8 @@
 - [ ] 已绑定 `HISTORY_DB`
 - [ ] 已绑定 `HISTORY_BUCKET`
 - [ ] 已配置 OAuth Secrets
-- [x] 已配置 LLM 文案/识别接口 Secrets
+- [x] 已配置 LLM 文案/识别接口明文变量
+- [x] 已配置 LLM 文案/识别接口 Secret `LLM_API_KEY`
 - [x] 已配置 Worker 图像生成接口 Secrets
 - [x] 已配置 `IMAGE_WORKER_URL`
 - [x] 已配置 `IMAGE_WORKER_TOKEN`

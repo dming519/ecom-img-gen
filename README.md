@@ -67,6 +67,13 @@ Prompt 生成：
 
 Cloudflare Pages / Nuxt Nitro：
 
+明文变量：
+
+- `LLM_BASE_URL`
+- `LLM_MODEL`
+
+Secrets：
+
 - `AUTH_SECRET`
 - `AUTH_GITHUB_ID`
 - `AUTH_GITHUB_SECRET`
@@ -74,19 +81,22 @@ Cloudflare Pages / Nuxt Nitro：
 - `AUTH_GOOGLE_SECRET`
 - `ACCESS_LOGIN_CODE` 可选访问码登录，OAuth 未配置时可先使用
 - `LLM_API_KEY`
-- `LLM_BASE_URL`
-- `LLM_MODEL`
 - `IMAGE_WORKER_URL`
 - `IMAGE_WORKER_TOKEN`
 
 Worker：
 
-- `IMAGE_API_KEY`
+明文变量：
+
 - `IMAGE_BASE_URL`
 - `IMAGE_MODEL`
-- `LLM_API_KEY`
 - `LLM_BASE_URL`
 - `LLM_MODEL`
+
+Secrets：
+
+- `IMAGE_API_KEY`
+- `LLM_API_KEY`
 - `IMAGE_WORKER_TOKEN`
 
 Pages 和 Worker 需要绑定同一个 `TASKS_KV`。Pages 还需要绑定：

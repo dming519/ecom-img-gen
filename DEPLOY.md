@@ -70,19 +70,25 @@ Worker 名称：`ecom-img-gen-worker`
 https://ecom-img-gen-worker.ldmcsy2020.workers.dev
 ```
 
+Worker 的非敏感配置写在 `worker/wrangler.toml` 的明文变量里：
+
+```toml
+[vars]
+IMAGE_MODEL = "gpt-image-2"
+IMAGE_BASE_URL = "https://sub2api.easyauto.app"
+LLM_MODEL = "gpt-5.5"
+LLM_BASE_URL = "https://sub2api.easyauto.app"
+```
+
 配置 Worker Secrets：
 
 ```bash
 npx wrangler secret put IMAGE_API_KEY
-npx wrangler secret put IMAGE_BASE_URL
-npx wrangler secret put IMAGE_MODEL
 npx wrangler secret put LLM_API_KEY
-npx wrangler secret put LLM_BASE_URL
-npx wrangler secret put LLM_MODEL
 npx wrangler secret put IMAGE_WORKER_TOKEN
 ```
 
-`IMAGE_*` 用于 GPT-Image-2 等生图/编辑接口；`LLM_*` 用于详情图文案生成和分层图像结构识别，必须指向支持图片输入的聊天/Responses 兼容接口。
+`IMAGE_*` 用于 GPT-Image-2 等生图/编辑接口；`LLM_*` 用于详情图文案生成和分层图像结构识别，必须指向支持图片输入的聊天/Responses 兼容接口。`*_API_KEY` 必须继续使用 Secret。
 
 `IMAGE_WORKER_TOKEN` 是 Pages 调 Worker 的内部鉴权 token，Pages 和 Worker 必须一致。
 
@@ -122,6 +128,14 @@ Build command: npm run build
 Output directory: dist
 ```
 
+Pages 的非敏感配置写在根目录 `wrangler.toml` 的明文变量里：
+
+```toml
+[vars]
+LLM_MODEL = "gpt-5.5"
+LLM_BASE_URL = "https://sub2api.easyauto.app"
+```
+
 Pages 需要绑定同一个 `TASKS_KV`，并绑定 `HISTORY_DB` 和 `HISTORY_BUCKET`。同时配置 Secrets：
 
 ```text
@@ -131,8 +145,6 @@ AUTH_GITHUB_SECRET
 AUTH_GOOGLE_ID
 AUTH_GOOGLE_SECRET
 LLM_API_KEY
-LLM_BASE_URL
-LLM_MODEL
 IMAGE_WORKER_URL
 IMAGE_WORKER_TOKEN
 ```
@@ -146,8 +158,6 @@ AUTH_SECRET
 IMAGE_WORKER_URL
 IMAGE_WORKER_TOKEN
 LLM_API_KEY
-LLM_BASE_URL
-LLM_MODEL
 ```
 
 仍需配置：
@@ -163,11 +173,7 @@ Worker 已配置：
 
 ```text
 IMAGE_API_KEY
-IMAGE_BASE_URL
-IMAGE_MODEL
 LLM_API_KEY
-LLM_BASE_URL
-LLM_MODEL
 IMAGE_WORKER_TOKEN
 ```
 
