@@ -2,6 +2,7 @@
 // TypeScript 小提示：`type A = "x" | "y"` 表示 A 只能是这几个字符串之一。
 export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 export type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
+export type LayerAspectRatio = "1:1" | "4:3" | "3:4";
 export type ImageQuality = "1K" | "2K" | "4K";
 export type MultiViewAngleId =
   | "front"
@@ -237,6 +238,11 @@ export interface CreateEditTaskOptions {
 
 export interface CreateLayerTaskOptions {
   sourceImageId: string;
+  sourceDimensions?: {
+    width: number;
+    height: number;
+  };
+  layerAspectRatio?: LayerAspectRatio;
 }
 
 export interface LayerResultItem {
@@ -257,6 +263,7 @@ export interface CutoutTaskStatus {
   manifest?: {
     width?: number;
     height?: number;
+    aspectRatio?: LayerAspectRatio;
     renderSize?: ImageSize;
     sourceImageId?: string;
     createdAt?: number;

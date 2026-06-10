@@ -31,6 +31,11 @@ interface CutoutRequestBody {
   taskId?: string;
   sourceImage?: string;
   sourceImageId?: string;
+  sourceDimensions?: {
+    width?: unknown;
+    height?: unknown;
+  };
+  layerAspectRatio?: unknown;
   maskImage?: string;
   cutoutTarget?: string;
   editInstruction?: string;
@@ -257,6 +262,29 @@ function resolveLayerAspectRatio(dimensions: { width: number; height: number } |
       ? candidate
       : best,
   ).aspectRatio;
+}
+
+function normalizeSourceDimensions(value: CutoutRequestBody["sourceDimensions"]) {
+  const width = Number(value?.width);
+  const height = Number(value?.height);
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width < 1 ||
+    height < 1 ||
+    width > 12000 ||
+    height > 12000
+  ) {
+    return null;
+  }
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
+function normalizeLayerAspectRatio(value: unknown): LayerAspectRatio | null {
+  return value === "1:1" || value === "3:4" || value === "4:3" ? value : null;
 }
 
 function resolveLayerImageSize(aspectRatio: LayerAspectRatio): ImageSize {
@@ -1225,8 +1253,9 @@ export class CutoutTasksDO {
       const shouldStop = () => isImageTaskCanceled(this.env, taskKey);
       if (taskType === "layer") {
         const layers: GeneratedLayerItem[] = [];
-        const sourceDimensions = getImageDimensions(sourceImage);
-        const layerAspectRatio = resolveLayerAspectRatio(sourceDimensions);
+        const parsedSourceDimensions = getImageDimensions(sourceImage);
+        const sourceDimensions = normalizeSourceDimensions(body.sourceDimensions) ?? parsedSourceDimensions;
+        const layerAspectRatio = normalizeLayerAspectRatio(body.layerAspectRatio) ?? resolveLayerAspectRatio(sourceDimensions);
         const layerImageSize = resolveLayerImageSize(layerAspectRatio);
         const modelLayerPresets = LAYER_PRESETS;
         const progressTotal = LAYER_PRESETS.length;
@@ -1242,6 +1271,7 @@ export class CutoutTasksDO {
               createdAt?: number;
               width?: number;
               height?: number;
+              aspectRatio?: LayerAspectRatio;
               renderSize?: ImageSize;
             };
           } = {},
@@ -1251,6 +1281,8 @@ export class CutoutTasksDO {
             status,
             userKey,
             sourceImageId: body.sourceImageId,
+            sourceDimensions,
+            layerAspectRatio,
             progress: {
               done: progressDone,
               total: progressTotal,
@@ -1331,6 +1363,7 @@ export class CutoutTasksDO {
             sourceImageId: body.sourceImageId,
             width: sourceDimensions?.width,
             height: sourceDimensions?.height,
+            aspectRatio: layerAspectRatio,
             renderSize: layerImageSize,
             createdAt: Date.now(),
           },

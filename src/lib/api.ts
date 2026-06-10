@@ -398,7 +398,11 @@ export async function createLayerTask(
   const response = await fetchWithRetry(DEFAULT_LAYER_PATH, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sourceImageId: options.sourceImageId }),
+    body: JSON.stringify({
+      sourceImageId: options.sourceImageId,
+      sourceDimensions: options.sourceDimensions,
+      layerAspectRatio: options.layerAspectRatio,
+    }),
     signal,
   });
 

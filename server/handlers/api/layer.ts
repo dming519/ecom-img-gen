@@ -7,6 +7,18 @@ import { getUserKey, requireImageCredit, type UserKvNamespace } from "../_lib/us
 
 interface LayerRequestBody {
   sourceImageId?: string;
+  sourceDimensions?: {
+    width?: unknown;
+    height?: unknown;
+  };
+  layerAspectRatio?: unknown;
+}
+
+type LayerAspectRatio = "1:1" | "4:3" | "3:4";
+
+interface ImageDimensions {
+  width: number;
+  height: number;
 }
 
 interface RequestContext {
@@ -41,6 +53,29 @@ function normalizeImageId(value: unknown) {
 
 function isDataImage(value: unknown) {
   return typeof value === "string" && value.startsWith("data:image/");
+}
+
+function normalizeSourceDimensions(value: LayerRequestBody["sourceDimensions"]): ImageDimensions | undefined {
+  const width = Number(value?.width);
+  const height = Number(value?.height);
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width < 1 ||
+    height < 1 ||
+    width > 12000 ||
+    height > 12000
+  ) {
+    return undefined;
+  }
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
+function normalizeLayerAspectRatio(value: unknown): LayerAspectRatio | undefined {
+  return value === "1:1" || value === "4:3" || value === "3:4" ? value : undefined;
 }
 
 export async function handlePost(context: RequestContext) {
@@ -94,12 +129,16 @@ export async function handlePost(context: RequestContext) {
 
   const taskId = crypto.randomUUID();
   const now = Date.now();
+  const sourceDimensions = normalizeSourceDimensions(body.sourceDimensions);
+  const layerAspectRatio = normalizeLayerAspectRatio(body.layerAspectRatio);
   await kv.put(
     `layer-task:${taskId}`,
     JSON.stringify({
       status: "pending",
       userKey,
       sourceImageId,
+      sourceDimensions,
+      layerAspectRatio,
       createdAt: now,
       updatedAt: now,
     }),
@@ -117,6 +156,8 @@ export async function handlePost(context: RequestContext) {
         taskId,
         sourceImage,
         sourceImageId,
+        sourceDimensions,
+        layerAspectRatio,
         userKey,
       }),
     });

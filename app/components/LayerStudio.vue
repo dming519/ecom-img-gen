@@ -16,7 +16,7 @@ import {
   dbPutProductImage,
   dbPutProductImageBlob,
 } from "@/lib/db"
-import type { AuthSession, LayerHistoryItem, LayerResultItem, LayerTaskStatus } from "@/lib/types"
+import type { AuthSession, LayerAspectRatio, LayerHistoryItem, LayerResultItem, LayerTaskStatus } from "@/lib/types"
 import Icon from "./Icon.vue"
 
 const props = defineProps<{
@@ -214,6 +214,22 @@ function getOutputLayers(sourceLayers: LayerResultItem[]) {
 
 function getOutputLayerCount(item: LayerHistoryItem) {
   return getOutputLayers(item.layers).length
+}
+
+function resolveLayerAspectRatio(dimensions?: ImageDimensions | null): LayerAspectRatio {
+  if (!dimensions?.width || !dimensions.height) return "1:1"
+  const sourceRatio = dimensions.width / dimensions.height
+  const candidates: Array<{ aspectRatio: LayerAspectRatio; ratio: number }> = [
+    { aspectRatio: "1:1", ratio: 1 },
+    { aspectRatio: "3:4", ratio: 3 / 4 },
+    { aspectRatio: "4:3", ratio: 4 / 3 },
+  ]
+  return candidates.reduce((best, candidate) =>
+    Math.abs(Math.log(sourceRatio / candidate.ratio)) <
+    Math.abs(Math.log(sourceRatio / best.ratio))
+      ? candidate
+      : best,
+  ).aspectRatio
 }
 
 function getLayerSourceKey(layer: LayerResultItem, dimensions?: ImageDimensions | null) {
@@ -419,7 +435,11 @@ async function handleGenerate() {
 
   try {
     await persistLayer(historyItem)
-    const created = await createLayerTask({ sourceImageId: sourceImageId.value }, abortRef.value.signal)
+    const created = await createLayerTask({
+      sourceImageId: sourceImageId.value,
+      sourceDimensions: sourceDimensions.value ?? undefined,
+      layerAspectRatio: sourceDimensions.value ? resolveLayerAspectRatio(sourceDimensions.value) : undefined,
+    }, abortRef.value.signal)
     taskIdRef.value = created.taskId
     updateSessionCredits({ status: "pending", ...created })
     updateLayerHistorySnapshot(historyItem, { status: "running", taskId: created.taskId, error: null })
