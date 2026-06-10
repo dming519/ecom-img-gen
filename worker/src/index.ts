@@ -1,13 +1,17 @@
 export interface Env {
+  IMAGE_API_KEY?: string;
+  IMAGE_BASE_URL?: string;
+  IMAGE_MODEL?: string;
+  LLM_API_KEY?: string;
+  LLM_BASE_URL?: string;
+  LLM_MODEL?: string;
+  // Legacy names kept temporarily so existing deployments do not break before secrets are renamed.
   OPENAI_API_KEY?: string;
   OPENAI_BASE_URL?: string;
   OPENAI_MODEL?: string;
   PROMPT_API_KEY?: string;
   PROMPT_BASE_URL?: string;
   PROMPT_MODEL?: string;
-  LAYER_PLAN_API_KEY?: string;
-  LAYER_PLAN_BASE_URL?: string;
-  LAYER_PLAN_MODEL?: string;
   IMAGE_WORKER_TOKEN?: string;
   TASKS_KV: KVNamespace;
   IMAGE_TASKS: DurableObjectNamespace;
@@ -72,6 +76,26 @@ const PROMPT_RETRY_DELAYS = [1200, 2800];
 const DEFAULT_LAYER_PLAN_MODEL = "gpt-5.5";
 // 这些上游状态码通常是临时问题，可以稍后重试。
 const IMAGE_RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504, 520, 522, 524]);
+
+function firstNonEmpty(...values: Array<string | undefined>) {
+  return values.map((value) => value?.trim()).find((value): value is string => !!value);
+}
+
+function getImageConfig(env: Env) {
+  return {
+    apiKey: firstNonEmpty(env.IMAGE_API_KEY, env.OPENAI_API_KEY),
+    baseUrl: firstNonEmpty(env.IMAGE_BASE_URL, env.OPENAI_BASE_URL),
+    model: firstNonEmpty(env.IMAGE_MODEL, env.OPENAI_MODEL),
+  };
+}
+
+function getLlmConfig(env: Env) {
+  return {
+    apiKey: firstNonEmpty(env.LLM_API_KEY, env.PROMPT_API_KEY),
+    baseUrl: firstNonEmpty(env.LLM_BASE_URL, env.PROMPT_BASE_URL),
+    model: firstNonEmpty(env.LLM_MODEL, env.PROMPT_MODEL),
+  };
+}
 
 interface PromptRequestBody {
   taskId?: string;
@@ -1035,9 +1059,7 @@ export class ImageTasksDO {
       return json({ error: "缺少 taskId" }, { status: 400 });
     }
 
-    const apiKey = this.env.OPENAI_API_KEY?.trim();
-    const baseUrl = this.env.OPENAI_BASE_URL?.trim();
-    const model = this.env.OPENAI_MODEL?.trim();
+    const { apiKey, baseUrl, model } = getImageConfig(this.env);
     if (!apiKey || !baseUrl || !model) {
       await this.env.TASKS_KV.put(
         `task:${taskId}`,
@@ -1045,7 +1067,7 @@ export class ImageTasksDO {
           status: "failed",
           userKey,
           updatedAt: Date.now(),
-          error: "服务端缺少 OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL 配置",
+          error: "服务端缺少 IMAGE_API_KEY / IMAGE_BASE_URL / IMAGE_MODEL 配置",
         }),
         { expirationTtl: 3600 },
       );
@@ -1085,9 +1107,7 @@ export class ImageTasksDO {
     const taskId = body.taskId?.trim();
     if (!taskId) return;
     const userKey = body.userKey?.trim();
-    const apiKey = this.env.OPENAI_API_KEY?.trim();
-    const baseUrl = this.env.OPENAI_BASE_URL?.trim();
-    const model = this.env.OPENAI_MODEL?.trim();
+    const { apiKey, baseUrl, model } = getImageConfig(this.env);
     const prompt = body.prompt?.trim() ?? "";
     const images = (body.inputImages ?? [])
       .filter((image) => typeof image === "string" && image.startsWith("data:image/"))
@@ -1108,7 +1128,7 @@ export class ImageTasksDO {
 
     try {
       if (!apiKey || !baseUrl || !model) {
-        throw new Error("服务端缺少 OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL 配置");
+        throw new Error("服务端缺少 IMAGE_API_KEY / IMAGE_BASE_URL / IMAGE_MODEL 配置");
       }
       if (!images.length) {
         throw new Error("缺少商品参考图，系统已禁止纯文案生成");
@@ -1254,9 +1274,7 @@ export class CutoutTasksDO {
       return json({ error: "缺少 taskId" }, { status: 400 });
     }
 
-    const apiKey = this.env.OPENAI_API_KEY?.trim();
-    const baseUrl = this.env.OPENAI_BASE_URL?.trim();
-    const model = this.env.OPENAI_MODEL?.trim();
+    const { apiKey, baseUrl, model } = getImageConfig(this.env);
     if (!apiKey || !baseUrl || !model) {
       await this.env.TASKS_KV.put(
         taskKey,
@@ -1265,7 +1283,7 @@ export class CutoutTasksDO {
           userKey,
           createdAt: now,
           updatedAt: now,
-          error: "服务端缺少 OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL 配置",
+          error: "服务端缺少 IMAGE_API_KEY / IMAGE_BASE_URL / IMAGE_MODEL 配置",
         }),
         { expirationTtl: 3600 },
       );
@@ -1327,9 +1345,7 @@ export class CutoutTasksDO {
     const taskId = body.taskId?.trim();
     if (!taskId) return;
     const userKey = body.userKey?.trim();
-    const apiKey = this.env.OPENAI_API_KEY?.trim();
-    const baseUrl = this.env.OPENAI_BASE_URL?.trim();
-    const model = this.env.OPENAI_MODEL?.trim();
+    const { apiKey, baseUrl, model } = getImageConfig(this.env);
     const sourceImage = body.sourceImage ?? "";
     const maskImage = body.maskImage ?? "";
     const taskType =
@@ -1348,7 +1364,7 @@ export class CutoutTasksDO {
 
     try {
       if (!apiKey || !baseUrl || !model) {
-        throw new Error("服务端缺少 OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL 配置");
+        throw new Error("服务端缺少 IMAGE_API_KEY / IMAGE_BASE_URL / IMAGE_MODEL 配置");
       }
       if (!sourceImage.startsWith("data:image/")) {
         throw new Error(taskType === "layer" ? "分层任务缺少原图" : "任务缺少原图");
@@ -1368,15 +1384,10 @@ export class CutoutTasksDO {
         const sourceDimensions = normalizeSourceDimensions(body.sourceDimensions) ?? parsedSourceDimensions;
         const layerAspectRatio = normalizeLayerAspectRatio(body.layerAspectRatio) ?? resolveLayerAspectRatio(sourceDimensions);
         const layerImageSize = resolveLayerImageSize(layerAspectRatio);
-        const planApiKey =
-          this.env.LAYER_PLAN_API_KEY?.trim() ||
-          this.env.PROMPT_API_KEY?.trim() ||
-          apiKey;
-        const planBaseUrl =
-          this.env.LAYER_PLAN_BASE_URL?.trim() ||
-          this.env.PROMPT_BASE_URL?.trim() ||
-          baseUrl;
-        const planModel = this.env.LAYER_PLAN_MODEL?.trim() || DEFAULT_LAYER_PLAN_MODEL;
+        const llmConfig = getLlmConfig(this.env);
+        const planApiKey = llmConfig.apiKey;
+        const planBaseUrl = llmConfig.baseUrl;
+        const planModel = llmConfig.model || DEFAULT_LAYER_PLAN_MODEL;
         let layerPlan: LayerPlanItem[] = [];
         let progressTotal = 1;
         let progressDone = 0;
@@ -1435,6 +1446,14 @@ export class CutoutTasksDO {
           }
           await this.env.TASKS_KV.put(taskKey, JSON.stringify(record), { expirationTtl: 3600 });
         };
+
+        if (!planApiKey || !planBaseUrl) {
+          await writeLayerTask("failed", {
+            current: "识别图层结构失败",
+            error: "服务端缺少 LLM_API_KEY / LLM_BASE_URL 配置",
+          });
+          return;
+        }
 
         await writeLayerTask("running", { current: "正在识别图层结构" });
         try {
@@ -1663,18 +1682,10 @@ export class PromptTasksDO {
       return json({ error: "缺少 taskId" }, { status: 400 });
     }
 
-    const apiKey =
-      body.apiKey?.trim() ||
-      this.env.PROMPT_API_KEY?.trim() ||
-      this.env.OPENAI_API_KEY?.trim();
-    const baseUrl =
-      body.baseUrl?.trim() ||
-      this.env.PROMPT_BASE_URL?.trim() ||
-      this.env.OPENAI_BASE_URL?.trim();
-    const model =
-      body.model?.trim() ||
-      this.env.PROMPT_MODEL?.trim() ||
-      this.env.OPENAI_MODEL?.trim();
+    const llmConfig = getLlmConfig(this.env);
+    const apiKey = body.apiKey?.trim() || llmConfig.apiKey;
+    const baseUrl = body.baseUrl?.trim() || llmConfig.baseUrl;
+    const model = body.model?.trim() || llmConfig.model;
     if (!apiKey || !baseUrl || !model) {
       await this.env.TASKS_KV.put(
         taskKey,
@@ -1683,7 +1694,7 @@ export class PromptTasksDO {
           userKey,
           createdAt,
           updatedAt: Date.now(),
-          error: "服务端缺少 PROMPT_API_KEY / PROMPT_BASE_URL / PROMPT_MODEL 配置",
+          error: "服务端缺少 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 配置",
         }),
         { expirationTtl: 3600 },
       );
@@ -1733,18 +1744,10 @@ export class PromptTasksDO {
     const taskKey = `prompt-task:${taskId}`;
     const createdAt = Date.now();
     const userKey = body.userKey?.trim();
-    const apiKey =
-      body.apiKey?.trim() ||
-      this.env.PROMPT_API_KEY?.trim() ||
-      this.env.OPENAI_API_KEY?.trim();
-    const baseUrl =
-      body.baseUrl?.trim() ||
-      this.env.PROMPT_BASE_URL?.trim() ||
-      this.env.OPENAI_BASE_URL?.trim();
-    const model =
-      body.model?.trim() ||
-      this.env.PROMPT_MODEL?.trim() ||
-      this.env.OPENAI_MODEL?.trim();
+    const llmConfig = getLlmConfig(this.env);
+    const apiKey = body.apiKey?.trim() || llmConfig.apiKey;
+    const baseUrl = body.baseUrl?.trim() || llmConfig.baseUrl;
+    const model = body.model?.trim() || llmConfig.model;
     const userText = body.userText?.trim() ?? "";
     const systemTemplate = body.systemTemplate?.trim() ?? "";
     const imageCount = Math.min(8, Math.max(1, Math.round(body.imageCount ?? 5)));

@@ -18,9 +18,10 @@ interface RequestContext {
   request: Request;
   env: {
     AUTH_SECRET?: string;
-    OPENAI_API_KEY?: string;
-    OPENAI_BASE_URL?: string;
-    OPENAI_MODEL?: string;
+    LLM_API_KEY?: string;
+    LLM_BASE_URL?: string;
+    LLM_MODEL?: string;
+    // Legacy names kept temporarily until Cloudflare secrets are renamed.
     PROMPT_API_KEY?: string;
     PROMPT_BASE_URL?: string;
     PROMPT_MODEL?: string;
@@ -44,6 +45,10 @@ function json(data: unknown, init?: ResponseInit) {
       ...init?.headers,
     },
   });
+}
+
+function firstNonEmpty(...values: Array<string | undefined>) {
+  return values.map((value) => value?.trim()).find((value): value is string => !!value);
 }
 
 // 用户可以选 1-8 张详情图；非法值统一回落到默认 5 张。
@@ -132,15 +137,9 @@ export async function handlePost(context: RequestContext) {
   const kv = context.env.TASKS_KV;
   const workerUrl = context.env.IMAGE_WORKER_URL?.trim();
   const workerToken = context.env.IMAGE_WORKER_TOKEN?.trim();
-  const apiKey =
-    context.env.PROMPT_API_KEY?.trim() || context.env.OPENAI_API_KEY?.trim();
-  const baseUrl = (
-    context.env.PROMPT_BASE_URL?.trim() ||
-    context.env.OPENAI_BASE_URL?.trim() ||
-    ""
-  ).replace(/\/+$/, "");
-  const model =
-    context.env.PROMPT_MODEL?.trim() || context.env.OPENAI_MODEL?.trim();
+  const apiKey = firstNonEmpty(context.env.LLM_API_KEY, context.env.PROMPT_API_KEY);
+  const baseUrl = firstNonEmpty(context.env.LLM_BASE_URL, context.env.PROMPT_BASE_URL)?.replace(/\/+$/, "") ?? "";
+  const model = firstNonEmpty(context.env.LLM_MODEL, context.env.PROMPT_MODEL);
 
   // 下面这些配置缺失属于部署问题，返回 500 方便排查 Cloudflare 环境变量。
   if (!kv) {
@@ -156,7 +155,7 @@ export async function handlePost(context: RequestContext) {
     return json(
       {
         error:
-          "服务端缺少 PROMPT_API_KEY / PROMPT_BASE_URL / PROMPT_MODEL 配置",
+          "服务端缺少 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 配置",
       },
       { status: 500 },
     );

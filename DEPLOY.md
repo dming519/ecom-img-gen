@@ -73,11 +73,16 @@ https://ecom-img-gen-worker.ldmcsy2020.workers.dev
 配置 Worker Secrets：
 
 ```bash
-npx wrangler secret put OPENAI_API_KEY
-npx wrangler secret put OPENAI_BASE_URL
-npx wrangler secret put OPENAI_MODEL
+npx wrangler secret put IMAGE_API_KEY
+npx wrangler secret put IMAGE_BASE_URL
+npx wrangler secret put IMAGE_MODEL
+npx wrangler secret put LLM_API_KEY
+npx wrangler secret put LLM_BASE_URL
+npx wrangler secret put LLM_MODEL
 npx wrangler secret put IMAGE_WORKER_TOKEN
 ```
+
+`IMAGE_*` 用于 GPT-Image-2 等生图/编辑接口；`LLM_*` 用于详情图文案生成和分层图像结构识别，必须指向支持图片输入的聊天/Responses 兼容接口。
 
 `IMAGE_WORKER_TOKEN` 是 Pages 调 Worker 的内部鉴权 token，Pages 和 Worker 必须一致。
 
@@ -125,14 +130,14 @@ AUTH_GITHUB_ID
 AUTH_GITHUB_SECRET
 AUTH_GOOGLE_ID
 AUTH_GOOGLE_SECRET
-PROMPT_API_KEY
-PROMPT_BASE_URL
-PROMPT_MODEL
+LLM_API_KEY
+LLM_BASE_URL
+LLM_MODEL
 IMAGE_WORKER_URL
 IMAGE_WORKER_TOKEN
 ```
 
-`PROMPT_MODEL` 可选。建议使用支持视觉输入的模型；不配置时使用 `OPENAI_MODEL`。
+`LLM_MODEL` 建议使用支持视觉输入的模型，例如 `gpt-5.5`。不要把 `LLM_BASE_URL` 指向生图代理。
 
 当前已自动配置：
 
@@ -140,9 +145,9 @@ IMAGE_WORKER_TOKEN
 AUTH_SECRET
 IMAGE_WORKER_URL
 IMAGE_WORKER_TOKEN
-PROMPT_API_KEY
-PROMPT_BASE_URL
-PROMPT_MODEL
+LLM_API_KEY
+LLM_BASE_URL
+LLM_MODEL
 ```
 
 仍需配置：
@@ -157,9 +162,12 @@ AUTH_GOOGLE_SECRET
 Worker 已配置：
 
 ```text
-OPENAI_API_KEY
-OPENAI_BASE_URL
-OPENAI_MODEL
+IMAGE_API_KEY
+IMAGE_BASE_URL
+IMAGE_MODEL
+LLM_API_KEY
+LLM_BASE_URL
+LLM_MODEL
 IMAGE_WORKER_TOKEN
 ```
 
