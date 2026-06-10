@@ -42,7 +42,6 @@ const createdCode = shallowRef<string | null>(null)
 const redeemLabel = shallowRef("")
 const customRedeemCode = shallowRef("")
 const redeemCredits = shallowRef(5)
-const redeemMaxUses = shallowRef(1)
 const createdRedeemCode = shallowRef<string | null>(null)
 const failedAvatars = ref(new Set<string>())
 
@@ -113,7 +112,6 @@ async function handleCreateRedeemCode() {
     const payload = await createRedeemCode(
       redeemLabel.value,
       redeemCredits.value,
-      redeemMaxUses.value,
       customRedeemCode.value,
     )
     redeemCodes.value = [payload.redeemCode, ...redeemCodes.value]
@@ -121,7 +119,6 @@ async function handleCreateRedeemCode() {
     redeemLabel.value = ""
     customRedeemCode.value = ""
     redeemCredits.value = 5
-    redeemMaxUses.value = 1
   } catch (event) {
     error.value = event instanceof Error ? event.message : String(event)
   } finally {
@@ -304,7 +301,7 @@ function copyText(value: string) {
         <div class="admin-section-head">
           <div>
             <h3>访问码</h3>
-            <p>创建给临时用户使用的登录码，创建后明文只显示一次。</p>
+            <p>创建给临时用户使用的登录码，可创建多个，明文会保留在后台列表中。</p>
           </div>
           <span>{{ accessCodes.length }} 个访问码</span>
         </div>
@@ -328,6 +325,7 @@ function copyText(value: string) {
             <thead>
               <tr>
                 <th>备注</th>
+                <th>访问码</th>
                 <th>状态</th>
                 <th>使用次数</th>
                 <th>最近使用</th>
@@ -345,6 +343,19 @@ function copyText(value: string) {
                     :disabled="busyKey === accessCode.id"
                     @blur="handleUpdateAccessCode(accessCode, { label: accessCode.label })"
                   >
+                </td>
+                <td>
+                  <div class="admin-code-value">
+                    <code>{{ accessCode.code || "未记录" }}</code>
+                    <button
+                      v-if="accessCode.code"
+                      class="btn-ghost"
+                      type="button"
+                      @click="copyText(accessCode.code || '')"
+                    >
+                      复制
+                    </button>
+                  </div>
                 </td>
                 <td>
                   <span :class="['access-code-status', { 'is-active': accessCode.active }]">
@@ -368,7 +379,7 @@ function copyText(value: string) {
                 </td>
               </tr>
               <tr v-if="!accessCodes.length && !loading">
-                <td colspan="6">暂无访问码</td>
+                <td colspan="7">暂无访问码</td>
               </tr>
             </tbody>
           </table>
@@ -379,7 +390,7 @@ function copyText(value: string) {
         <div class="admin-section-head">
           <div>
             <h3>兑换码</h3>
-            <p>创建给已登录用户使用的永久额度兑换码，创建后明文只显示一次。</p>
+            <p>创建给已登录用户使用的一次性永久额度兑换码，可创建多个，明文会保留在后台列表中。</p>
           </div>
           <span>{{ redeemCodes.length }} 个兑换码</span>
         </div>
@@ -387,8 +398,7 @@ function copyText(value: string) {
         <form class="access-code-form redeem-code-form" @submit.prevent="handleCreateRedeemCode">
           <input v-model="redeemLabel" type="text" placeholder="备注，例如：活动赠送 / 老客补偿" aria-label="兑换码备注">
           <input v-model="customRedeemCode" type="text" placeholder="自定义兑换码，可留空自动生成" aria-label="自定义兑换码">
-          <input v-model.number="redeemCredits" type="number" min="1" max="999" aria-label="每次增加图片张数">
-          <input v-model.number="redeemMaxUses" type="number" min="1" max="10000" aria-label="可兑换次数">
+          <input v-model.number="redeemCredits" type="number" min="1" max="999" aria-label="兑换后增加次数">
           <button class="btn-secondary" type="submit" :disabled="redeemBusy">
             {{ redeemBusy ? "创建中..." : "创建兑换码" }}
           </button>
@@ -405,9 +415,10 @@ function copyText(value: string) {
             <thead>
               <tr>
                 <th>备注</th>
+                <th>兑换码</th>
                 <th>状态</th>
                 <th>永久次数</th>
-                <th>兑换进度</th>
+                <th>兑换状态</th>
                 <th>最近兑换</th>
                 <th>创建时间</th>
                 <th>操作</th>
@@ -425,12 +436,29 @@ function copyText(value: string) {
                   >
                 </td>
                 <td>
+                  <div class="admin-code-value">
+                    <code>{{ redeemCode.code || "未记录" }}</code>
+                    <button
+                      v-if="redeemCode.code"
+                      class="btn-ghost"
+                      type="button"
+                      @click="copyText(redeemCode.code || '')"
+                    >
+                      复制
+                    </button>
+                  </div>
+                </td>
+                <td>
                   <span :class="['access-code-status', { 'is-active': redeemCode.active }]">
                     {{ redeemCode.active ? "启用" : "停用" }}
                   </span>
                 </td>
                 <td>+{{ redeemCode.credits }}</td>
-                <td>{{ redeemCode.redeemCount }} / {{ redeemCode.maxRedemptions }}</td>
+                <td>
+                  <span :class="['access-code-status', { 'is-active': redeemCode.redeemCount === 0 }]">
+                    {{ redeemCode.redeemCount > 0 ? "已兑换" : "未兑换" }}
+                  </span>
+                </td>
                 <td>
                   {{ redeemCode.lastRedeemedAt ? new Date(redeemCode.lastRedeemedAt).toLocaleString("zh-CN", TIME_FMT) : "未兑换" }}
                 </td>
@@ -447,7 +475,7 @@ function copyText(value: string) {
                 </td>
               </tr>
               <tr v-if="!redeemCodes.length && !loading">
-                <td colspan="7">暂无兑换码</td>
+                <td colspan="8">暂无兑换码</td>
               </tr>
             </tbody>
           </table>

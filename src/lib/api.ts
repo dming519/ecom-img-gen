@@ -685,7 +685,6 @@ export async function fetchRedeemCodes(): Promise<{ redeemCodes: RedeemCodeRow[]
 export async function createRedeemCode(
   label: string,
   credits: number,
-  maxRedemptions: number,
   code?: string,
 ): Promise<{ redeemCode: RedeemCodeRow; code: string }> {
   const response = await fetchWithRetry("/api/admin/redeem-codes", {
@@ -695,7 +694,6 @@ export async function createRedeemCode(
       action: "create",
       label,
       credits,
-      maxRedemptions,
       code,
     }),
   });

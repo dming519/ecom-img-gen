@@ -6,6 +6,7 @@ interface RedeemCodeRecord {
   id: string;
   label: string;
   codeHash: string;
+  codeText: string | null;
   credits: number;
   maxRedemptions: number;
   redeemCount: number;
@@ -28,6 +29,7 @@ interface RedeemCodeRowRecord {
   id: string;
   label: string;
   code_hash: string;
+  code_text?: string | null;
   credits: number;
   max_redemptions: number;
   redeem_count: number;
@@ -38,19 +40,12 @@ interface RedeemCodeRowRecord {
   last_redeemed_at?: number | null;
 }
 
-interface RedeemUseRowRecord {
-  id: string;
-  code_id: string;
-  user_key: string;
-  credits: number;
-  redeemed_at: number;
-}
-
 export interface RedeemCodeEnv {
   HISTORY_DB?: HistoryD1Database;
 }
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const SINGLE_USE_REDEMPTION_LIMIT = 1;
 
 function normalizeCode(code: string) {
   return code.trim().replace(/[\s-]+/g, "").toUpperCase();
@@ -59,11 +54,6 @@ function normalizeCode(code: string) {
 function normalizeCredits(value: number | undefined) {
   if (!Number.isFinite(value)) return 5;
   return Math.max(1, Math.min(999, Math.round(value ?? 5)));
-}
-
-function normalizeMaxRedemptions(value: number | undefined) {
-  if (!Number.isFinite(value)) return 1;
-  return Math.max(1, Math.min(10000, Math.round(value ?? 1)));
 }
 
 async function hashCode(code: string) {
@@ -85,6 +75,7 @@ function fromRow(row: RedeemCodeRowRecord): RedeemCodeRecord {
     id: row.id,
     label: row.label,
     codeHash: row.code_hash,
+    codeText: row.code_text ?? null,
     credits: row.credits,
     maxRedemptions: row.max_redemptions,
     redeemCount: row.redeem_count,
@@ -96,20 +87,11 @@ function fromRow(row: RedeemCodeRowRecord): RedeemCodeRecord {
   };
 }
 
-function useFromRow(row: RedeemUseRowRecord): RedeemUseRecord {
-  return {
-    id: row.id,
-    codeId: row.code_id,
-    userKey: row.user_key,
-    credits: row.credits,
-    redeemedAt: row.redeemed_at,
-  };
-}
-
 function toRow(record: RedeemCodeRecord): RedeemCodeRow {
   return {
     id: record.id,
     label: record.label,
+    code: record.codeText,
     credits: record.credits,
     maxRedemptions: record.maxRedemptions,
     redeemCount: record.redeemCount,
@@ -125,13 +107,14 @@ async function writeRedeemCode(db: HistoryD1Database, record: RedeemCodeRecord) 
   await db
     .prepare(
       `INSERT INTO redeem_codes
-        (id, label, code_hash, credits, max_redemptions, redeem_count,
+        (id, label, code_hash, code_text, credits, max_redemptions, redeem_count,
          active, created_at, updated_at, created_by, last_redeemed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id)
        DO UPDATE SET
          label = excluded.label,
          code_hash = excluded.code_hash,
+         code_text = COALESCE(excluded.code_text, redeem_codes.code_text),
          credits = excluded.credits,
          max_redemptions = excluded.max_redemptions,
          redeem_count = excluded.redeem_count,
@@ -144,6 +127,7 @@ async function writeRedeemCode(db: HistoryD1Database, record: RedeemCodeRecord) 
       record.id,
       record.label,
       record.codeHash,
+      record.codeText,
       record.credits,
       record.maxRedemptions,
       record.redeemCount,
@@ -169,7 +153,7 @@ async function readRedeemCode(db: HistoryD1Database, id: string) {
   const row = await db
     .prepare(
       `SELECT id, label, code_hash, credits, max_redemptions, redeem_count,
-        active, created_at, updated_at, created_by, last_redeemed_at
+        code_text, active, created_at, updated_at, created_by, last_redeemed_at
        FROM redeem_codes
        WHERE id = ?`,
     )
@@ -189,18 +173,6 @@ async function readRedeemCodeByHash(db: HistoryD1Database, hash: string) {
   return null;
 }
 
-async function readRedeemUse(db: HistoryD1Database, codeId: string, userKey: string) {
-  const row = await db
-    .prepare(
-      `SELECT id, code_id, user_key, credits, redeemed_at
-       FROM redeem_code_uses
-       WHERE code_id = ? AND user_key = ?`,
-    )
-    .bind(codeId, userKey)
-    .first<RedeemUseRowRecord>();
-  return row ? useFromRow(row) : null;
-}
-
 async function writeRedeemUse(db: HistoryD1Database, record: RedeemUseRecord) {
   const result = await db
     .prepare(
@@ -218,7 +190,7 @@ export async function listRedeemCodes(env: RedeemCodeEnv) {
   const result = await db
     .prepare(
       `SELECT id, label, code_hash, credits, max_redemptions, redeem_count,
-        active, created_at, updated_at, created_by, last_redeemed_at
+        code_text, active, created_at, updated_at, created_by, last_redeemed_at
        FROM redeem_codes
        ORDER BY created_at DESC`,
     )
@@ -232,7 +204,6 @@ export async function createRedeemCodeRecord(
     label?: string;
     code?: string;
     credits?: number;
-    maxRedemptions?: number;
     createdBy?: string | null;
   },
 ) {
@@ -251,8 +222,9 @@ export async function createRedeemCodeRecord(
     id: crypto.randomUUID(),
     label: options.label?.trim() || `兑换码 ${new Date(now).toLocaleDateString("zh-CN")}`,
     codeHash,
+    codeText: code,
     credits: normalizeCredits(options.credits),
-    maxRedemptions: normalizeMaxRedemptions(options.maxRedemptions),
+    maxRedemptions: SINGLE_USE_REDEMPTION_LIMIT,
     redeemCount: 0,
     active: true,
     createdAt: now,
@@ -295,11 +267,7 @@ export async function redeemCodeRecord(env: RedeemCodeEnv, code: string, userKey
   const record = await readRedeemCodeByHash(db, hash);
   if (!record || record.codeHash !== hash) throw new Error("兑换码不正确");
   if (!record.active) throw new Error("兑换码已停用");
-  if (record.redeemCount >= record.maxRedemptions) throw new Error("兑换码已被兑完");
-
-  if (await readRedeemUse(db, record.id, userKey)) {
-    throw new Error("当前账号已兑换过该兑换码");
-  }
+  if (record.redeemCount >= SINGLE_USE_REDEMPTION_LIMIT) throw new Error("兑换码已被兑换");
 
   const now = Date.now();
   const useRecord: RedeemUseRecord = {
@@ -311,25 +279,26 @@ export async function redeemCodeRecord(env: RedeemCodeEnv, code: string, userKey
   };
 
   const insertedUses = await writeRedeemUse(db, useRecord);
-  if (!insertedUses) throw new Error("当前账号已兑换过该兑换码");
+  if (!insertedUses) throw new Error("兑换码已被兑换");
 
   const updateResult = await db
     .prepare(
       `UPDATE redeem_codes
        SET redeem_count = redeem_count + 1,
+         max_redemptions = ?,
          last_redeemed_at = ?,
          updated_at = ?
-       WHERE id = ? AND redeem_count < max_redemptions`,
+       WHERE id = ? AND redeem_count < ?`,
     )
-    .bind(now, now, record.id)
+    .bind(SINGLE_USE_REDEMPTION_LIMIT, now, now, record.id, SINGLE_USE_REDEMPTION_LIMIT)
     .run();
 
-  if ((updateResult.meta?.changes ?? 1) < 1) {
+  if ((updateResult.meta?.changes ?? 0) < 1) {
     await db
       .prepare(`DELETE FROM redeem_code_uses WHERE code_id = ? AND user_key = ?`)
       .bind(record.id, userKey)
       .run();
-    throw new Error("兑换码已被兑完");
+    throw new Error("兑换码已被兑换");
   }
 
   const next = await readRedeemCode(db, record.id);

@@ -68,6 +68,7 @@ export interface AdminUserRow {
 export interface AccessCodeRow {
   id: string;
   label: string;
+  code: string | null;
   active: boolean;
   createdAt: number;
   updatedAt: number;
@@ -80,6 +81,7 @@ export interface AccessCodeRow {
 export interface RedeemCodeRow {
   id: string;
   label: string;
+  code: string | null;
   credits: number;
   maxRedemptions: number;
   redeemCount: number;

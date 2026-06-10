@@ -6,6 +6,7 @@ interface AccessCodeRecord {
   id: string;
   label: string;
   codeHash: string;
+  codeText: string | null;
   active: boolean;
   createdAt: number;
   updatedAt: number;
@@ -18,6 +19,7 @@ interface AccessCodeRowRecord {
   id: string;
   label: string;
   code_hash: string;
+  code_text?: string | null;
   active: number;
   created_at: number;
   updated_at: number;
@@ -56,6 +58,7 @@ function fromRow(row: AccessCodeRowRecord): AccessCodeRecord {
     id: row.id,
     label: row.label,
     codeHash: row.code_hash,
+    codeText: row.code_text ?? null,
     active: !!row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -69,6 +72,7 @@ function toRow(record: AccessCodeRecord): AccessCodeRow {
   return {
     id: record.id,
     label: record.label,
+    code: record.codeText,
     active: record.active,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -82,13 +86,14 @@ async function writeAccessCode(db: HistoryD1Database, record: AccessCodeRecord) 
   await db
     .prepare(
       `INSERT INTO access_codes
-        (id, label, code_hash, active, created_at, updated_at,
+        (id, label, code_hash, code_text, active, created_at, updated_at,
          created_by, last_used_at, use_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id)
        DO UPDATE SET
          label = excluded.label,
          code_hash = excluded.code_hash,
+         code_text = COALESCE(excluded.code_text, access_codes.code_text),
          active = excluded.active,
          updated_at = excluded.updated_at,
          created_by = excluded.created_by,
@@ -99,6 +104,7 @@ async function writeAccessCode(db: HistoryD1Database, record: AccessCodeRecord) 
       record.id,
       record.label,
       record.codeHash,
+      record.codeText,
       record.active ? 1 : 0,
       record.createdAt,
       record.updatedAt,
@@ -122,7 +128,7 @@ async function readAccessCode(db: HistoryD1Database, id: string) {
   const row = await db
     .prepare(
       `SELECT id, label, code_hash, active, created_at, updated_at,
-        created_by, last_used_at, use_count
+        code_text, created_by, last_used_at, use_count
        FROM access_codes
        WHERE id = ?`,
     )
@@ -183,7 +189,7 @@ export async function listAccessCodes(env: AccessCodeEnv) {
   const result = await db
     .prepare(
       `SELECT id, label, code_hash, active, created_at, updated_at,
-        created_by, last_used_at, use_count
+        code_text, created_by, last_used_at, use_count
        FROM access_codes
        ORDER BY created_at DESC`,
     )
@@ -210,6 +216,7 @@ export async function createAccessCodeRecord(
     id: crypto.randomUUID(),
     label: options.label?.trim() || `访问码 ${new Date(now).toLocaleDateString("zh-CN")}`,
     codeHash,
+    codeText: code,
     active: true,
     createdAt: now,
     updatedAt: now,

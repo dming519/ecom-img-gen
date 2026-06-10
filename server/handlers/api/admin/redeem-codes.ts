@@ -63,7 +63,6 @@ export async function handlePost(context: RequestContext) {
       label?: string;
       code?: string;
       credits?: number;
-      maxRedemptions?: number;
       active?: boolean;
     };
 
@@ -81,7 +80,6 @@ export async function handlePost(context: RequestContext) {
       label: body.label,
       code: body.code,
       credits: body.credits,
-      maxRedemptions: body.maxRedemptions,
       createdBy: auth.session.user.userKey ?? `${auth.session.user.provider}:${auth.session.user.id}`,
     });
     return json(created, { status: 201 });

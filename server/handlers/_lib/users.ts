@@ -168,6 +168,7 @@ async function ensureAdminSchema(db: HistoryD1Database) {
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,
       code_hash TEXT NOT NULL UNIQUE,
+      code_text TEXT,
       active INTEGER NOT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
@@ -183,6 +184,7 @@ async function ensureAdminSchema(db: HistoryD1Database) {
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,
       code_hash TEXT NOT NULL UNIQUE,
+      code_text TEXT,
       credits INTEGER NOT NULL,
       max_redemptions INTEGER NOT NULL,
       redeem_count INTEGER NOT NULL,
@@ -204,6 +206,8 @@ async function ensureAdminSchema(db: HistoryD1Database) {
       redeemed_at INTEGER NOT NULL,
       PRIMARY KEY (code_id, user_key)
     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_redeem_code_uses_once
+      ON redeem_code_uses(code_id)`,
   ];
 
   for (const statement of statements) {
@@ -211,6 +215,7 @@ async function ensureAdminSchema(db: HistoryD1Database) {
   }
 
   await ensureUserUsageDailyColumns(db);
+  await ensureAdminCodeTextColumns(db);
 }
 
 async function ensureUserUsageDailyColumns(db: HistoryD1Database) {
@@ -228,6 +233,20 @@ async function ensureUserUsageDailyColumns(db: HistoryD1Database) {
     await db
       .prepare(`ALTER TABLE user_usage ADD COLUMN credit_model_version INTEGER NOT NULL DEFAULT 2`)
       .run();
+  }
+}
+
+async function ensureAdminCodeTextColumns(db: HistoryD1Database) {
+  const accessColumns = await db.prepare(`PRAGMA table_info(access_codes)`).all<{ name: string }>();
+  const accessNames = new Set((accessColumns.results ?? []).map((column) => column.name));
+  if (!accessNames.has("code_text")) {
+    await db.prepare(`ALTER TABLE access_codes ADD COLUMN code_text TEXT`).run();
+  }
+
+  const redeemColumns = await db.prepare(`PRAGMA table_info(redeem_codes)`).all<{ name: string }>();
+  const redeemNames = new Set((redeemColumns.results ?? []).map((column) => column.name));
+  if (!redeemNames.has("code_text")) {
+    await db.prepare(`ALTER TABLE redeem_codes ADD COLUMN code_text TEXT`).run();
   }
 }
 
