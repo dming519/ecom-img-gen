@@ -346,12 +346,11 @@ function copyText(value: string) {
                 </td>
                 <td>
                   <div class="admin-code-value">
-                    <code>{{ accessCode.code || "未记录" }}</code>
+                    <code>{{ accessCode.code }}</code>
                     <button
-                      v-if="accessCode.code"
                       class="btn-ghost"
                       type="button"
-                      @click="copyText(accessCode.code || '')"
+                      @click="copyText(accessCode.code)"
                     >
                       复制
                     </button>
@@ -437,12 +436,11 @@ function copyText(value: string) {
                 </td>
                 <td>
                   <div class="admin-code-value">
-                    <code>{{ redeemCode.code || "未记录" }}</code>
+                    <code>{{ redeemCode.code }}</code>
                     <button
-                      v-if="redeemCode.code"
                       class="btn-ghost"
                       type="button"
-                      @click="copyText(redeemCode.code || '')"
+                      @click="copyText(redeemCode.code)"
                     >
                       复制
                     </button>

@@ -329,7 +329,7 @@ function getPromptImageSrc(item: DetailPromptItem | undefined) {
   return null
 }
 
-// 支持 `/image/`、`/cutout/`、`/multi-view/`、`/edit/` 以及旧版 hash/query 写法，统一判断当前模块。
+// 根据正式路由路径判断当前模块。
 function readStudioModeFromUrl(): StudioMode {
   if (typeof window === "undefined") return props.initialMode
   const pathname = window.location.pathname.replace(/\/+$/, "")
@@ -338,17 +338,6 @@ function readStudioModeFromUrl(): StudioMode {
   if (pathname.endsWith("/edit")) return "edit"
   if (pathname.endsWith("/layer")) return "layer"
   if (pathname.endsWith("/image")) return "image"
-  const hashMode = window.location.hash.replace(/^#/, "")
-  if (hashMode === "cutout") return "cutout"
-  if (hashMode === "multi-view") return "multi-view"
-  if (hashMode === "edit") return "edit"
-  if (hashMode === "layer") return "layer"
-  if (hashMode === "image") return "image"
-  const module = new URL(window.location.href).searchParams.get("module")
-  if (module === "cutout") return "cutout"
-  if (module === "multi-view") return "multi-view"
-  if (module === "edit") return "edit"
-  if (module === "layer") return "layer"
   return "image"
 }
 
@@ -492,6 +481,33 @@ function validateProduct() {
     return false
   }
   return true
+}
+
+async function handleLoadDemoData() {
+  productName.value = "玻尿酸多效修护精华液"
+  sellingPoints.value = "• 深层补水：玻尿酸微分子渗透技术\n• 修护屏障：神经酰胺+角鲨烷双重修护\n• 适合人群：敏感肌、干燥肌、熟龄肌\n• 规格：30ml 旅行装 / 50ml 标准装\n• 使用感：清爽不油腻，快速吸收"
+  imageCount.value = 5
+  aspectRatio.value = "3:4"
+  quality.value = "1K"
+  const canvas = document.createElement("canvas")
+  canvas.width = 900
+  canvas.height = 1200
+  const context = canvas.getContext("2d", { alpha: false })
+  if (!context) return
+  context.fillStyle = "#f8fafc"
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.fillStyle = "#2563eb"
+  context.beginPath()
+  context.roundRect(300, 360, 300, 600, 45)
+  context.fill()
+  context.fillStyle = "#1e293b"
+  context.fillRect(390, 240, 120, 120)
+  context.fillStyle = "#ffffff"
+  context.font = "700 64px sans-serif"
+  context.textAlign = "center"
+  context.textBaseline = "middle"
+  context.fillText("SKU", 450, 660)
+  productImages.value = [canvas.toDataURL("image/png")]
 }
 
 // 第一步：根据商品资料生成详情图文案，不直接生成图片。
@@ -1427,7 +1443,19 @@ onBeforeUnmount(() => {
               <strong>正在生成详情图方案</strong>
               <p>AI 正在分析商品资料和参考图，预计需要 10-20 秒...</p>
             </div>
-            <div v-else-if="!activePrompt" class="empty">生成详情图方案后可在这里逐张生成图片。</div>
+            <div v-else-if="!activePrompt" class="empty" style="display: flex; flex-direction: column; align-items: center; gap: 14px; justify-content: center; padding: 32px; text-align: center;">
+              <Icon name="spark" style="width: 32px; height: 32px; color: var(--accent); opacity: 0.8;" />
+              <div style="font-size: 0.84rem; color: var(--text-sub);">还没有详情图生成方案。</div>
+              <button
+                type="button"
+                class="btn-secondary"
+                style="min-height: 32px; padding: 6px 12px; font-size: 0.78rem; border-radius: var(--radius-control); cursor: pointer; font-weight: bold;"
+                :disabled="controlsDisabled"
+                @click="handleLoadDemoData"
+              >
+                导入示例数据
+              </button>
+            </div>
             <template v-else>
               <div class="prompt-switcher" aria-label="详情图方案切换">
                 <button
@@ -1526,6 +1554,7 @@ onBeforeUnmount(() => {
             :busy="imageBusy"
             @select="activePromptIdx = $event"
             @download="handleDownload"
+            @load-demo="handleLoadDemoData"
             @zoom="index => {
               const imageSrc = getPromptImageSrc(prompts[index])
               if (imageSrc) lightboxSrc = imageSrc

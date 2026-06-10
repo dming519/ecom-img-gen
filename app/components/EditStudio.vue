@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue"
 import {
   cancelEditTask,
   createEditTask,
@@ -570,6 +570,41 @@ async function loadEditHistoryIfAuthenticated() {
   }
 }
 
+function handleGlobalKeyDown(event: KeyboardEvent) {
+  const activeEl = document.activeElement as HTMLElement | null
+  if (
+    activeEl &&
+    (activeEl.tagName === "INPUT" ||
+      activeEl.tagName === "TEXTAREA" ||
+      activeEl.isContentEditable)
+  ) {
+    return
+  }
+
+  const key = event.key.toLowerCase()
+
+  if (key === "b" && !event.ctrlKey && !event.metaKey) {
+    mode.value = "brush"
+  } else if (key === "e" && !event.ctrlKey && !event.metaKey) {
+    mode.value = "eraser"
+  } else if (event.key === "[") {
+    brushSize.value = clamp(brushSize.value - 4, 12, 96)
+  } else if (event.key === "]") {
+    brushSize.value = clamp(brushSize.value + 4, 12, 96)
+  } else if (key === "z" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault()
+    handleUndo()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", handleGlobalKeyDown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleGlobalKeyDown)
+})
+
 watch(sourceImage, (next) => {
   if (next) redrawSource(next)
 })
@@ -655,16 +690,34 @@ watch(
             橡皮
           </button>
         </div>
-        <label class="brush-slider">
-          <span>笔刷</span>
-          <input
-            type="range"
-            min="12"
-            max="96"
-            :value="brushSize"
-            :disabled="controlsDisabled"
-            @input="event => brushSize = clamp(Number((event.target as HTMLInputElement).value), 12, 96)"
-          >
+         <label class="brush-slider">
+          <span>笔刷 ({{ brushSize }}px)</span>
+          <div class="brush-slider-wrap" style="display: flex; align-items: center; gap: 10px; flex: 1; width: 100%;">
+            <input
+              type="range"
+              min="12"
+              max="96"
+              :value="brushSize"
+              :disabled="controlsDisabled"
+              @input="event => brushSize = clamp(Number((event.target as HTMLInputElement).value), 12, 96)"
+              style="flex: 1;"
+            >
+            <div
+              class="brush-size-dot-preview"
+              :style="{
+                width: `${brushSize}px`,
+                height: `${brushSize}px`,
+                maxWidth: '24px',
+                maxHeight: '24px',
+                borderRadius: '50%',
+                background: mode === 'eraser' ? 'rgba(239, 68, 68, 0.5)' : 'rgba(23, 105, 255, 0.5)',
+                border: '1px solid #fff',
+                boxShadow: '0 0 0 1px rgba(0,0,0,0.15)',
+                flexShrink: 0,
+                transition: 'width 0.1s, height 0.1s, background-color 0.1s'
+              }"
+            />
+          </div>
         </label>
         <div class="cutout-toolbar-actions">
           <div class="cutout-zoom-actions" aria-label="画布缩放">

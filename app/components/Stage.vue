@@ -14,6 +14,7 @@ const emit = defineEmits<{
   select: [index: number]
   download: [index: number]
   zoom: [index: number]
+  "load-demo": []
 }>()
 
 const active = computed(() => props.prompts[props.activeIndex] ?? null)
@@ -31,10 +32,18 @@ function getItemSrc(item: DetailPromptItem) {
 
 <template>
   <div v-if="!prompts.length" class="stage">
-    <div class="stage-empty-card">
+    <div class="stage-empty-card" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px;">
       <Icon name="image" class="icon-large" />
       <div class="icon-hint">您的商品详情图将在这里呈现</div>
-      <p class="empty-tip">先填写商品资料并生成方案，然后点击"批量生成详情图"</p>
+      <p class="empty-tip" style="margin-bottom: 8px;">先填写商品资料并生成方案，然后点击"批量生成详情图"</p>
+      <button
+        type="button"
+        class="btn-secondary"
+        style="min-height: 32px; padding: 6px 12px; font-size: 0.78rem; border-radius: var(--radius-control); cursor: pointer; font-weight: bold;"
+        @click="emit('load-demo')"
+      >
+        导入示例数据
+      </button>
     </div>
   </div>
 

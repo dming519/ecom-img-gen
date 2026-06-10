@@ -16,6 +16,7 @@ import {
   dbPutProductImage,
   dbPutProductImageBlob,
 } from "@/lib/db"
+import { blobToZipBytes, createZip, encodeZipText } from "@/lib/zip"
 import type { AuthSession, LayerAspectRatio, LayerHistoryItem, LayerResultItem, LayerTaskStatus } from "@/lib/types"
 import Icon from "./Icon.vue"
 
@@ -62,6 +63,17 @@ const layersNormalizedToSourceSize = shallowRef(false)
 const layers = ref<LayerResultItem[]>([])
 const plannedLayerRows = ref<Array<Omit<LayerDisplayRow, "state" | "layer">>>([])
 const selectedLayerId = shallowRef<string | null>(null)
+const hiddenLayerIds = ref<Set<string>>(new Set())
+
+function toggleLayerVisibility(layerId: string) {
+  const next = new Set(hiddenLayerIds.value)
+  if (next.has(layerId)) {
+    next.delete(layerId)
+  } else {
+    next.add(layerId)
+  }
+  hiddenLayerIds.value = next
+}
 const busy = shallowRef(false)
 const zipBusy = shallowRef(false)
 const error = shallowRef<string | null>(null)
@@ -123,7 +135,10 @@ const selectedLayer = computed(() =>
 const previewLayer = computed(() => selectedLayer.value)
 const previewSrc = computed(() => (previewLayer.value ? getLayerSrc(previewLayer.value) : null))
 const outputLayerCount = computed(() => getOutputLayers(layers.value).length)
-const canDownloadZip = computed(() => !busy.value && outputLayerCount.value > 0)
+const exportLayerCount = computed(() =>
+  getOutputLayers(layers.value).filter((layer) => !hiddenLayerIds.value.has(layer.id)).length,
+)
+const canDownloadZip = computed(() => !busy.value && exportLayerCount.value > 0)
 const layerRows = computed<LayerDisplayRow[]>(() => {
   const sortedLayers = getOutputLayers(layers.value)
   if (!busy.value) {
@@ -525,36 +540,8 @@ function handleCancel() {
   busy.value = false
 }
 
-const crcTable = (() => {
-  const table = new Uint32Array(256)
-  for (let n = 0; n < 256; n += 1) {
-    let c = n
-    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
-    table[n] = c >>> 0
-  }
-  return table
-})()
-
-function crc32(bytes: Uint8Array) {
-  let crc = 0xffffffff
-  for (const byte of bytes) crc = crcTable[(crc ^ byte) & 0xff]! ^ (crc >>> 8)
-  return (crc ^ 0xffffffff) >>> 0
-}
-
-function writeUint16(target: number[], value: number) {
-  target.push(value & 0xff, (value >>> 8) & 0xff)
-}
-
-function writeUint32(target: number[], value: number) {
-  target.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff)
-}
-
-function encodeText(value: string) {
-  return new TextEncoder().encode(value)
-}
-
 async function blobToBytes(blob: Blob) {
-  return new Uint8Array(await blob.arrayBuffer())
+  return blobToZipBytes(blob)
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -564,64 +551,6 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
       else reject(new Error("图层白底规范化失败"))
     }, "image/png")
   })
-}
-
-function createZip(entries: Array<{ name: string; data: Uint8Array }>) {
-  const chunks: Uint8Array[] = []
-  const central: Uint8Array[] = []
-  let offset = 0
-  for (const entry of entries) {
-    const name = encodeText(entry.name)
-    const crc = crc32(entry.data)
-    const local: number[] = []
-    writeUint32(local, 0x04034b50)
-    writeUint16(local, 20)
-    writeUint16(local, 0)
-    writeUint16(local, 0)
-    writeUint16(local, 0)
-    writeUint16(local, 0)
-    writeUint32(local, crc)
-    writeUint32(local, entry.data.length)
-    writeUint32(local, entry.data.length)
-    writeUint16(local, name.length)
-    writeUint16(local, 0)
-    const localBytes = new Uint8Array([...local, ...name])
-    chunks.push(localBytes, entry.data)
-
-    const header: number[] = []
-    writeUint32(header, 0x02014b50)
-    writeUint16(header, 20)
-    writeUint16(header, 20)
-    writeUint16(header, 0)
-    writeUint16(header, 0)
-    writeUint16(header, 0)
-    writeUint16(header, 0)
-    writeUint32(header, crc)
-    writeUint32(header, entry.data.length)
-    writeUint32(header, entry.data.length)
-    writeUint16(header, name.length)
-    writeUint16(header, 0)
-    writeUint16(header, 0)
-    writeUint16(header, 0)
-    writeUint16(header, 0)
-    writeUint32(header, 0)
-    writeUint32(header, offset)
-    central.push(new Uint8Array([...header, ...name]))
-    offset += localBytes.length + entry.data.length
-  }
-
-  const centralSize = central.reduce((sum, item) => sum + item.length, 0)
-  const end: number[] = []
-  writeUint32(end, 0x06054b50)
-  writeUint16(end, 0)
-  writeUint16(end, 0)
-  writeUint16(end, entries.length)
-  writeUint16(end, entries.length)
-  writeUint32(end, centralSize)
-  writeUint32(end, offset)
-  writeUint16(end, 0)
-  const parts = [...chunks, ...central, new Uint8Array(end)].map((item) => item.buffer as ArrayBuffer)
-  return new Blob(parts, { type: "application/zip" })
 }
 
 async function fetchLayerBlob(layer: LayerResultItem) {
@@ -689,7 +618,9 @@ async function handleDownloadZip() {
   zipBusy.value = true
   error.value = null
   try {
-    const outputLayers = getOutputLayers(layers.value)
+    const hiddenIds = hiddenLayerIds.value
+    const allOutputLayers = getOutputLayers(layers.value)
+    const outputLayers = allOutputLayers.filter((layer) => !hiddenIds.has(layer.id))
     const imageEntries = await Promise.all(
       outputLayers.map(async (layer, index) => ({
         name: `${String(index + 1).padStart(2, "0")}-${layer.id}.png`,
@@ -702,13 +633,14 @@ async function handleDownloadZip() {
       sourceDimensions: sourceDimensions.value,
       normalizedToSourceSize: !!sourceDimensions.value,
       layerBackground: LAYER_BACKGROUND_COLOR,
+      excludedLayerIds: allOutputLayers.filter((layer) => hiddenIds.has(layer.id)).map((layer) => layer.id),
       layers: outputLayers,
     }
     const zip = createZip([
       ...imageEntries,
       {
         name: "layers.json",
-        data: encodeText(JSON.stringify(manifest, null, 2)),
+        data: encodeZipText(JSON.stringify(manifest, null, 2)),
       },
     ])
     const url = URL.createObjectURL(zip)
@@ -889,12 +821,15 @@ watch(
           <button
             type="button"
             class="layer-preview-image"
-            :style="layerPreviewFrameStyle"
+            :style="[
+              layerPreviewFrameStyle,
+              previewLayer && hiddenLayerIds.has(previewLayer.id) ? { opacity: 0.15 } : {}
+            ]"
             @click="emit('zoom', previewSrc)"
           >
             <img :src="previewSrc" :alt="previewLayer?.name ?? '分层预览'">
           </button>
-          <div class="stage-actions">
+        <div class="stage-actions">
             <button type="button" class="btn-ghost" :disabled="!canDownloadZip || zipBusy" @click="handleDownloadZip">
               <Icon name="download" />
               {{ zipBusy ? "打包中" : busy ? "完成后下载" : "下载 ZIP" }}
@@ -946,36 +881,55 @@ watch(
       </div>
       <div class="cutout-panel-body layer-list-body">
         <div v-if="layerRows.length" class="layer-list">
-          <button
+          <div
             v-for="row in layerRows"
             :key="row.id"
-            type="button"
             :class="[
-              'layer-row',
-              `is-${row.state}`,
-              { 'is-active': row.layer && selectedLayer?.id === row.layer.id },
+              'layer-row-container',
+              { 'is-active': row.layer && selectedLayer?.id === row.layer.id }
             ]"
-            :disabled="!row.layer"
-            @click="row.layer && (selectedLayerId = row.layer.id)"
+            style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; border-radius: 12px; margin-bottom: 6px;"
           >
-            <span class="layer-thumb">
-              <img v-if="row.layer && getLayerSrc(row.layer)" :src="getLayerSrc(row.layer)!" :alt="row.layer.name">
-              <span v-else-if="row.state === 'running'" class="layer-mini-spinner" aria-hidden="true" />
-              <span v-else class="layer-thumb-placeholder" aria-hidden="true" />
-            </span>
-            <span class="layer-row-copy">
-              <strong>{{ row.layer?.name ?? row.name }}</strong>
-              <small>
-                {{
-                  row.layer
-                    ? `第 ${row.layer.index + 1} 层 · ${getLayerRoleLabel(row.layer.role)}`
-                    : row.state === "running"
-                      ? "正在生成"
-                      : "等待生成"
-                }}
-              </small>
-            </span>
-          </button>
+            <button
+              type="button"
+              :class="[
+                'layer-row',
+                `is-${row.state}`,
+                { 'is-active': row.layer && selectedLayer?.id === row.layer.id },
+              ]"
+              :disabled="!row.layer"
+              style="flex: 1; text-align: left; background: none; border: none; padding: 0; display: flex; align-items: center; gap: 12px; cursor: pointer; border-radius: 12px;"
+              @click="row.layer && (selectedLayerId = row.layer.id)"
+            >
+              <span class="layer-thumb">
+                <img v-if="row.layer && getLayerSrc(row.layer)" :src="getLayerSrc(row.layer)!" :alt="row.layer.name" :style="hiddenLayerIds.has(row.layer.id) ? { opacity: 0.15 } : {}">
+                <span v-else-if="row.state === 'running'" class="layer-mini-spinner" aria-hidden="true" />
+                <span v-else class="layer-thumb-placeholder" aria-hidden="true" />
+              </span>
+              <span class="layer-row-copy">
+                <strong :style="row.layer && hiddenLayerIds.has(row.layer.id) ? { textDecoration: 'line-through', opacity: 0.5 } : {}">{{ row.layer?.name ?? row.name }}</strong>
+                <small>
+                  {{
+                    row.layer
+                      ? `第 ${row.layer.index + 1} 层 · ${getLayerRoleLabel(row.layer.role)}`
+                      : row.state === "running"
+                        ? "正在生成"
+                        : "等待生成"
+                  }}
+                </small>
+              </span>
+            </button>
+            <button
+              v-if="row.layer"
+              type="button"
+              class="btn-ghost"
+              style="min-width: 32px; width: 32px; height: 32px; min-height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; cursor: pointer;"
+              :title="hiddenLayerIds.has(row.layer.id) ? '加入 ZIP 导出' : '从 ZIP 导出排除'"
+              @click.stop="toggleLayerVisibility(row.layer.id)"
+            >
+              <Icon :name="hiddenLayerIds.has(row.layer.id) ? 'eye-off' : 'eye'" />
+            </button>
+          </div>
         </div>
         <div v-else class="empty layer-list-empty">
           上传图片并开始分层后，这里会显示可下载图层。

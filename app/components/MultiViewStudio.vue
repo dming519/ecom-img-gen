@@ -16,6 +16,7 @@ import {
   dbPutProductImage,
 } from "@/lib/db"
 import { resolveImageSize } from "@/lib/imageOptions"
+import { blobToZipBytes, createZip, encodeZipText } from "@/lib/zip"
 import type {
   AspectRatio,
   AuthSession,
@@ -120,6 +121,7 @@ const aspectRatio = shallowRef<AspectRatio>("1:1")
 const quality = shallowRef<ImageQuality>("1K")
 const items = ref<MultiViewItem[]>(createViewItems(selectedAngleIds.value))
 const busy = shallowRef(false)
+const downloadAllBusy = shallowRef(false)
 const error = shallowRef<string | null>(null)
 const currentTaskIdRef = shallowRef<string | null>(null)
 const abortRef = shallowRef<AbortController | null>(null)
@@ -228,6 +230,20 @@ function handleAngleToggle(angleId: MultiViewAngleId) {
     : [...current, angleId]
   if (!next.length) return
   selectedAngleIds.value = getSortedAngleIds(next).slice(0, MAX_MULTI_VIEW_IMAGES)
+  items.value = createViewItems(selectedAngleIds.value)
+}
+
+function handleSelectAllAngles() {
+  if (busy.value) return
+  const allIds = ANGLE_PRESETS.map((angle) => angle.id)
+  selectedAngleIds.value = allIds.slice(0, MAX_MULTI_VIEW_IMAGES)
+  items.value = createViewItems(selectedAngleIds.value)
+}
+
+function handleClearAllAngles() {
+  if (busy.value) return
+  const firstId = ANGLE_PRESETS[0]?.id ?? "front"
+  selectedAngleIds.value = [firstId]
   items.value = createViewItems(selectedAngleIds.value)
 }
 
@@ -590,6 +606,57 @@ function handleDownload(item: MultiViewItem) {
   anchor.click()
 }
 
+async function fetchResultBytes(item: MultiViewItem) {
+  const src = getResultSrc(item)
+  if (!src) throw new Error(`${item.title} 缺少图片`)
+  const response = await fetch(src, { cache: "no-store" })
+  if (!response.ok) throw new Error(`${item.title} 读取失败`)
+  return blobToZipBytes(await response.blob())
+}
+
+async function handleDownloadAll() {
+  const succeededItems = items.value.filter((item) => item.status === "succeeded")
+  if (!succeededItems.length || downloadAllBusy.value) return
+  downloadAllBusy.value = true
+  error.value = null
+  try {
+    const imageEntries = await Promise.all(
+      succeededItems.map(async (item, index) => ({
+        name: `${String(index + 1).padStart(2, "0")}-${item.id}.png`,
+        data: await fetchResultBytes(item),
+      })),
+    )
+    const manifest = {
+      createdAt: new Date().toISOString(),
+      aspectRatio: aspectRatio.value,
+      quality: quality.value,
+      views: succeededItems.map((item) => ({
+        id: item.id,
+        title: item.title,
+        imageId: item.imageId,
+        model: item.model,
+      })),
+    }
+    const zip = createZip([
+      ...imageEntries,
+      {
+        name: "multi-view.json",
+        data: encodeZipText(JSON.stringify(manifest, null, 2)),
+      },
+    ])
+    const url = URL.createObjectURL(zip)
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = `ecom-multi-view-${Date.now()}.zip`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  } catch (downloadError) {
+    error.value = downloadError instanceof Error ? downloadError.message : String(downloadError)
+  } finally {
+    downloadAllBusy.value = false
+  }
+}
+
 function getMultiViewHistoryCover(item: MultiViewHistoryItem) {
   const result = item.results.find((view) => view.imageId)
   if (!result) return null
@@ -751,7 +818,24 @@ watch(
           <div class="setting-block">
             <div class="setting-head">
               <label>视角</label>
-              <span>{{ imageCount }} 张</span>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <button
+                  type="button"
+                  class="btn-link-preset"
+                  style="font-size: 0.73rem; color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; font-weight: bold; text-decoration: none;"
+                  :disabled="angleControlsDisabled"
+                  @click="handleSelectAllAngles"
+                >全选</button>
+                <span style="color: var(--border); font-size: 0.7rem; opacity: 0.5;">|</span>
+                <button
+                  type="button"
+                  class="btn-link-preset"
+                  style="font-size: 0.73rem; color: var(--text-sub); background: none; border: none; padding: 0; cursor: pointer; font-weight: bold; text-decoration: none;"
+                  :disabled="angleControlsDisabled"
+                  @click="handleClearAllAngles"
+                >复位</button>
+                <span style="margin-left: 4px; font-weight: 780; color: var(--text-strong);">{{ imageCount }} 张</span>
+              </div>
             </div>
             <div class="param-controls" aria-label="视角">
               <div class="multi-view-angle-options" role="group" aria-label="选择视角">
@@ -820,9 +904,22 @@ watch(
     </aside>
 
     <section class="studio-panel canvas-panel multi-view-results">
-      <div class="panel-heading">
+      <div class="panel-heading" style="display: flex; align-items: center; justify-content: space-between;">
         <h2>视角结果</h2>
-        <span class="panel-count">{{ completedCount }} / {{ items.length }}</span>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <button
+            v-if="completedCount > 0"
+            type="button"
+            class="btn-ghost"
+            style="min-height: 28px; padding: 4px 10px; font-size: 0.74rem; font-weight: 780; border-radius: var(--radius-control);"
+            :disabled="downloadAllBusy"
+            @click="handleDownloadAll"
+          >
+            <Icon name="download" />
+            {{ downloadAllBusy ? "打包中" : "下载全部" }}
+          </button>
+          <span class="panel-count">{{ completedCount }} / {{ items.length }}</span>
+        </div>
       </div>
       <div class="multi-view-result-grid">
         <article

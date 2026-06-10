@@ -6,7 +6,7 @@ interface AccessCodeRecord {
   id: string;
   label: string;
   codeHash: string;
-  codeText: string | null;
+  codeText: string;
   active: boolean;
   createdAt: number;
   updatedAt: number;
@@ -19,7 +19,7 @@ interface AccessCodeRowRecord {
   id: string;
   label: string;
   code_hash: string;
-  code_text?: string | null;
+  code_text: string;
   active: number;
   created_at: number;
   updated_at: number;
@@ -58,7 +58,7 @@ function fromRow(row: AccessCodeRowRecord): AccessCodeRecord {
     id: row.id,
     label: row.label,
     codeHash: row.code_hash,
-    codeText: row.code_text ?? null,
+    codeText: row.code_text,
     active: !!row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -93,7 +93,7 @@ async function writeAccessCode(db: HistoryD1Database, record: AccessCodeRecord) 
        DO UPDATE SET
          label = excluded.label,
          code_hash = excluded.code_hash,
-         code_text = COALESCE(excluded.code_text, access_codes.code_text),
+         code_text = excluded.code_text,
          active = excluded.active,
          updated_at = excluded.updated_at,
          created_by = excluded.created_by,

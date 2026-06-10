@@ -59,9 +59,9 @@ interface UsageRow {
   remaining_credits: number;
   used_credits: number;
   granted_credits: number;
-  daily_usage_date?: string | null;
-  daily_used_credits?: number | null;
-  credit_model_version?: number | null;
+  daily_usage_date: string | null;
+  daily_used_credits: number;
+  credit_model_version: number;
   created_at: number;
   updated_at: number;
   last_generated_at?: number | null;
@@ -168,7 +168,7 @@ async function ensureAdminSchema(db: HistoryD1Database) {
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,
       code_hash TEXT NOT NULL UNIQUE,
-      code_text TEXT,
+      code_text TEXT NOT NULL,
       active INTEGER NOT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
@@ -184,7 +184,7 @@ async function ensureAdminSchema(db: HistoryD1Database) {
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,
       code_hash TEXT NOT NULL UNIQUE,
-      code_text TEXT,
+      code_text TEXT NOT NULL,
       credits INTEGER NOT NULL,
       max_redemptions INTEGER NOT NULL,
       redeem_count INTEGER NOT NULL,
@@ -214,40 +214,6 @@ async function ensureAdminSchema(db: HistoryD1Database) {
     await db.prepare(statement).run();
   }
 
-  await ensureUserUsageDailyColumns(db);
-  await ensureAdminCodeTextColumns(db);
-}
-
-async function ensureUserUsageDailyColumns(db: HistoryD1Database) {
-  const columns = await db.prepare(`PRAGMA table_info(user_usage)`).all<{ name: string }>();
-  const names = new Set((columns.results ?? []).map((column) => column.name));
-  if (!names.has("daily_usage_date")) {
-    await db.prepare(`ALTER TABLE user_usage ADD COLUMN daily_usage_date TEXT`).run();
-  }
-  if (!names.has("daily_used_credits")) {
-    await db
-      .prepare(`ALTER TABLE user_usage ADD COLUMN daily_used_credits INTEGER NOT NULL DEFAULT 0`)
-      .run();
-  }
-  if (!names.has("credit_model_version")) {
-    await db
-      .prepare(`ALTER TABLE user_usage ADD COLUMN credit_model_version INTEGER NOT NULL DEFAULT 2`)
-      .run();
-  }
-}
-
-async function ensureAdminCodeTextColumns(db: HistoryD1Database) {
-  const accessColumns = await db.prepare(`PRAGMA table_info(access_codes)`).all<{ name: string }>();
-  const accessNames = new Set((accessColumns.results ?? []).map((column) => column.name));
-  if (!accessNames.has("code_text")) {
-    await db.prepare(`ALTER TABLE access_codes ADD COLUMN code_text TEXT`).run();
-  }
-
-  const redeemColumns = await db.prepare(`PRAGMA table_info(redeem_codes)`).all<{ name: string }>();
-  const redeemNames = new Set((redeemColumns.results ?? []).map((column) => column.name));
-  if (!redeemNames.has("code_text")) {
-    await db.prepare(`ALTER TABLE redeem_codes ADD COLUMN code_text TEXT`).run();
-  }
 }
 
 export async function requireAdminDb(env: UserEnv, label = "管理数据表") {

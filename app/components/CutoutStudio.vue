@@ -747,6 +747,33 @@ async function loadCutoutDraftIfAuthenticated() {
   }
 }
 
+function handleGlobalKeyDown(event: KeyboardEvent) {
+  const activeEl = document.activeElement as HTMLElement | null
+  if (
+    activeEl &&
+    (activeEl.tagName === "INPUT" ||
+      activeEl.tagName === "TEXTAREA" ||
+      activeEl.isContentEditable)
+  ) {
+    return
+  }
+
+  const key = event.key.toLowerCase()
+
+  if (key === "b" && !event.ctrlKey && !event.metaKey) {
+    mode.value = "brush"
+  } else if (key === "e" && !event.ctrlKey && !event.metaKey) {
+    mode.value = "eraser"
+  } else if (event.key === "[") {
+    brushSize.value = clamp(brushSize.value - 4, 12, 96)
+  } else if (event.key === "]") {
+    brushSize.value = clamp(brushSize.value + 4, 12, 96)
+  } else if (key === "z" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault()
+    handleUndo()
+  }
+}
+
 // 初始化时先确认 canvas 已挂载，再按登录态恢复云端历史和上次未完成的草稿。
 onMounted(() => {
   componentMounted.value = true
@@ -754,6 +781,7 @@ onMounted(() => {
   window.ecomImgGenFlushCutoutDraft = persistCurrentDraft
   void loadCutoutHistoryIfAuthenticated()
   void loadCutoutDraftIfAuthenticated()
+  window.addEventListener("keydown", handleGlobalKeyDown)
 })
 
 // 组件卸载时移除全局函数，避免父组件拿到过期引用。
@@ -762,6 +790,7 @@ onBeforeUnmount(() => {
   if (window.ecomImgGenFlushCutoutDraft === persistCurrentDraft) {
     delete window.ecomImgGenFlushCutoutDraft
   }
+  window.removeEventListener("keydown", handleGlobalKeyDown)
 })
 
 // sourceImage 改变时重绘 canvas。watch 用于处理“状态变化引发副作用”的场景。
@@ -853,15 +882,33 @@ watch(
           </button>
         </div>
         <label class="brush-slider">
-          <span>笔刷</span>
-          <input
-            type="range"
-            min="12"
-            max="96"
-            :value="brushSize"
-            :disabled="controlsDisabled"
-            @input="event => brushSize = clamp(Number((event.target as HTMLInputElement).value), 12, 96)"
-          >
+          <span>笔刷 ({{ brushSize }}px)</span>
+          <div class="brush-slider-wrap" style="display: flex; align-items: center; gap: 10px; flex: 1; width: 100%;">
+            <input
+              type="range"
+              min="12"
+              max="96"
+              :value="brushSize"
+              :disabled="controlsDisabled"
+              @input="event => brushSize = clamp(Number((event.target as HTMLInputElement).value), 12, 96)"
+              style="flex: 1;"
+            >
+            <div
+              class="brush-size-dot-preview"
+              :style="{
+                width: `${brushSize}px`,
+                height: `${brushSize}px`,
+                maxWidth: '24px',
+                maxHeight: '24px',
+                borderRadius: '50%',
+                background: mode === 'eraser' ? 'rgba(239, 68, 68, 0.5)' : 'rgba(23, 105, 255, 0.5)',
+                border: '1px solid #fff',
+                boxShadow: '0 0 0 1px rgba(0,0,0,0.15)',
+                flexShrink: 0,
+                transition: 'width 0.1s, height 0.1s, background-color 0.1s'
+              }"
+            />
+          </div>
         </label>
         <div class="cutout-toolbar-actions">
           <div class="cutout-zoom-actions" aria-label="画布缩放">

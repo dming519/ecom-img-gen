@@ -190,6 +190,28 @@ function normalizeTaskStatus(task: TaskRecord, timeoutMs: number, timeoutMessage
   return task;
 }
 
+function normalizeCompletedLayerTask(task: TaskRecord, prefix: string) {
+  if (prefix !== "layer-task" || task.status !== "running") return task;
+  const progress = task.progress as { done?: unknown; total?: unknown } | undefined;
+  const done = Number(progress?.done);
+  const total = Number(progress?.total);
+  const layers = Array.isArray(task.layers) ? task.layers : [];
+  if (
+    Number.isFinite(done) &&
+    Number.isFinite(total) &&
+    total > 0 &&
+    done >= total &&
+    layers.length >= total
+  ) {
+    return {
+      ...task,
+      status: "succeeded",
+      updatedAt: Date.now(),
+    };
+  }
+  return task;
+}
+
 async function requireTaskAccess(
   context: TaskRequestContext,
   unauthorizedMessage: string,
@@ -235,7 +257,10 @@ export async function handleTaskStatusRequest(
     return json({ error: "任务数据损坏" }, { status: 500 });
   }
 
-  const normalized = normalizeTaskStatus(task, options.timeoutMs, options.timeoutMessage);
+  const normalized = normalizeCompletedLayerTask(
+    normalizeTaskStatus(task, options.timeoutMs, options.timeoutMessage),
+    options.prefix,
+  );
   if (normalized.userKey && normalized.userKey !== access.sessionUserKey) {
     return json({ error: "无权访问该任务" }, { status: 403 });
   }

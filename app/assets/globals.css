@@ -4160,6 +4160,13 @@ footer {
     linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.88));
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.1);
   overflow: hidden;
+  transition: transform 0.28s var(--ease), border-color 0.28s var(--ease), box-shadow 0.28s var(--ease);
+}
+
+.home-module-detail:hover {
+  transform: translateY(-4px);
+  border-color: rgba(23, 105, 255, 0.38);
+  box-shadow: 0 32px 85px rgba(15, 23, 42, 0.14);
 }
 
 .module-detail-copy {
@@ -4880,6 +4887,8 @@ footer {
     box-shadow: none;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
+    mask-image: linear-gradient(to right, black 85%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
   }
 
   .creative-tabs::after {

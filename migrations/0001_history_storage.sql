@@ -27,3 +27,17 @@ CREATE TABLE IF NOT EXISTS stored_images (
 
 CREATE INDEX IF NOT EXISTS idx_stored_images_user
   ON stored_images(user_key, created_at);
+
+CREATE TABLE IF NOT EXISTS detail_prompts (
+  id TEXT PRIMARY KEY,
+  user_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  source_task_id TEXT,
+  prompt_index INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_detail_prompts_user
+  ON detail_prompts(user_key, created_at);

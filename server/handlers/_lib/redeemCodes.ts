@@ -6,7 +6,7 @@ interface RedeemCodeRecord {
   id: string;
   label: string;
   codeHash: string;
-  codeText: string | null;
+  codeText: string;
   credits: number;
   maxRedemptions: number;
   redeemCount: number;
@@ -29,7 +29,7 @@ interface RedeemCodeRowRecord {
   id: string;
   label: string;
   code_hash: string;
-  code_text?: string | null;
+  code_text: string;
   credits: number;
   max_redemptions: number;
   redeem_count: number;
@@ -75,7 +75,7 @@ function fromRow(row: RedeemCodeRowRecord): RedeemCodeRecord {
     id: row.id,
     label: row.label,
     codeHash: row.code_hash,
-    codeText: row.code_text ?? null,
+    codeText: row.code_text,
     credits: row.credits,
     maxRedemptions: row.max_redemptions,
     redeemCount: row.redeem_count,
@@ -114,7 +114,7 @@ async function writeRedeemCode(db: HistoryD1Database, record: RedeemCodeRecord) 
        DO UPDATE SET
          label = excluded.label,
          code_hash = excluded.code_hash,
-         code_text = COALESCE(excluded.code_text, redeem_codes.code_text),
+         code_text = excluded.code_text,
          credits = excluded.credits,
          max_redemptions = excluded.max_redemptions,
          redeem_count = excluded.redeem_count,

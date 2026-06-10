@@ -5,13 +5,6 @@ export interface Env {
   LLM_API_KEY?: string;
   LLM_BASE_URL?: string;
   LLM_MODEL?: string;
-  // Legacy names kept temporarily so existing deployments do not break before secrets are renamed.
-  OPENAI_API_KEY?: string;
-  OPENAI_BASE_URL?: string;
-  OPENAI_MODEL?: string;
-  PROMPT_API_KEY?: string;
-  PROMPT_BASE_URL?: string;
-  PROMPT_MODEL?: string;
   IMAGE_WORKER_TOKEN?: string;
   TASKS_KV: KVNamespace;
   IMAGE_TASKS: DurableObjectNamespace;
@@ -83,17 +76,17 @@ function firstNonEmpty(...values: Array<string | undefined>) {
 
 function getImageConfig(env: Env) {
   return {
-    apiKey: firstNonEmpty(env.IMAGE_API_KEY, env.OPENAI_API_KEY),
-    baseUrl: firstNonEmpty(env.IMAGE_BASE_URL, env.OPENAI_BASE_URL),
-    model: firstNonEmpty(env.IMAGE_MODEL, env.OPENAI_MODEL),
+    apiKey: firstNonEmpty(env.IMAGE_API_KEY),
+    baseUrl: firstNonEmpty(env.IMAGE_BASE_URL),
+    model: firstNonEmpty(env.IMAGE_MODEL),
   };
 }
 
 function getLlmConfig(env: Env) {
   return {
-    apiKey: firstNonEmpty(env.LLM_API_KEY, env.PROMPT_API_KEY),
-    baseUrl: firstNonEmpty(env.LLM_BASE_URL, env.PROMPT_BASE_URL),
-    model: firstNonEmpty(env.LLM_MODEL, env.PROMPT_MODEL),
+    apiKey: firstNonEmpty(env.LLM_API_KEY),
+    baseUrl: firstNonEmpty(env.LLM_BASE_URL),
+    model: firstNonEmpty(env.LLM_MODEL),
   };
 }
 
@@ -1530,6 +1523,23 @@ export class CutoutTasksDO {
             base64: result,
           });
           progressDone += 1;
+
+          if (progressDone >= progressTotal) {
+            await writeLayerTask("succeeded", {
+              current: "完成",
+              model,
+              manifest: {
+                sourceImageId: body.sourceImageId,
+                width: sourceDimensions?.width,
+                height: sourceDimensions?.height,
+                aspectRatio: layerAspectRatio,
+                renderSize: layerImageSize,
+                createdAt: Date.now(),
+              },
+            });
+            await this.state.storage.delete("task");
+            return;
+          }
 
           await writeLayerTask("running", { current: `${layer.name}已完成` });
         }
