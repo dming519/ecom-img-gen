@@ -56,15 +56,19 @@ interface StoredImageTask {
   status?: string;
 }
 
-interface ImageRequestAttemptResult {
+interface UpstreamRequestAttemptResult {
   response: Response;
   text: string;
   attempts: number;
   retryErrors: string[];
 }
 
+type ImageRequestAttemptResult = UpstreamRequestAttemptResult;
+
 const IMAGE_RETRY_ATTEMPTS = 3;
 const IMAGE_RETRY_DELAYS = [1600, 3600];
+const PROMPT_RETRY_ATTEMPTS = 3;
+const PROMPT_RETRY_DELAYS = [1200, 2800];
 const DEFAULT_LAYER_PLAN_MODEL = "gpt-5.5";
 // 这些上游状态码通常是临时问题，可以稍后重试。
 const IMAGE_RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504, 520, 522, 524]);
@@ -455,6 +459,12 @@ function formatImageAttemptFailure(label: string, result: ImageRequestAttemptRes
   return `${label}失败（已尝试 ${result.attempts} 次）: ${detail}${retries}`;
 }
 
+function formatPromptAttemptFailure(label: string, result: UpstreamRequestAttemptResult) {
+  const detail = `HTTP ${result.response.status}: ${getUpstreamErrorDetail(result.text)}`;
+  const retries = result.retryErrors.length ? `；${result.retryErrors.join("；")}` : "";
+  return `${label}失败（已尝试 ${result.attempts} 次）: ${detail}${retries}`;
+}
+
 function summarizeRawText(text: string) {
   return text.replace(/\s+/g, " ").trim().slice(0, 300);
 }
@@ -585,6 +595,66 @@ function createPromptRequest(
       ],
     }),
   });
+}
+
+async function createPromptRequestWithRetry(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  systemTemplate: string,
+  userText: string,
+  productImages: string[],
+  shouldStop?: () => Promise<boolean>,
+): Promise<UpstreamRequestAttemptResult> {
+  const retryErrors: string[] = [];
+
+  for (let attempt = 1; attempt <= PROMPT_RETRY_ATTEMPTS; attempt += 1) {
+    if (await shouldStop?.()) {
+      throw new Error("任务已取消");
+    }
+
+    try {
+      const response = await createPromptRequest(
+        baseUrl,
+        apiKey,
+        model,
+        systemTemplate,
+        userText,
+        productImages,
+      );
+      const text = await response.text();
+      if (await shouldStop?.()) {
+        throw new Error("任务已取消");
+      }
+      if (
+        response.ok ||
+        !isRetryableImageStatus(response.status) ||
+        attempt >= PROMPT_RETRY_ATTEMPTS
+      ) {
+        return {
+          response,
+          text,
+          attempts: attempt,
+          retryErrors,
+        };
+      }
+
+      retryErrors.push(
+        `第${attempt}次 HTTP ${response.status}: ${getUpstreamErrorDetail(text)}`,
+      );
+    } catch (error) {
+      if (attempt >= PROMPT_RETRY_ATTEMPTS) {
+        throw new Error(
+          [...retryErrors, `第${attempt}次请求异常: ${getErrorMessage(error)}`].join("；"),
+        );
+      }
+      retryErrors.push(`第${attempt}次请求异常: ${getErrorMessage(error)}`);
+    }
+
+    await sleep(PROMPT_RETRY_DELAYS[Math.min(attempt - 1, PROMPT_RETRY_DELAYS.length - 1)]);
+  }
+
+  throw new Error("文本识别请求重试失败");
 }
 
 function getQualityInstruction(quality: ImageQuality) {
@@ -781,26 +851,20 @@ async function createDynamicLayerPlan(
   sourceImage: string,
   dimensions: { width: number; height: number } | null,
   aspectRatio: LayerAspectRatio,
+  shouldStop?: () => Promise<boolean>,
 ) {
-  const response = await createPromptRequest(
+  const attemptResult = await createPromptRequestWithRetry(
     baseUrl,
     apiKey,
     model,
     createLayerPlanSystemTemplate(),
     createLayerPlanUserText(dimensions, aspectRatio),
     [sourceImage],
+    shouldStop,
   );
-  const text = await response.text();
+  const { response, text } = attemptResult;
   if (!response.ok) {
-    let detail = summarizeRawText(text);
-    try {
-      const payload = JSON.parse(text) as ChatCompletionPayload;
-      if (payload.error?.message) detail = payload.error.message;
-      if (payload.message) detail = payload.message;
-    } catch {
-      // Keep raw response.
-    }
-    throw new Error(`分层规划失败: HTTP ${response.status}: ${detail}`);
+    throw new Error(formatPromptAttemptFailure("分层规划", attemptResult));
   }
 
   let content = "";
@@ -1373,14 +1437,24 @@ export class CutoutTasksDO {
         };
 
         await writeLayerTask("running", { current: "正在识别图层结构" });
-        layerPlan = await createDynamicLayerPlan(
-          planBaseUrl,
-          planApiKey,
-          planModel,
-          sourceImage,
-          sourceDimensions,
-          layerAspectRatio,
-        );
+        try {
+          layerPlan = await createDynamicLayerPlan(
+            planBaseUrl,
+            planApiKey,
+            planModel,
+            sourceImage,
+            sourceDimensions,
+            layerAspectRatio,
+            shouldStop,
+          );
+        } catch (error) {
+          if (await shouldStop()) return;
+          await writeLayerTask("failed", {
+            current: "识别图层结构失败",
+            error: getErrorMessage(error),
+          });
+          return;
+        }
         progressTotal = layerPlan.length;
         await writeLayerTask("running", { current: `已规划 ${progressTotal} 个图层` });
 
