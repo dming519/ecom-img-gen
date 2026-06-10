@@ -5,6 +5,9 @@ export interface Env {
   PROMPT_API_KEY?: string;
   PROMPT_BASE_URL?: string;
   PROMPT_MODEL?: string;
+  LAYER_PLAN_API_KEY?: string;
+  LAYER_PLAN_BASE_URL?: string;
+  LAYER_PLAN_MODEL?: string;
   IMAGE_WORKER_TOKEN?: string;
   TASKS_KV: KVNamespace;
   IMAGE_TASKS: DurableObjectNamespace;
@@ -62,6 +65,7 @@ interface ImageRequestAttemptResult {
 
 const IMAGE_RETRY_ATTEMPTS = 3;
 const IMAGE_RETRY_DELAYS = [1600, 3600];
+const DEFAULT_LAYER_PLAN_MODEL = "gpt-5.5";
 // 这些上游状态码通常是临时问题，可以稍后重试。
 const IMAGE_RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504, 520, 522, 524]);
 
@@ -1300,9 +1304,15 @@ export class CutoutTasksDO {
         const sourceDimensions = normalizeSourceDimensions(body.sourceDimensions) ?? parsedSourceDimensions;
         const layerAspectRatio = normalizeLayerAspectRatio(body.layerAspectRatio) ?? resolveLayerAspectRatio(sourceDimensions);
         const layerImageSize = resolveLayerImageSize(layerAspectRatio);
-        const planApiKey = this.env.PROMPT_API_KEY?.trim() || apiKey;
-        const planBaseUrl = this.env.PROMPT_BASE_URL?.trim() || baseUrl;
-        const planModel = this.env.PROMPT_MODEL?.trim() || model;
+        const planApiKey =
+          this.env.LAYER_PLAN_API_KEY?.trim() ||
+          this.env.PROMPT_API_KEY?.trim() ||
+          apiKey;
+        const planBaseUrl =
+          this.env.LAYER_PLAN_BASE_URL?.trim() ||
+          this.env.PROMPT_BASE_URL?.trim() ||
+          baseUrl;
+        const planModel = this.env.LAYER_PLAN_MODEL?.trim() || DEFAULT_LAYER_PLAN_MODEL;
         let layerPlan: LayerPlanItem[] = [];
         let progressTotal = 1;
         let progressDone = 0;
