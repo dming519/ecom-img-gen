@@ -116,7 +116,6 @@ export interface DetailPromptItem {
   status: DetailImageStatus;
   taskId?: string;
   imageId?: string;
-  base64?: string;
   model?: string;
   error?: string;
   createdAt?: number;
@@ -189,7 +188,6 @@ export type CreateImageTaskOptions = CreateDetailImageTaskOptions | CreateMultiV
 export interface ImageTaskStatus {
   status: "pending" | "running" | "succeeded" | "failed" | "canceled";
   imageId?: string;
-  base64?: string;
   model?: string;
   error?: string;
   usedReferenceImages?: boolean;
@@ -251,14 +249,12 @@ export interface LayerResultItem {
   role: "background" | "subject" | "text" | "decoration" | "shadow" | "preview" | "other";
   index: number;
   imageId?: string;
-  base64?: string;
 }
 
 // 抠图任务状态。成功时优先返回 `imageId`，前端通过图片文件接口加载白底结果图。
 export interface CutoutTaskStatus {
   status: "pending" | "running" | "succeeded" | "failed" | "canceled";
   imageId?: string;
-  base64?: string;
   layers?: LayerResultItem[];
   manifest?: {
     width?: number;
@@ -296,9 +292,6 @@ export interface CutoutHistoryItem {
   maskImageId?: string;
   resultImageId?: string;
   target?: string;
-  sourceImage?: string;
-  maskImage?: string;
-  resultBase64?: string;
   status: CutoutStatus;
   error?: string;
   taskId?: string;
@@ -314,9 +307,6 @@ export interface EditHistoryItem {
   maskImageId?: string;
   resultImageId?: string;
   instruction: string;
-  sourceImage?: string;
-  maskImage?: string;
-  resultBase64?: string;
   status: CutoutStatus;
   error?: string;
   taskId?: string;
@@ -331,7 +321,6 @@ export interface MultiViewHistoryResultItem {
   status: MultiViewHistoryStatus;
   taskId?: string;
   imageId?: string;
-  base64?: string;
   model?: string;
   error?: string;
   updatedAt?: number;
@@ -340,7 +329,6 @@ export interface MultiViewHistoryResultItem {
 export interface MultiViewHistoryItem {
   id?: number;
   sourceImageIds?: string[];
-  sourceImages?: string[];
   aspectRatio: AspectRatio;
   quality: ImageQuality;
   results: MultiViewHistoryResultItem[];
@@ -353,7 +341,6 @@ export interface MultiViewHistoryItem {
 export interface LayerHistoryItem {
   id?: number;
   sourceImageId?: string;
-  sourceImage?: string;
   sourceDimensions?: {
     width: number;
     height: number;
@@ -380,7 +367,6 @@ export interface CutoutDraft {
   sourceImageId?: string;
   maskImageId?: string;
   resultImageId?: string;
-  resultBase64?: string | null;
   target?: string;
   brushSize?: number;
   mode?: "brush" | "eraser";

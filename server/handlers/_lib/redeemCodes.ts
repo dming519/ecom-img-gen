@@ -1,6 +1,6 @@
 import type { RedeemCodeRow } from "@/lib/types";
 import type { HistoryD1Database } from "./historyStorage";
-import { requireAdminDb, type UserKvNamespace } from "./users";
+import { requireAdminDb } from "./users";
 
 interface RedeemCodeRecord {
   id: string;
@@ -48,26 +48,9 @@ interface RedeemUseRowRecord {
 
 export interface RedeemCodeEnv {
   HISTORY_DB?: HistoryD1Database;
-  TASKS_KV?: UserKvNamespace;
 }
 
-const REDEEM_INDEX = "redeemCodes:index";
-const HASH_PREFIX = "redeemCodeHash:";
-const CODE_PREFIX = "redeemCode:";
-const USE_PREFIX = "redeemCodeUse:";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-function redeemCodeKey(id: string) {
-  return `${CODE_PREFIX}${id}`;
-}
-
-function redeemCodeHashKey(hash: string) {
-  return `${HASH_PREFIX}${hash}`;
-}
-
-function redeemUseKey(codeId: string, userKey: string) {
-  return `${USE_PREFIX}${codeId}:${userKey}`;
-}
 
 function normalizeCode(code: string) {
   return code.trim().replace(/[\s-]+/g, "").toUpperCase();
@@ -81,16 +64,6 @@ function normalizeCredits(value: number | undefined) {
 function normalizeMaxRedemptions(value: number | undefined) {
   if (!Number.isFinite(value)) return 1;
   return Math.max(1, Math.min(10000, Math.round(value ?? 1)));
-}
-
-async function readJson<T>(kv: UserKvNamespace, key: string) {
-  const raw = await kv.get(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
 }
 
 async function hashCode(code: string) {
@@ -146,18 +119,6 @@ function toRow(record: RedeemCodeRecord): RedeemCodeRow {
     createdBy: record.createdBy,
     lastRedeemedAt: record.lastRedeemedAt,
   };
-}
-
-async function readKvFallbackRedeemCode(env: RedeemCodeEnv, id: string) {
-  return env.TASKS_KV
-    ? readJson<RedeemCodeRecord>(env.TASKS_KV, redeemCodeKey(id))
-    : null;
-}
-
-async function readKvFallbackRedeemUse(env: RedeemCodeEnv, codeId: string, userKey: string) {
-  return env.TASKS_KV
-    ? readJson<RedeemUseRecord>(env.TASKS_KV, redeemUseKey(codeId, userKey))
-    : null;
 }
 
 async function writeRedeemCode(db: HistoryD1Database, record: RedeemCodeRecord) {
@@ -217,7 +178,7 @@ async function readRedeemCode(db: HistoryD1Database, id: string) {
   return row ? fromRow(row) : null;
 }
 
-async function readRedeemCodeByHash(env: RedeemCodeEnv, db: HistoryD1Database, hash: string) {
+async function readRedeemCodeByHash(db: HistoryD1Database, hash: string) {
   const hashRow = await db
     .prepare(`SELECT code_id FROM redeem_code_hashes WHERE code_hash = ?`)
     .bind(hash)
@@ -225,12 +186,7 @@ async function readRedeemCodeByHash(env: RedeemCodeEnv, db: HistoryD1Database, h
   if (hashRow?.code_id) {
     return readRedeemCode(db, hashRow.code_id);
   }
-
-  const kvFallbackId = await env.TASKS_KV?.get(redeemCodeHashKey(hash));
-  if (!kvFallbackId) return null;
-  const kvFallback = await readKvFallbackRedeemCode(env, kvFallbackId);
-  if (kvFallback) await writeRedeemCode(db, kvFallback);
-  return kvFallback;
+  return null;
 }
 
 async function readRedeemUse(db: HistoryD1Database, codeId: string, userKey: string) {
@@ -257,30 +213,8 @@ async function writeRedeemUse(db: HistoryD1Database, record: RedeemUseRecord) {
   return result.meta?.changes ?? 1;
 }
 
-async function importKvFallbackRedeemCodes(env: RedeemCodeEnv, db: HistoryD1Database) {
-  if (!env.TASKS_KV) return;
-
-  let ids = (await readJson<string[]>(env.TASKS_KV, REDEEM_INDEX)) ?? [];
-  if (!ids.length && env.TASKS_KV.list) {
-    const listed: string[] = [];
-    let cursor: string | undefined;
-    do {
-      const result = await env.TASKS_KV.list({ prefix: CODE_PREFIX, cursor, limit: 1000 });
-      listed.push(...result.keys.map((item) => item.name.replace(CODE_PREFIX, "")));
-      cursor = result.list_complete ? undefined : result.cursor;
-    } while (cursor);
-    ids = listed;
-  }
-
-  for (const id of ids) {
-    const record = await readKvFallbackRedeemCode(env, id);
-    if (record) await writeRedeemCode(db, record);
-  }
-}
-
 export async function listRedeemCodes(env: RedeemCodeEnv) {
   const db = await requireAdminDb(env, "兑换码表");
-  await importKvFallbackRedeemCodes(env, db);
   const result = await db
     .prepare(
       `SELECT id, label, code_hash, credits, max_redemptions, redeem_count,
@@ -308,7 +242,7 @@ export async function createRedeemCodeRecord(
   if (normalizedCode.length < 6) throw new Error("兑换码至少需要 6 位");
 
   const codeHash = await hashCode(normalizedCode);
-  if (await readRedeemCodeByHash(env, db, codeHash)) {
+  if (await readRedeemCodeByHash(db, codeHash)) {
     throw new Error("兑换码已存在，请换一个");
   }
 
@@ -339,7 +273,7 @@ export async function updateRedeemCodeRecord(
   patch: { label?: string; active?: boolean },
 ) {
   const db = await requireAdminDb(env, "兑换码表");
-  const record = (await readRedeemCode(db, id)) ?? (await readKvFallbackRedeemCode(env, id));
+  const record = await readRedeemCode(db, id);
   if (!record) throw new Error("兑换码不存在");
 
   const next: RedeemCodeRecord = {
@@ -358,18 +292,12 @@ export async function redeemCodeRecord(env: RedeemCodeEnv, code: string, userKey
   if (!normalized) throw new Error("请输入兑换码");
 
   const hash = await hashCode(normalized);
-  const record = await readRedeemCodeByHash(env, db, hash);
+  const record = await readRedeemCodeByHash(db, hash);
   if (!record || record.codeHash !== hash) throw new Error("兑换码不正确");
   if (!record.active) throw new Error("兑换码已停用");
   if (record.redeemCount >= record.maxRedemptions) throw new Error("兑换码已被兑完");
 
   if (await readRedeemUse(db, record.id, userKey)) {
-    throw new Error("当前账号已兑换过该兑换码");
-  }
-
-  const kvFallbackUse = await readKvFallbackRedeemUse(env, record.id, userKey);
-  if (kvFallbackUse) {
-    await writeRedeemUse(db, kvFallbackUse);
     throw new Error("当前账号已兑换过该兑换码");
   }
 

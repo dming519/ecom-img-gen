@@ -196,7 +196,6 @@ async function getImageDimensions(src: string): Promise<ImageDimensions> {
 }
 
 function getLayerSrc(layer: LayerResultItem) {
-  if (layer.base64) return `data:image/png;base64,${layer.base64}`
   if (layer.imageId) return dbImageFileUrl(layer.imageId)
   return null
 }
@@ -233,14 +232,10 @@ function resolveLayerAspectRatio(dimensions?: ImageDimensions | null): LayerAspe
 }
 
 function getLayerSourceKey(layer: LayerResultItem, dimensions?: ImageDimensions | null) {
-  const base64 = layer.base64 ?? ""
   return [
     layer.id,
     layer.imageId ?? "",
     dimensions ? `${dimensions.width}x${dimensions.height}` : "source-size",
-    base64.length,
-    base64.slice(0, 48),
-    base64.slice(-48),
   ].join(":")
 }
 
@@ -272,7 +267,6 @@ function updateLayerHistorySnapshot(
   } = {},
 ) {
   item.sourceImageId = sourceImageId.value
-  item.sourceImage = sourceImage.value ?? undefined
   item.sourceDimensions = sourceDimensions.value ?? undefined
   item.normalizedToSourceSize = layersNormalizedToSourceSize.value
   item.layerBackground = LAYER_BACKGROUND_COLOR
@@ -312,8 +306,7 @@ async function normalizeLayerToWhiteSourceCanvas(
   const blob = await fetchLayerBlob(layer)
   const normalizedBlob = await drawBlobOnWhiteSourceCanvas(blob, dimensions)
   const imageId = await dbPutProductImageBlob(normalizedBlob, `${layer.id}.png`)
-  const { base64: _base64, ...rest } = layer
-  const normalized = { ...rest, imageId }
+  const normalized = { ...layer, imageId }
   normalizedLayerCache.set(sourceKey, normalized)
   return normalized
 }
@@ -419,7 +412,6 @@ async function handleGenerate() {
   progress.value = normalizeLayerProgress()
   let historyItem: LayerHistoryItem = {
     sourceImageId: sourceImageId.value,
-    sourceImage: sourceImage.value ?? undefined,
     layers: [],
     status: "running",
     progress: { ...progress.value },
@@ -685,7 +677,7 @@ async function handleDownloadZip() {
       sourceDimensions: sourceDimensions.value,
       normalizedToSourceSize: !!sourceDimensions.value,
       layerBackground: LAYER_BACKGROUND_COLOR,
-      layers: outputLayers.map(({ base64: _base64, ...layer }) => layer),
+      layers: outputLayers,
     }
     const zip = createZip([
       ...imageEntries,
@@ -708,9 +700,8 @@ async function handleDownloadZip() {
 }
 
 function getLayerHistoryCover(item: LayerHistoryItem) {
-  const layer = getOutputLayers(item.layers).find((entry) => entry.imageId || entry.base64)
+  const layer = getOutputLayers(item.layers).find((entry) => entry.imageId)
   if (!layer) return null
-  if (layer.base64) return `data:image/png;base64,${layer.base64}`
   if (layer.imageId) return dbImageFileUrl(layer.imageId)
   return null
 }
@@ -724,13 +715,11 @@ async function handleSelectHistory(index: number) {
   if (item.sourceImageId) {
     const [restored] = await dbGetProductImages([item.sourceImageId])
     sourceImage.value = restored ?? null
-  } else {
-    sourceImage.value = item.sourceImage ?? null
   }
   sourceDimensions.value = item.sourceDimensions ??
     (sourceImage.value ? await getImageDimensions(sourceImage.value).catch(() => null) : null)
   layers.value = getOutputLayers(item.layers)
-  layersNormalizedToSourceSize.value = !!item.normalizedToSourceSize
+  layersNormalizedToSourceSize.value = true
   normalizedLayerCache.clear()
   selectedLayerId.value = layers.value[0]?.id ?? null
   progress.value = normalizeLayerProgress({
@@ -738,11 +727,6 @@ async function handleSelectHistory(index: number) {
     total: item.progress?.total,
     current: item.progress?.current ?? "",
   })
-  if (layers.value.length && !layersNormalizedToSourceSize.value) {
-    await normalizeLayersToWhiteSourceCanvas()
-    updateLayerHistorySnapshot(item)
-    await persistLayer(item)
-  }
   error.value = item.error ?? null
 }
 
@@ -755,37 +739,6 @@ function handleDeleteHistory(index: number) {
     activeHistoryIdx.value = history.value.length ? Math.min(index, history.value.length - 1) : -1
   } else if (activeHistoryIdx.value > index) {
     activeHistoryIdx.value -= 1
-  }
-}
-
-async function getLayerHistorySourceDimensions(item: LayerHistoryItem) {
-  if (item.sourceDimensions) return item.sourceDimensions
-  let source = item.sourceImage ?? null
-  if (!source && item.sourceImageId) {
-    const [restored] = await dbGetProductImages([item.sourceImageId])
-    source = restored ?? null
-  }
-  return source ? getImageDimensions(source).catch(() => null) : null
-}
-
-async function migrateLegacyLayerHistoryItems(items: LayerHistoryItem[]) {
-  for (const item of items) {
-    if (item.normalizedToSourceSize || !getOutputLayers(item.layers).length) continue
-    try {
-      const dimensions = await getLayerHistorySourceDimensions(item)
-      const normalizedLayers = await normalizeLayerListToWhiteSourceCanvas(item.layers, dimensions)
-      const migrated: LayerHistoryItem = {
-        ...item,
-        sourceDimensions: dimensions ?? item.sourceDimensions,
-        normalizedToSourceSize: true,
-        layerBackground: LAYER_BACKGROUND_COLOR,
-        layers: normalizedLayers,
-        updatedAt: Date.now(),
-      }
-      await persistLayer(migrated, { activate: false })
-    } catch (event) {
-      console.warn("分层历史白底迁移失败:", event)
-    }
   }
 }
 
@@ -811,7 +764,6 @@ async function loadLayerHistoryIfAuthenticated() {
     const items = await dbAllLayers()
     history.value = items
     activeHistoryIdx.value = items.length ? items.length - 1 : -1
-    void migrateLegacyLayerHistoryItems(items)
   } catch (event) {
     console.warn("分层历史读取失败:", event)
   }

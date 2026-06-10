@@ -41,7 +41,6 @@ const MASK_HISTORY_LIMIT = 18
 const sourceImage = shallowRef<string | null>(null)
 const sourceImageId = shallowRef<string | undefined>()
 const resultImageId = shallowRef<string | undefined>()
-const resultBase64 = shallowRef<string | null>(null)
 const cutoutTarget = shallowRef("")
 const history = ref<CutoutHistoryItem[]>([])
 const activeHistoryIdx = shallowRef(-1)
@@ -78,13 +77,7 @@ const creditLabel = computed(() =>
 const isSuperAdmin = computed(() => props.session?.user?.role === "super_admin")
 const sessionUserKey = computed(() => props.session?.user?.userKey ?? props.session?.user?.id ?? null)
 const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
-const resultSrc = computed(() =>
-  resultBase64.value
-    ? `data:image/png;base64,${resultBase64.value}`
-    : resultImageId.value
-      ? dbImageFileUrl(resultImageId.value)
-      : null,
-)
+const resultSrc = computed(() => (resultImageId.value ? dbImageFileUrl(resultImageId.value) : null))
 const normalizedCutoutTarget = computed(() => cutoutTarget.value.trim().replace(/\s+/g, " ").slice(0, 160))
 const canvasStyle = computed(() =>
   canvasSize.value.width && canvasSize.value.height
@@ -259,19 +252,16 @@ async function persistCurrentDraft(
   if (!hasMaskOverride && maskCanvas && hasMaskPixels(maskCanvas)) {
     maskImageId = await dbPutProductImage(maskCanvas.toDataURL("image/png"))
   }
-  const hasResultOverride = Object.prototype.hasOwnProperty.call(overrides, "resultBase64")
   const hasResultImageOverride = Object.prototype.hasOwnProperty.call(overrides, "resultImageId")
   const nextSourceImageId = overrides.sourceImageId ?? sourceImageId.value
-  const nextResultBase64 = hasResultOverride ? overrides.resultBase64 : resultBase64.value
   const nextResultImageId = hasResultImageOverride ? overrides.resultImageId : resultImageId.value
   const nextTarget = overrides.target ?? normalizedCutoutTarget.value
-  if (!nextSourceImageId && !maskImageId && !nextResultBase64 && !nextResultImageId) return
+  if (!nextSourceImageId && !maskImageId && !nextResultImageId) return
   try {
     const draft = {
       sourceImageId: nextSourceImageId,
       maskImageId,
       resultImageId: nextResultImageId,
-      resultBase64: nextResultBase64,
       target: nextTarget,
       brushSize: overrides.brushSize ?? brushSize.value,
       mode: overrides.mode ?? mode.value,
@@ -285,7 +275,7 @@ async function persistCurrentDraft(
   }
 }
 
-// 新增或更新一条抠图历史。服务端可能会把图片转存成 imageId。
+// 新增或更新一条抠图历史。
 async function persistCutout(item: CutoutHistoryItem) {
   try {
     if (item.id == null) {
@@ -321,14 +311,12 @@ async function handleFileChange(event: Event) {
     sourceImage.value = dataUrl
     sourceImageId.value = id
     resultImageId.value = undefined
-    resultBase64.value = null
     canvasZoom.value = 1
     activeHistoryIdx.value = -1
     await dbPutCutoutDraft({
       sourceImageId: id,
       maskImageId: undefined,
       resultImageId: undefined,
-      resultBase64: null,
       target: normalizedCutoutTarget.value,
       brushSize: brushSize.value,
       mode: mode.value,
@@ -537,7 +525,6 @@ async function handleGenerate() {
   abortRef.value = new AbortController()
   let item: CutoutHistoryItem = {
     sourceImageId: sourceImageId.value,
-    sourceImage: sourceImage.value,
     target: normalizedCutoutTarget.value,
     status: "running",
     createdAt: Date.now(),
@@ -548,7 +535,7 @@ async function handleGenerate() {
     const editorMaskImage = maskCanvasRef.value?.toDataURL("image/png")
     const maskImageId = editorMaskImage ? await dbPutProductImage(editorMaskImage) : undefined
     const taskMaskImageId = await dbPutProductImage(apiMaskImage)
-    item = { ...item, maskImageId, maskImage: editorMaskImage }
+    item = { ...item, maskImageId }
     await persistCurrentDraft({ maskImageId })
     await persistCutout(item)
     history.value = [...history.value, item]
@@ -591,7 +578,7 @@ async function handleGenerate() {
       return
     }
     updateSessionCredits(result)
-    // 成功结果优先使用服务端返回的 imageId；旧任务返回 base64 时仍兼容保存。
+    if (!result.imageId) throw new Error("抠图任务未返回图片 ID")
     item = {
       ...item,
       status: "succeeded",
@@ -599,16 +586,13 @@ async function handleGenerate() {
       error: undefined,
       model: result.model,
       resultImageId: result.imageId,
-      resultBase64: result.base64,
       updatedAt: Date.now(),
     }
     resultImageId.value = result.imageId
-    resultBase64.value = result.base64 ?? null
     await persistCutout(item)
     resultImageId.value = item.resultImageId
     await persistCurrentDraft({
       resultImageId: item.resultImageId,
-      resultBase64: result.base64 ?? null,
     })
     history.value = history.value.map((historyItem) =>
       historyItem.id === item.id ? item : historyItem,
@@ -648,13 +632,11 @@ async function handleSelectHistory(index: number) {
   activeHistoryIdx.value = index
   cutoutTarget.value = item.target ?? ""
   resultImageId.value = item.resultImageId
-  resultBase64.value = item.resultBase64 ?? null
   error.value = item.error ?? null
   await dbPutCutoutDraft({
     sourceImageId: item.sourceImageId,
     maskImageId: item.maskImageId,
     resultImageId: item.resultImageId,
-    resultBase64: item.resultBase64 ?? null,
     target: item.target ?? "",
     brushSize: brushSize.value,
     mode: mode.value,
@@ -705,7 +687,6 @@ function handleDownload() {
 }
 
 function getCutoutResultSrc(item: CutoutHistoryItem) {
-  if (item.resultBase64) return `data:image/png;base64,${item.resultBase64}`
   if (item.resultImageId) return dbImageFileUrl(item.resultImageId)
   return null
 }
@@ -748,7 +729,6 @@ async function loadCutoutDraftIfAuthenticated() {
     brushSize.value = clamp(Number(draft.brushSize ?? 34), 12, 96)
     mode.value = draft.mode === "eraser" ? "eraser" : "brush"
     resultImageId.value = draft.resultImageId
-    resultBase64.value = draft.resultBase64 ?? null
     cutoutTarget.value = draft.target ?? ""
     const [sourceImages, maskImages] = await Promise.all([
       draft.sourceImageId ? dbGetProductImages([draft.sourceImageId]) : Promise.resolve([]),

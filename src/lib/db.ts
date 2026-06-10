@@ -72,8 +72,7 @@ function assignSaved<T extends object>(target: T, saved: T) {
   return saved;
 }
 
-// 详情图历史保存时，服务端可能把 base64 图片转存成 imageId。
-// 这里把 imageId 合并回来，后续页面就能通过 `/api/history/image-file` 读取图片。
+// 详情图历史保存后，把服务端返回的规范化字段合并回页面状态。
 function mergeSavedDetail(target: HistoryItem, saved: HistoryItem) {
   const savedPromptById = new Map(saved.prompts.map((prompt) => [prompt.id, prompt]));
   target.id = saved.id;
@@ -84,111 +83,51 @@ function mergeSavedDetail(target: HistoryItem, saved: HistoryItem) {
   };
   target.prompts = target.prompts.map((prompt) => {
     const savedPrompt = savedPromptById.get(prompt.id);
-    const { prompt: _prompt, ...cleanPrompt } =
-      prompt as typeof prompt & { prompt?: unknown };
     return savedPrompt
       ? {
-          ...cleanPrompt,
-          promptId: savedPrompt.promptId ?? cleanPrompt.promptId,
-          imageId: savedPrompt.imageId ?? cleanPrompt.imageId,
+          ...prompt,
+          promptId: savedPrompt.promptId ?? prompt.promptId,
+          imageId: savedPrompt.imageId ?? prompt.imageId,
         }
-      : cleanPrompt;
+      : prompt;
   });
   target.timestamp = saved.timestamp;
   target.generation = saved.generation;
   return target;
 }
 
-// 提交详情图历史前做瘦身：
-// 1. 已经有 productImageIds 时，不重复上传 productImages。
-// 2. 已经有 imageId 的生成图，不再把 base64 一起塞进历史 JSON。
+// 提交详情图历史前做瘦身：历史 JSON 只保留图片 ID 和 prompt ID。
 function toDetailRequestItem(item: HistoryItem): HistoryItem {
-  const productImageIds = item.product.productImageIds ?? [];
-  const productImages =
-    productImageIds.length >= item.product.productImages.length
-      ? []
-      : item.product.productImages;
   return {
     ...item,
     product: {
       ...item.product,
-      productImages,
+      productImages: [],
+      productImageIds: item.product.productImageIds ?? [],
     },
-    prompts: item.prompts.map((prompt) => {
-      const { prompt: _prompt, ...withoutPrompt } =
-        prompt as typeof prompt & { prompt?: unknown };
-      if (!prompt.imageId) return withoutPrompt;
-      const { base64: _base64, ...rest } = withoutPrompt;
-      return rest;
-    }),
+    prompts: item.prompts,
   };
 }
 
-// 抠图历史也要瘦身：原图和 mask 一般已经另存为图片文件，历史记录只留 ID。
+// 抠图历史只保存图片 ID。
 function toCutoutRequestItem(item: CutoutHistoryItem): CutoutHistoryItem {
-  const {
-    sourceImage: _sourceImage,
-    maskImage: _maskImage,
-    resultBase64: _resultBase64,
-    ...rest
-  } = item;
-  return item.resultImageId
-    ? rest
-    : {
-        ...rest,
-        resultBase64: item.resultBase64,
-      };
+  return item;
 }
 
-// 改图历史同样只保留图片 ID，避免把原图、mask 和结果 base64 写进历史 JSON。
+// 改图历史只保存图片 ID。
 function toEditRequestItem(item: EditHistoryItem): EditHistoryItem {
-  const {
-    sourceImage: _sourceImage,
-    maskImage: _maskImage,
-    resultBase64: _resultBase64,
-    ...rest
-  } = item;
-  return item.resultImageId
-    ? rest
-    : {
-        ...rest,
-        resultBase64: item.resultBase64,
-      };
+  return item;
 }
 
 function toMultiViewRequestItem(item: MultiViewHistoryItem): MultiViewHistoryItem {
-  const sourceImages = item.sourceImageIds?.length ? [] : item.sourceImages;
   return {
     ...item,
-    sourceImages,
-    results: item.results.map((result) => {
-      if (!result.imageId) return result;
-      const { base64: _base64, ...rest } = result;
-      return rest;
-    }),
+    sourceImageIds: item.sourceImageIds ?? [],
   };
 }
 
 function toLayerRequestItem(item: LayerHistoryItem): LayerHistoryItem {
-  const { sourceImage: _sourceImage, ...rest } = item;
-  return {
-    ...rest,
-    sourceImage: item.sourceImageId ? undefined : item.sourceImage,
-    layers: item.layers.map((layer) => {
-      if (!layer.imageId) return layer;
-      const { base64: _base64, ...layerRest } = layer;
-      return layerRest;
-    }),
-  };
-}
-
-// 草稿如果已经有 resultImageId，就不需要重复带上 resultBase64。
-function toCutoutDraftRequest(
-  draft: Omit<CutoutDraft, "id"> & { id?: "active" },
-): Omit<CutoutDraft, "id"> & { id?: "active" } {
-  if (!draft.resultImageId) return draft;
-  const { resultBase64: _resultBase64, ...rest } = draft;
-  return rest;
+  return item;
 }
 
 // 新增一组详情图历史。
@@ -247,7 +186,7 @@ export async function dbAddCutout(item: CutoutHistoryItem) {
   return saved.id;
 }
 
-// 更新抠图历史，例如任务完成后把结果 imageId 或兼容旧任务的 base64 写回。
+// 更新抠图历史。
 export async function dbPutCutout(item: CutoutHistoryItem) {
   const payload = await requestJson<{ item: CutoutHistoryItem }>("/api/history/cutout", {
     method: "PUT",
@@ -411,7 +350,7 @@ export async function dbPutCutoutDraft(
     "/api/history/cutout-draft",
     {
       method: "PUT",
-      body: JSON.stringify({ draft: toCutoutDraftRequest(draft) }),
+      body: JSON.stringify({ draft }),
     },
   );
   assignSaved(draft, payload.draft);

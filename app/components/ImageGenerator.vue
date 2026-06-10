@@ -53,8 +53,7 @@ const PRODUCT_IMAGE_QUALITY = 0.82
 const MAX_PROMPT_IMAGE_CHARS = 1_500_000
 const MAX_PROMPT_IMAGE_TOTAL_CHARS = 6_000_000
 const MAX_DETAIL_IMAGES = 8
-const PREVIOUS_DRAFT_KEY = "ecomimggen_draft"
-const DRAFT_KEY = "ecomimggen_draft_v2"
+const DRAFT_KEY = "ecomimggen_draft_v3"
 const ASPECT_RATIO_VALUES: AspectRatio[] = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16"]
 const IMAGE_QUALITY_VALUES: ImageQuality[] = ["1K", "2K", "4K"]
 const STATUS_LABEL: Record<DetailPromptItem["status"], string> = {
@@ -220,11 +219,6 @@ function fileToCompressedDataURL(file: File): Promise<string> {
   })
 }
 
-function stripLegacyPrompt(item: DetailPromptItem): DetailPromptItem {
-  const { prompt: _prompt, ...clean } = item as DetailPromptItem & { prompt?: unknown }
-  return clean
-}
-
 // 服务端只返回 title/promptId，这里补上前端需要跟踪的 id、index 和状态。
 function createPromptItem(index: number, title: string, promptId: string): DetailPromptItem {
   return {
@@ -237,17 +231,17 @@ function createPromptItem(index: number, title: string, promptId: string): Detai
 }
 
 function hasPromptImage(item: DetailPromptItem) {
-  return !!(item.base64 || item.imageId)
+  return !!item.imageId
 }
 
 // 页面刷新或中断后，把未完成的 queued/running 状态恢复成可继续操作的状态。
 function resetInterruptedPrompt(item: DetailPromptItem): DetailPromptItem {
-  const clean = stripLegacyPrompt(item)
-  if (clean.status !== "queued" && clean.status !== "running") return clean
+  if (item.status !== "queued" && item.status !== "running") return item
+  const hasImage = hasPromptImage(item)
   return {
-    ...clean,
-    status: hasPromptImage(clean) ? "succeeded" : "draft",
-    taskId: hasPromptImage(clean) ? clean.taskId : undefined,
+    ...item,
+    status: hasImage ? "succeeded" : "draft",
+    taskId: hasImage ? item.taskId : undefined,
     error: undefined,
     updatedAt: Date.now(),
   }
@@ -258,13 +252,13 @@ function resetActiveGenerationPrompts(items: DetailPromptItem[]): DetailPromptIt
   return items.map((item) =>
     item.status === "queued" || item.status === "running"
       ? {
-          ...stripLegacyPrompt(item),
+          ...item,
           status: hasPromptImage(item) ? "succeeded" : "draft",
           taskId: hasPromptImage(item) ? item.taskId : undefined,
           error: undefined,
           updatedAt: Date.now(),
         }
-      : stripLegacyPrompt(item),
+      : item,
   )
 }
 
@@ -331,7 +325,6 @@ async function ensureProductImageIds() {
 
 function getPromptImageSrc(item: DetailPromptItem | undefined) {
   if (!item) return null
-  if (item.base64) return `data:image/png;base64,${item.base64}`
   if (item.imageId) return dbImageFileUrl(item.imageId)
   return null
 }
@@ -572,10 +565,9 @@ async function handleGenerateImages() {
   let historyItem: HistoryItem = {
     product: cloneProduct(currentProduct.value),
     prompts: prompts.value.map((item) => ({
-      ...stripLegacyPrompt(item),
+      ...item,
       status: "draft",
       imageId: undefined,
-      base64: undefined,
     })),
     timestamp: Date.now(),
     generation: {
@@ -647,15 +639,16 @@ async function handleGenerateImages() {
         throw new Error(message)
       }
       updateSessionCredits(result)
+      if (!result.imageId) {
+        throw new Error(`${working[index]?.title ?? `第${index + 1}张详情图`}未返回图片 ID`)
+      }
 
-      // 成功结果优先使用服务端返回的 imageId；旧任务返回 base64 时仍兼容保存。
       working = working.map((item, itemIndex) =>
         itemIndex === index
           ? {
               ...item,
               status: "succeeded",
               imageId: result.imageId,
-              base64: result.base64,
               model: result.model,
               updatedAt: Date.now(),
             }
@@ -745,7 +738,6 @@ async function handleRegenerateActiveImage() {
             ...item,
             status: "queued" as const,
             imageId: undefined,
-            base64: undefined,
             model: undefined,
             taskId: undefined,
             error: undefined,
@@ -797,6 +789,9 @@ async function handleRegenerateActiveImage() {
       throw new Error(message)
     }
     updateSessionCredits(result)
+    if (!result.imageId) {
+      throw new Error(`${target.title}未返回图片 ID`)
+    }
 
     working = working.map((item, itemIndex): DetailPromptItem =>
       itemIndex === targetIndex
@@ -804,7 +799,6 @@ async function handleRegenerateActiveImage() {
             ...item,
             status: "succeeded" as const,
             imageId: result.imageId,
-            base64: result.base64,
             model: result.model,
             taskId: undefined,
             error: undefined,
@@ -978,7 +972,7 @@ watch(
         productName: productName.value,
         sellingPoints: sellingPoints.value,
         imageCount: imageCount.value,
-        prompts: prompts.value.map(stripLegacyPrompt),
+        prompts: prompts.value,
         aspectRatio: aspectRatio.value,
         quality: quality.value,
         productImageIds: productImageIds.value,
@@ -999,7 +993,6 @@ onMounted(() => {
 
   if (studioMode.value === "image") {
     try {
-      localStorage.removeItem(PREVIOUS_DRAFT_KEY)
       const raw = localStorage.getItem(DRAFT_KEY)
       if (raw) {
         const draft = JSON.parse(raw) as DraftState

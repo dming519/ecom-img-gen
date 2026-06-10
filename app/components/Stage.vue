@@ -19,13 +19,11 @@ const emit = defineEmits<{
 const active = computed(() => props.prompts[props.activeIndex] ?? null)
 const activeSrc = computed(() => {
   if (!active.value) return null
-  if (active.value.base64) return `data:image/png;base64,${active.value.base64}`
   if (active.value.imageId) return dbImageFileUrl(active.value.imageId)
   return null
 })
 
 function getItemSrc(item: DetailPromptItem) {
-  if (item.base64) return `data:image/png;base64,${item.base64}`
   if (item.imageId) return dbImageFileUrl(item.imageId)
   return null
 }

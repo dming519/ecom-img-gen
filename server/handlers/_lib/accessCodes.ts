@@ -1,5 +1,5 @@
 import type { AccessCodeRow, AuthUser } from "@/lib/types";
-import { requireAdminDb, type UserKvNamespace } from "./users";
+import { requireAdminDb } from "./users";
 import type { HistoryD1Database } from "./historyStorage";
 
 interface AccessCodeRecord {
@@ -29,34 +29,12 @@ interface AccessCodeRowRecord {
 export interface AccessCodeEnv {
   ACCESS_LOGIN_CODE?: string;
   HISTORY_DB?: HistoryD1Database;
-  TASKS_KV?: UserKvNamespace;
 }
 
-const ACCESS_INDEX = "accessCodes:index";
-const HASH_PREFIX = "accessCodeHash:";
-const CODE_PREFIX = "accessCode:";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-function accessCodeKey(id: string) {
-  return `${CODE_PREFIX}${id}`;
-}
-
-function accessCodeHashKey(hash: string) {
-  return `${HASH_PREFIX}${hash}`;
-}
 
 function normalizeCode(code: string) {
   return code.trim().replace(/[\s-]+/g, "").toUpperCase();
-}
-
-async function readJson<T>(kv: UserKvNamespace, key: string) {
-  const raw = await kv.get(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
 }
 
 async function hashCode(code: string) {
@@ -98,12 +76,6 @@ function toRow(record: AccessCodeRecord): AccessCodeRow {
     lastUsedAt: record.lastUsedAt,
     useCount: record.useCount,
   };
-}
-
-async function readKvFallbackAccessCode(env: AccessCodeEnv, id: string) {
-  return env.TASKS_KV
-    ? readJson<AccessCodeRecord>(env.TASKS_KV, accessCodeKey(id))
-    : null;
 }
 
 async function writeAccessCode(db: HistoryD1Database, record: AccessCodeRecord) {
@@ -159,7 +131,7 @@ async function readAccessCode(db: HistoryD1Database, id: string) {
   return row ? fromRow(row) : null;
 }
 
-async function readAccessCodeByHash(env: AccessCodeEnv, db: HistoryD1Database, hash: string) {
+async function readAccessCodeByHash(db: HistoryD1Database, hash: string) {
   const hashRow = await db
     .prepare(`SELECT code_id FROM access_code_hashes WHERE code_hash = ?`)
     .bind(hash)
@@ -167,33 +139,7 @@ async function readAccessCodeByHash(env: AccessCodeEnv, db: HistoryD1Database, h
   if (hashRow?.code_id) {
     return readAccessCode(db, hashRow.code_id);
   }
-
-  const kvFallbackId = await env.TASKS_KV?.get(accessCodeHashKey(hash));
-  if (!kvFallbackId) return null;
-  const kvFallback = await readKvFallbackAccessCode(env, kvFallbackId);
-  if (kvFallback) await writeAccessCode(db, kvFallback);
-  return kvFallback;
-}
-
-async function importKvFallbackAccessCodes(env: AccessCodeEnv, db: HistoryD1Database) {
-  if (!env.TASKS_KV) return;
-
-  let ids = (await readJson<string[]>(env.TASKS_KV, ACCESS_INDEX)) ?? [];
-  if (!ids.length && env.TASKS_KV.list) {
-    const listed: string[] = [];
-    let cursor: string | undefined;
-    do {
-      const result = await env.TASKS_KV.list({ prefix: CODE_PREFIX, cursor, limit: 1000 });
-      listed.push(...result.keys.map((item) => item.name.replace(CODE_PREFIX, "")));
-      cursor = result.list_complete ? undefined : result.cursor;
-    } while (cursor);
-    ids = listed;
-  }
-
-  for (const id of ids) {
-    const record = await readKvFallbackAccessCode(env, id);
-    if (record) await writeAccessCode(db, record);
-  }
+  return null;
 }
 
 export async function resolveAccessCodeUser(env: AccessCodeEnv, code: string) {
@@ -212,7 +158,7 @@ export async function resolveAccessCodeUser(env: AccessCodeEnv, code: string) {
 
   const db = await requireAdminDb(env, "访问码表");
   const hash = await hashCode(normalized);
-  const record = await readAccessCodeByHash(env, db, hash);
+  const record = await readAccessCodeByHash(db, hash);
   if (!record || !record.active || record.codeHash !== hash) return null;
 
   const next: AccessCodeRecord = {
@@ -234,7 +180,6 @@ export async function resolveAccessCodeUser(env: AccessCodeEnv, code: string) {
 
 export async function listAccessCodes(env: AccessCodeEnv) {
   const db = await requireAdminDb(env, "访问码表");
-  await importKvFallbackAccessCodes(env, db);
   const result = await db
     .prepare(
       `SELECT id, label, code_hash, active, created_at, updated_at,
@@ -256,7 +201,7 @@ export async function createAccessCodeRecord(
   if (normalizedCode.length < 6) throw new Error("访问码至少需要 6 位");
 
   const codeHash = await hashCode(normalizedCode);
-  if (await readAccessCodeByHash(env, db, codeHash)) {
+  if (await readAccessCodeByHash(db, codeHash)) {
     throw new Error("访问码已存在，请换一个");
   }
 
@@ -285,7 +230,7 @@ export async function updateAccessCodeRecord(
   patch: { label?: string; active?: boolean },
 ) {
   const db = await requireAdminDb(env, "访问码表");
-  const record = (await readAccessCode(db, id)) ?? (await readKvFallbackAccessCode(env, id));
+  const record = await readAccessCode(db, id);
   if (!record) throw new Error("访问码不存在");
 
   const next: AccessCodeRecord = {

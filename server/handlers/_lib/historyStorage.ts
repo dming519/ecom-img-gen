@@ -380,53 +380,19 @@ async function serializeDetailItem(
   userKey: string,
   item: HistoryItem,
 ) {
-  const productImages = item.product.productImages
-    .filter((image) => image.startsWith("data:image/"))
-    .slice(0, 8);
-  const existingImageIds = item.product.productImageIds ?? [];
-  const productImageIds = productImages.length
-    ? await Promise.all(
-        productImages.map((image, index) =>
-          existingImageIds[index] ?? writeImage(env, userKey, image),
-        ),
-      )
-    : existingImageIds;
+  void env;
+  void userKey;
   const clean: HistoryItem = {
     ...item,
     product: {
       ...item.product,
       productImages: [],
-      productImageIds,
+      productImageIds: item.product.productImageIds ?? [],
     },
   };
-  const prompts = await Promise.all(
-    clean.prompts.map(async (prompt) => {
-      const legacyPrompt = (prompt as typeof prompt & { prompt?: unknown }).prompt;
-      const promptId =
-        typeof legacyPrompt === "string" && legacyPrompt.trim()
-          ? await storeDetailPrompt(env, userKey, {
-              id: prompt.promptId,
-              title: prompt.title,
-              prompt: legacyPrompt,
-              index: prompt.index,
-            })
-          : prompt.promptId;
-      const imageId =
-        prompt.base64 && !prompt.imageId
-          ? await writeImage(env, userKey, prompt.base64, DEFAULT_IMAGE_MIME)
-          : prompt.imageId;
-      const { base64: _base64, prompt: _prompt, ...rest } =
-        prompt as typeof prompt & { prompt?: unknown };
-      return {
-        ...rest,
-        promptId,
-        imageId,
-      };
-    }),
-  );
   return {
     ...clean,
-    prompts,
+    prompts: clean.prompts,
   };
 }
 
@@ -435,30 +401,9 @@ async function serializeCutoutItem(
   userKey: string,
   item: CutoutHistoryItem,
 ) {
-  const sourceImageId =
-    item.sourceImage && !item.sourceImageId
-      ? await writeImage(env, userKey, item.sourceImage, DEFAULT_IMAGE_MIME)
-      : item.sourceImageId;
-  const maskImageId =
-    item.maskImage && !item.maskImageId
-      ? await writeImage(env, userKey, item.maskImage, DEFAULT_IMAGE_MIME)
-      : item.maskImageId;
-  const resultImageId =
-    item.resultBase64 && !item.resultImageId
-      ? await writeImage(env, userKey, item.resultBase64, DEFAULT_IMAGE_MIME)
-      : item.resultImageId;
-  const {
-    sourceImage: _sourceImage,
-    maskImage: _maskImage,
-    resultBase64: _resultBase64,
-    ...rest
-  } = item;
-  return {
-    ...rest,
-    sourceImageId,
-    maskImageId,
-    resultImageId,
-  };
+  void env;
+  void userKey;
+  return item;
 }
 
 async function serializeEditItem(
@@ -466,30 +411,9 @@ async function serializeEditItem(
   userKey: string,
   item: EditHistoryItem,
 ) {
-  const sourceImageId =
-    item.sourceImage && !item.sourceImageId
-      ? await writeImage(env, userKey, item.sourceImage, DEFAULT_IMAGE_MIME)
-      : item.sourceImageId;
-  const maskImageId =
-    item.maskImage && !item.maskImageId
-      ? await writeImage(env, userKey, item.maskImage, DEFAULT_IMAGE_MIME)
-      : item.maskImageId;
-  const resultImageId =
-    item.resultBase64 && !item.resultImageId
-      ? await writeImage(env, userKey, item.resultBase64, DEFAULT_IMAGE_MIME)
-      : item.resultImageId;
-  const {
-    sourceImage: _sourceImage,
-    maskImage: _maskImage,
-    resultBase64: _resultBase64,
-    ...rest
-  } = item;
-  return {
-    ...rest,
-    sourceImageId,
-    maskImageId,
-    resultImageId,
-  };
+  void env;
+  void userKey;
+  return item;
 }
 
 async function serializeMultiViewItem(
@@ -497,35 +421,11 @@ async function serializeMultiViewItem(
   userKey: string,
   item: MultiViewHistoryItem,
 ) {
-  const sourceImages = (item.sourceImages ?? [])
-    .filter((image) => image.startsWith("data:image/"))
-    .slice(0, 8);
-  const existingImageIds = item.sourceImageIds ?? [];
-  const sourceImageIds = sourceImages.length
-    ? await Promise.all(
-        sourceImages.map((image, index) =>
-          existingImageIds[index] ?? writeImage(env, userKey, image),
-        ),
-      )
-    : existingImageIds;
-  const results = await Promise.all(
-    item.results.map(async (result) => {
-      const imageId =
-        result.base64 && !result.imageId
-          ? await writeImage(env, userKey, result.base64, DEFAULT_IMAGE_MIME)
-          : result.imageId;
-      const { base64: _base64, ...rest } = result;
-      return {
-        ...rest,
-        imageId,
-      };
-    }),
-  );
-  const { sourceImages: _sourceImages, ...rest } = item;
+  void env;
+  void userKey;
   return {
-    ...rest,
-    sourceImageIds,
-    results,
+    ...item,
+    sourceImageIds: item.sourceImageIds ?? [],
   };
 }
 
@@ -534,29 +434,9 @@ async function serializeLayerItem(
   userKey: string,
   item: LayerHistoryItem,
 ) {
-  const sourceImageId =
-    item.sourceImage && !item.sourceImageId
-      ? await writeImage(env, userKey, item.sourceImage, DEFAULT_IMAGE_MIME)
-      : item.sourceImageId;
-  const layers = await Promise.all(
-    item.layers.map(async (layer) => {
-      const imageId =
-        layer.base64 && !layer.imageId
-          ? await writeImage(env, userKey, layer.base64, DEFAULT_IMAGE_MIME)
-          : layer.imageId;
-      const { base64: _base64, ...rest } = layer;
-      return {
-        ...rest,
-        imageId,
-      };
-    }),
-  );
-  const { sourceImage: _sourceImage, ...rest } = item;
-  return {
-    ...rest,
-    sourceImageId,
-    layers,
-  };
+  void env;
+  void userKey;
+  return item;
 }
 
 async function serializeCutoutDraft(
@@ -564,19 +444,11 @@ async function serializeCutoutDraft(
   userKey: string,
   draft: Omit<CutoutDraft, "id"> & { id?: "active" },
 ) {
-  const resultBase64 =
-    typeof draft.resultBase64 === "string" && draft.resultBase64
-      ? draft.resultBase64
-      : null;
-  const resultImageId =
-    resultBase64 && !draft.resultImageId
-      ? await writeImage(env, userKey, resultBase64, DEFAULT_IMAGE_MIME)
-      : draft.resultImageId;
-  const { resultBase64: _resultBase64, ...rest } = draft;
+  void env;
+  void userKey;
   return {
-    ...rest,
+    ...draft,
     id: "active" as const,
-    resultImageId: resultImageId || undefined,
   };
 }
 
@@ -630,118 +502,13 @@ async function updateHistoryRecord(
     .run();
 }
 
-function hasInlineDetailImages(item: HistoryItem) {
-  return (
-    item.product.productImages.some((image) => image.startsWith("data:image/")) ||
-    item.prompts.some((prompt) => {
-      const legacyPrompt = (prompt as typeof prompt & { prompt?: unknown }).prompt;
-      return !!prompt.base64 || (typeof legacyPrompt === "string" && !!legacyPrompt.trim());
-    })
-  );
+function parseHistoryRow<T extends { id?: number }>(row: HistoryRow) {
+  const item = parseJson<T>(row.payload);
+  return item ? { ...item, id: row.id } : null;
 }
 
-function hasInlineCutoutImages(item: CutoutHistoryItem) {
-  return !!(
-    item.sourceImage ||
-    item.maskImage ||
-    item.resultBase64
-  );
-}
-
-function hasInlineEditImages(item: EditHistoryItem) {
-  return !!(
-    item.sourceImage ||
-    item.maskImage ||
-    item.resultBase64
-  );
-}
-
-function hasInlineMultiViewImages(item: MultiViewHistoryItem) {
-  return !!(
-    item.sourceImages?.some((image) => image.startsWith("data:image/")) ||
-    item.results.some((result) => result.base64)
-  );
-}
-
-function hasInlineLayerImages(item: LayerHistoryItem) {
-  return !!(
-    item.sourceImage ||
-    item.layers.some((layer) => layer.base64)
-  );
-}
-
-function hasInlineCutoutDraftImages(draft: CutoutDraft) {
-  return typeof draft.resultBase64 === "string" && !!draft.resultBase64;
-}
-
-async function normalizeStoredDetailItem(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  row: HistoryRow,
-) {
-  const item = parseJson<HistoryItem>(row.payload);
-  if (!item) return null;
-  if (!hasInlineDetailImages(item)) return { ...item, id: row.id };
-
-  const payload = await serializeDetailItem(env, userKey, item);
-  await updateHistoryRecord(env.HISTORY_DB, userKey, "detail", row.id, payload, Date.now());
-  return { ...payload, id: row.id };
-}
-
-async function normalizeStoredCutoutItem(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  row: HistoryRow,
-) {
-  const item = parseJson<CutoutHistoryItem>(row.payload);
-  if (!item) return null;
-  if (!hasInlineCutoutImages(item)) return { ...item, id: row.id };
-
-  const payload = await serializeCutoutItem(env, userKey, item);
-  await updateHistoryRecord(env.HISTORY_DB, userKey, "cutout", row.id, payload, Date.now());
-  return { ...payload, id: row.id };
-}
-
-async function normalizeStoredEditItem(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  row: HistoryRow,
-) {
-  const item = parseJson<EditHistoryItem>(row.payload);
-  if (!item) return null;
-  if (!hasInlineEditImages(item)) return { ...item, id: row.id };
-
-  const payload = await serializeEditItem(env, userKey, item);
-  await updateHistoryRecord(env.HISTORY_DB, userKey, "edit", row.id, payload, Date.now());
-  return { ...payload, id: row.id };
-}
-
-async function normalizeStoredMultiViewItem(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  row: HistoryRow,
-) {
-  const item = parseJson<MultiViewHistoryItem>(row.payload);
-  if (!item) return null;
-  if (!hasInlineMultiViewImages(item)) return { ...item, id: row.id };
-
-  const payload = await serializeMultiViewItem(env, userKey, item);
-  await updateHistoryRecord(env.HISTORY_DB, userKey, "multi-view", row.id, payload, Date.now());
-  return { ...payload, id: row.id };
-}
-
-async function normalizeStoredLayerItem(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  row: HistoryRow,
-) {
-  const item = parseJson<LayerHistoryItem>(row.payload);
-  if (!item) return null;
-  if (!hasInlineLayerImages(item)) return { ...item, id: row.id };
-
-  const payload = await serializeLayerItem(env, userKey, item);
-  await updateHistoryRecord(env.HISTORY_DB, userKey, "layer", row.id, payload, Date.now());
-  return { ...payload, id: row.id };
+function isPresent<T>(item: T | null): item is T {
+  return item !== null;
 }
 
 async function listHistoryRows(
@@ -784,12 +551,9 @@ export async function listDetailHistory(
 ) {
   await ensureHistorySchema(env.HISTORY_DB);
   const rows = await listHistoryRows(env.HISTORY_DB, userKey, "detail");
-  const items: HistoryItem[] = [];
-  for (const row of rows) {
-    const item = await normalizeStoredDetailItem(env, userKey, row);
-    if (item) items.push(item);
-  }
-  return items;
+  return rows
+    .map((row) => parseHistoryRow<HistoryItem>(row))
+    .filter(isPresent);
 }
 
 export async function deleteDetailHistory(
@@ -838,12 +602,9 @@ export async function listCutoutHistory(
 ) {
   await ensureHistorySchema(env.HISTORY_DB);
   const rows = await listHistoryRows(env.HISTORY_DB, userKey, "cutout");
-  const items: CutoutHistoryItem[] = [];
-  for (const row of rows) {
-    const item = await normalizeStoredCutoutItem(env, userKey, row);
-    if (item) items.push(item);
-  }
-  return items;
+  return rows
+    .map((row) => parseHistoryRow<CutoutHistoryItem>(row))
+    .filter(isPresent);
 }
 
 export async function deleteCutoutHistory(
@@ -892,12 +653,9 @@ export async function listEditHistory(
 ) {
   await ensureHistorySchema(env.HISTORY_DB);
   const rows = await listHistoryRows(env.HISTORY_DB, userKey, "edit");
-  const items: EditHistoryItem[] = [];
-  for (const row of rows) {
-    const item = await normalizeStoredEditItem(env, userKey, row);
-    if (item) items.push(item);
-  }
-  return items;
+  return rows
+    .map((row) => parseHistoryRow<EditHistoryItem>(row))
+    .filter(isPresent);
 }
 
 export async function deleteEditHistory(
@@ -946,12 +704,9 @@ export async function listMultiViewHistory(
 ) {
   await ensureHistorySchema(env.HISTORY_DB);
   const rows = await listHistoryRows(env.HISTORY_DB, userKey, "multi-view");
-  const items: MultiViewHistoryItem[] = [];
-  for (const row of rows) {
-    const item = await normalizeStoredMultiViewItem(env, userKey, row);
-    if (item) items.push(item);
-  }
-  return items;
+  return rows
+    .map((row) => parseHistoryRow<MultiViewHistoryItem>(row))
+    .filter(isPresent);
 }
 
 export async function deleteMultiViewHistory(
@@ -1000,12 +755,9 @@ export async function listLayerHistory(
 ) {
   await ensureHistorySchema(env.HISTORY_DB);
   const rows = await listHistoryRows(env.HISTORY_DB, userKey, "layer");
-  const items: LayerHistoryItem[] = [];
-  for (const row of rows) {
-    const item = await normalizeStoredLayerItem(env, userKey, row);
-    if (item) items.push(item);
-  }
-  return items;
+  return rows
+    .map((row) => parseHistoryRow<LayerHistoryItem>(row))
+    .filter(isPresent);
 }
 
 export async function deleteLayerHistory(
@@ -1041,17 +793,7 @@ export async function getCutoutDraft(
   )
     .bind(userKey)
     .first<{ payload: string }>();
-  const draft = parseJson<CutoutDraft>(row?.payload);
-  if (draft && hasInlineCutoutDraftImages(draft)) {
-    const payload = await serializeCutoutDraft(env, userKey, draft);
-    await env.HISTORY_DB.prepare(
-      `UPDATE cutout_drafts SET payload = ?, updated_at = ? WHERE user_key = ?`,
-    )
-      .bind(JSON.stringify(payload), Date.now(), userKey)
-      .run();
-    return payload;
-  }
-  return draft ?? null;
+  return parseJson<CutoutDraft>(row?.payload);
 }
 
 export async function saveCutoutDraft(

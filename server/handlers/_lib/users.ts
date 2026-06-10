@@ -6,21 +6,13 @@ const DAILY_RESET_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 type AuthProvider = AuthUser["provider"];
 
-interface KvListResult {
-  keys: Array<{ name: string }>;
-  cursor?: string;
-  list_complete?: boolean;
-}
-
 export interface UserKvNamespace {
   get: (key: string) => Promise<string | null>;
   put: (key: string, value: string, options?: { expirationTtl?: number }) => Promise<void>;
-  list?: (options?: { prefix?: string; cursor?: string; limit?: number }) => Promise<KvListResult>;
 }
 
 export interface UserEnv {
   HISTORY_DB?: HistoryD1Database;
-  TASKS_KV?: UserKvNamespace;
 }
 
 interface UserRecord {
@@ -76,15 +68,7 @@ interface UsageRow {
 }
 
 const META_ADMIN = "meta:superAdminUserKey";
-const USERS_INDEX = "users:index";
-
-function userRecordKey(userKey: string) {
-  return `user:${userKey}`;
-}
-
-function usageRecordKey(userKey: string) {
-  return `usage:${userKey}`;
-}
+const CURRENT_CREDIT_MODEL_VERSION = 2;
 
 function getUsageDay(timestamp = Date.now()) {
   return new Date(timestamp + DAILY_RESET_OFFSET_MS).toISOString().slice(0, 10);
@@ -138,18 +122,6 @@ function dailyUsageChanged(before: UsageRecord, after: UsageRecord) {
   );
 }
 
-function migrateInitialCreditsToPermanent(usage: UsageRecord): UsageRecord {
-  if (usage.creditModelVersion >= 2) return usage;
-  const granted = Math.max(0, Math.round(usage.grantedCredits));
-  const remaining = Math.max(0, Math.round(usage.remainingCredits));
-  return {
-    ...usage,
-    remainingCredits: Math.max(0, remaining - DAILY_IMAGE_CREDITS),
-    grantedCredits: Math.max(0, granted - DAILY_IMAGE_CREDITS),
-    creditModelVersion: 2,
-  };
-}
-
 function normalizeRole(role: string | undefined): UserRole {
   if (role === "super_admin" || role === "admin") return role;
   return "user";
@@ -157,16 +129,6 @@ function normalizeRole(role: string | undefined): UserRole {
 
 export function getUserKey(user: AuthUser) {
   return user.userKey || `${user.provider}:${user.id}`;
-}
-
-async function readJson<T>(kv: UserKvNamespace, key: string) {
-  const raw = await kv.get(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
 }
 
 async function ensureAdminSchema(db: HistoryD1Database) {
@@ -197,7 +159,7 @@ async function ensureAdminSchema(db: HistoryD1Database) {
       granted_credits INTEGER NOT NULL,
       daily_usage_date TEXT,
       daily_used_credits INTEGER NOT NULL DEFAULT 0,
-      credit_model_version INTEGER NOT NULL DEFAULT 0,
+      credit_model_version INTEGER NOT NULL DEFAULT 2,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       last_generated_at INTEGER
@@ -264,7 +226,7 @@ async function ensureUserUsageDailyColumns(db: HistoryD1Database) {
   }
   if (!names.has("credit_model_version")) {
     await db
-      .prepare(`ALTER TABLE user_usage ADD COLUMN credit_model_version INTEGER NOT NULL DEFAULT 0`)
+      .prepare(`ALTER TABLE user_usage ADD COLUMN credit_model_version INTEGER NOT NULL DEFAULT 2`)
       .run();
   }
 }
@@ -299,7 +261,7 @@ function fromUsageRow(row: UsageRow): UsageRecord {
     grantedCredits: row.granted_credits,
     dailyUsageDate: row.daily_usage_date ?? "",
     dailyUsedCredits: clampDailyUsed(row.daily_used_credits),
-    creditModelVersion: row.credit_model_version ?? 0,
+    creditModelVersion: row.credit_model_version ?? CURRENT_CREDIT_MODEL_VERSION,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastGeneratedAt: row.last_generated_at ?? undefined,
@@ -371,12 +333,8 @@ async function writeMeta(db: HistoryD1Database, key: string, value: string) {
     .run();
 }
 
-async function readSuperAdminKey(env: UserEnv, db: HistoryD1Database) {
-  const existing = await readMeta(db, META_ADMIN);
-  if (existing) return existing;
-  const kvFallback = await env.TASKS_KV?.get(META_ADMIN);
-  if (kvFallback) await writeMeta(db, META_ADMIN, kvFallback);
-  return kvFallback ?? null;
+async function readSuperAdminKey(db: HistoryD1Database) {
+  return readMeta(db, META_ADMIN);
 }
 
 async function readUserRecord(db: HistoryD1Database, userKey: string) {
@@ -473,62 +431,26 @@ async function writeUsageRecord(db: HistoryD1Database, usage: UsageRecord) {
     .run();
 }
 
-async function readKvFallbackUser(env: UserEnv, userKey: string) {
-  return env.TASKS_KV
-    ? readJson<UserRecord>(env.TASKS_KV, userRecordKey(userKey))
-    : null;
-}
-
-async function readKvFallbackUsage(env: UserEnv, userKey: string) {
-  return env.TASKS_KV
-    ? readJson<UsageRecord>(env.TASKS_KV, usageRecordKey(userKey))
-    : null;
-}
-
 async function readUsage(
-  env: UserEnv,
   db: HistoryD1Database,
   userKey: string,
   now = Date.now(),
 ) {
   const existing = await readUsageRecord(db, userKey);
   if (existing) {
-    let source = existing;
-    if (existing.creditModelVersion < 2) {
-      const kvFallback = await readKvFallbackUsage(env, userKey);
-      if (kvFallback && kvFallback.grantedCredits > existing.grantedCredits) {
-        source = {
-          ...kvFallback,
-          dailyUsageDate: kvFallback.dailyUsageDate ?? "",
-          dailyUsedCredits: clampDailyUsed(kvFallback.dailyUsedCredits),
-          creditModelVersion: kvFallback.creditModelVersion ?? 0,
-        };
-      }
-    }
-    const migrated = migrateInitialCreditsToPermanent(source);
-    const normalized = normalizeDailyUsage(migrated, now);
+    const normalized = normalizeDailyUsage(
+      {
+        ...existing,
+        creditModelVersion: CURRENT_CREDIT_MODEL_VERSION,
+      },
+      now,
+    );
     if (
       dailyUsageChanged(existing, normalized) ||
-      existing.remainingCredits !== normalized.remainingCredits ||
-      existing.grantedCredits !== normalized.grantedCredits ||
       existing.creditModelVersion !== normalized.creditModelVersion
     ) {
       await writeUsageRecord(db, normalized);
     }
-    return normalized;
-  }
-  const kvFallback = await readKvFallbackUsage(env, userKey);
-  if (kvFallback) {
-    const normalized = normalizeDailyUsage(
-      migrateInitialCreditsToPermanent({
-        ...kvFallback,
-        dailyUsageDate: kvFallback.dailyUsageDate ?? "",
-        dailyUsedCredits: clampDailyUsed(kvFallback.dailyUsedCredits),
-        creditModelVersion: kvFallback.creditModelVersion ?? 0,
-      }),
-      now,
-    );
-    await writeUsageRecord(db, normalized);
     return normalized;
   }
   const created: UsageRecord = {
@@ -538,38 +460,12 @@ async function readUsage(
     grantedCredits: 0,
     dailyUsageDate: getUsageDay(now),
     dailyUsedCredits: 0,
-    creditModelVersion: 2,
+    creditModelVersion: CURRENT_CREDIT_MODEL_VERSION,
     createdAt: now,
     updatedAt: now,
   };
   await writeUsageRecord(db, created);
   return created;
-}
-
-async function importKvFallbackUsers(env: UserEnv, db: HistoryD1Database) {
-  if (!env.TASKS_KV) return;
-
-  const kvFallbackAdmin = await env.TASKS_KV.get(META_ADMIN);
-  if (kvFallbackAdmin) await writeMeta(db, META_ADMIN, kvFallbackAdmin);
-
-  let userKeys = (await readJson<string[]>(env.TASKS_KV, USERS_INDEX)) ?? [];
-  if (!userKeys.length && env.TASKS_KV.list) {
-    const listed: string[] = [];
-    let cursor: string | undefined;
-    do {
-      const result = await env.TASKS_KV.list({ prefix: "user:", cursor, limit: 1000 });
-      listed.push(...result.keys.map((item) => item.name.replace(/^user:/, "")));
-      cursor = result.list_complete ? undefined : result.cursor;
-    } while (cursor);
-    userKeys = listed;
-  }
-
-  for (const userKey of userKeys) {
-    const record = await readKvFallbackUser(env, userKey);
-    if (!record) continue;
-    await writeUserRecord(db, record);
-    await readUsage(env, db, userKey);
-  }
 }
 
 export async function ensureManagedUser(env: UserEnv, authUser: AuthUser) {
@@ -589,11 +485,8 @@ export async function ensureManagedUser(env: UserEnv, authUser: AuthUser) {
 
   const now = Date.now();
   const userKey = getUserKey(authUser);
-  const existing = (await readUserRecord(db, userKey)) ?? (await readKvFallbackUser(env, userKey));
-  if (existing && !(await readUserRecord(db, userKey))) {
-    await writeUserRecord(db, existing);
-  }
-  const existingAdmin = await readSuperAdminKey(env, db);
+  const existing = await readUserRecord(db, userKey);
+  const existingAdmin = await readSuperAdminKey(db);
   const canBecomeFirstAdmin = authUser.provider !== "access";
   const isFirstUser = !existingAdmin && canBecomeFirstAdmin;
   const isRegisteredSuperAdmin = existingAdmin === userKey;
@@ -618,7 +511,7 @@ export async function ensureManagedUser(env: UserEnv, authUser: AuthUser) {
     await writeMeta(db, META_ADMIN, userKey);
   }
 
-  const usage = await readUsage(env, db, userKey, now);
+  const usage = await readUsage(db, userKey, now);
   return {
     user: toSessionUser(record, usage),
     record,
@@ -632,13 +525,10 @@ export async function hydrateManagedUser(env: UserEnv, authUser: AuthUser) {
   await ensureAdminSchema(db);
 
   const userKey = getUserKey(authUser);
-  const record = (await readUserRecord(db, userKey)) ?? (await readKvFallbackUser(env, userKey));
+  const record = await readUserRecord(db, userKey);
   if (!record) return ensureManagedUser(env, authUser);
-  if (!(await readUserRecord(db, userKey))) {
-    await writeUserRecord(db, record);
-  }
 
-  const superAdminKey = await readSuperAdminKey(env, db);
+  const superAdminKey = await readSuperAdminKey(db);
   const role: UserRole =
     superAdminKey === userKey ? "super_admin" : normalizeRole(record.role);
   const normalizedRecord =
@@ -647,7 +537,7 @@ export async function hydrateManagedUser(env: UserEnv, authUser: AuthUser) {
     await writeUserRecord(db, normalizedRecord);
   }
 
-  const usage = await readUsage(env, db, userKey);
+  const usage = await readUsage(db, userKey);
   return {
     user: toSessionUser(normalizedRecord, usage),
     record: normalizedRecord,
@@ -658,17 +548,10 @@ export async function hydrateManagedUser(env: UserEnv, authUser: AuthUser) {
 export async function consumeImageCreditByUserKey(env: UserEnv, userKey: string) {
   const db = await requireAdminDb(env, "用户次数表");
   let record = await readUserRecord(db, userKey);
-  if (!record) {
-    const kvFallback = await readKvFallbackUser(env, userKey);
-    if (kvFallback) {
-      await writeUserRecord(db, kvFallback);
-      record = kvFallback;
-    }
-  }
   if (!record) throw new Error("用户不存在");
 
-  const usage = await readUsage(env, db, userKey);
-  const superAdminKey = await readSuperAdminKey(env, db);
+  const usage = await readUsage(db, userKey);
+  const superAdminKey = await readSuperAdminKey(db);
   const role: UserRole =
     superAdminKey === userKey ? "super_admin" : normalizeRole(record.role);
   const normalizedRecord =
@@ -759,8 +642,7 @@ export async function grantImageCredits(env: UserEnv, authUser: AuthUser, amount
 
 export async function listManagedUsers(env: UserEnv) {
   const db = await requireAdminDb(env, "用户表");
-  await importKvFallbackUsers(env, db);
-  const superAdminKey = await readSuperAdminKey(env, db);
+  const superAdminKey = await readSuperAdminKey(db);
   const result = await db
     .prepare(
       `SELECT user_key, provider, provider_id, name, email, image, role,
@@ -780,7 +662,7 @@ export async function listManagedUsers(env: UserEnv) {
     if (normalizedRecord !== record) {
       await writeUserRecord(db, normalizedRecord);
     }
-    const usage = await readUsage(env, db, normalizedRecord.userKey);
+    const usage = await readUsage(db, normalizedRecord.userKey);
     rows.push(toAdminRow(normalizedRecord, usage));
   }
 
@@ -794,17 +676,10 @@ export async function updateManagedUser(
 ) {
   const db = await requireAdminDb(env, "用户表");
   let record = await readUserRecord(db, userKey);
-  if (!record) {
-    const kvFallback = await readKvFallbackUser(env, userKey);
-    if (kvFallback) {
-      await writeUserRecord(db, kvFallback);
-      record = kvFallback;
-    }
-  }
   if (!record) throw new Error("用户不存在");
 
   const now = Date.now();
-  const superAdminKey = await readSuperAdminKey(env, db);
+  const superAdminKey = await readSuperAdminKey(db);
   const isSuperAdmin = superAdminKey === userKey;
   let nextRecord = record;
   if (patch.role) {
@@ -820,7 +695,7 @@ export async function updateManagedUser(
     await writeUserRecord(db, nextRecord);
   }
 
-  let usage = await readUsage(env, db, userKey, now);
+  let usage = await readUsage(db, userKey, now);
   if (Number.isFinite(patch.remainingCredits)) {
     const nextRemaining = Math.max(0, Math.round(patch.remainingCredits ?? 0));
     usage = {

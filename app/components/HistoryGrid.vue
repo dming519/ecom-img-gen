@@ -23,7 +23,6 @@ const TIME_FMT: Intl.DateTimeFormatOptions = {
 
 function getPromptSrc(prompt: DetailPromptItem | undefined) {
   if (!prompt) return null
-  if (prompt.base64) return `data:image/png;base64,${prompt.base64}`
   if (prompt.imageId) return dbImageFileUrl(prompt.imageId)
   return null
 }
@@ -55,11 +54,11 @@ function getReversed(history: HistoryItem[]) {
     >
       <div class="history-cover">
         <span class="tile-no">
-          {{ item.prompts.filter((prompt) => prompt.base64 || prompt.imageId).length }}/{{ item.prompts.length }}
+          {{ item.prompts.filter((prompt) => prompt.imageId).length }}/{{ item.prompts.length }}
         </span>
         <img
-          v-if="getPromptSrc(item.prompts.find((prompt) => prompt.base64 || prompt.imageId))"
-          :src="getPromptSrc(item.prompts.find((prompt) => prompt.base64 || prompt.imageId))!"
+          v-if="getPromptSrc(item.prompts.find((prompt) => prompt.imageId))"
+          :src="getPromptSrc(item.prompts.find((prompt) => prompt.imageId))!"
           :alt="item.product.name"
         >
         <div v-else class="tile-empty">{{ item.product.name.slice(0, 8) }}</div>

@@ -39,7 +39,6 @@ interface MultiViewItem extends MultiViewAngle {
   status: MultiViewStatus
   taskId?: string
   imageId?: string
-  base64?: string
   model?: string
   error?: string
   updatedAt?: number
@@ -195,7 +194,6 @@ function updateMultiViewHistorySnapshot(
   options: { status?: MultiViewHistoryStatus; error?: string | null } = {},
 ) {
   item.sourceImageIds = productImageIds.value.slice()
-  item.sourceImages = productImages.value.slice()
   item.aspectRatio = aspectRatio.value
   item.quality = quality.value
   item.results = cloneViewItems()
@@ -377,7 +375,6 @@ async function generateView(index: number, generationImageIds: string[], history
           status: "queued",
           taskId: undefined,
           imageId: undefined,
-          base64: undefined,
           model: undefined,
           error: undefined,
           updatedAt: Date.now(),
@@ -434,6 +431,7 @@ async function generateView(index: number, generationImageIds: string[], history
   }
 
   updateSessionCredits(result)
+  if (!result.imageId) throw new Error(`${item.title}未返回图片 ID`)
   items.value = items.value.map((view, viewIndex) =>
     viewIndex === index
       ? {
@@ -441,7 +439,6 @@ async function generateView(index: number, generationImageIds: string[], history
           status: "succeeded",
           taskId: undefined,
           imageId: result.imageId,
-          base64: result.base64,
           model: result.model,
           error: undefined,
           updatedAt: Date.now(),
@@ -467,7 +464,6 @@ async function handleGenerateAll() {
     const generationImageIds = await getGenerationImageIds()
     historyItem = {
       sourceImageIds: generationImageIds,
-      sourceImages: productImages.value.slice(),
       aspectRatio: aspectRatio.value,
       quality: quality.value,
       results: cloneViewItems(),
@@ -534,7 +530,6 @@ async function handleRegenerate(index: number) {
     if (!historyItem) {
       historyItem = {
         sourceImageIds: generationImageIds,
-        sourceImages: productImages.value.slice(),
         aspectRatio: aspectRatio.value,
         quality: quality.value,
         results: cloneViewItems(),
@@ -571,7 +566,7 @@ function handleCancelGeneration() {
   abortRef.value?.abort()
   items.value = items.value.map((item) =>
     item.status === "queued" || item.status === "running"
-      ? { ...item, status: item.base64 || item.imageId ? "succeeded" : "draft", taskId: undefined }
+      ? { ...item, status: item.imageId ? "succeeded" : "draft", taskId: undefined }
       : item,
   )
   const historyItem = history.value[activeHistoryIdx.value]
@@ -582,7 +577,6 @@ function handleCancelGeneration() {
 }
 
 function getResultSrc(item: MultiViewItem) {
-  if (item.base64) return `data:image/png;base64,${item.base64}`
   if (item.imageId) return dbImageFileUrl(item.imageId)
   return null
 }
@@ -597,9 +591,8 @@ function handleDownload(item: MultiViewItem) {
 }
 
 function getMultiViewHistoryCover(item: MultiViewHistoryItem) {
-  const result = item.results.find((view) => view.imageId || view.base64)
+  const result = item.results.find((view) => view.imageId)
   if (!result) return null
-  if (result.base64) return `data:image/png;base64,${result.base64}`
   if (result.imageId) return dbImageFileUrl(result.imageId)
   return null
 }
@@ -616,9 +609,7 @@ async function handleSelectHistory(index: number) {
     .filter((result): result is MultiViewItem => !!result)
     .map((result) => ({ ...result }))
   productImageIds.value = item.sourceImageIds?.slice() ?? []
-  productImages.value = productImageIds.value.length
-    ? await dbGetProductImages(productImageIds.value)
-    : item.sourceImages?.slice() ?? []
+  productImages.value = await dbGetProductImages(productImageIds.value)
   error.value = item.error ?? null
 }
 
@@ -912,7 +903,7 @@ watch(
                       : "处理中"
               }}
             </strong>
-            <p>{{ item.error || `${item.results.filter(result => result.imageId || result.base64).length}/${item.results.length} 张视角图` }}</p>
+            <p>{{ item.error || `${item.results.filter(result => result.imageId).length}/${item.results.length} 张视角图` }}</p>
             <small>{{ new Date(item.createdAt).toLocaleString() }}</small>
           </div>
         </button>

@@ -38,7 +38,6 @@ const MASK_HISTORY_LIMIT = 18
 const sourceImage = shallowRef<string | null>(null)
 const sourceImageId = shallowRef<string | undefined>()
 const resultImageId = shallowRef<string | undefined>()
-const resultBase64 = shallowRef<string | null>(null)
 const editInstruction = shallowRef("")
 const history = ref<EditHistoryItem[]>([])
 const activeHistoryIdx = shallowRef(-1)
@@ -70,13 +69,7 @@ const creditLabel = computed(() =>
 const isSuperAdmin = computed(() => props.session?.user?.role === "super_admin")
 const sessionUserKey = computed(() => props.session?.user?.userKey ?? props.session?.user?.id ?? null)
 const controlsDisabled = computed(() => props.sessionLoading || busy.value || !props.authenticated)
-const resultSrc = computed(() =>
-  resultBase64.value
-    ? `data:image/png;base64,${resultBase64.value}`
-    : resultImageId.value
-      ? dbImageFileUrl(resultImageId.value)
-      : null,
-)
+const resultSrc = computed(() => (resultImageId.value ? dbImageFileUrl(resultImageId.value) : null))
 const canvasStyle = computed(() =>
   canvasSize.value.width && canvasSize.value.height
     ? {
@@ -221,7 +214,6 @@ async function handleFileChange(event: Event) {
     sourceImage.value = dataUrl
     sourceImageId.value = id
     resultImageId.value = undefined
-    resultBase64.value = null
     canvasZoom.value = 1
     activeHistoryIdx.value = -1
   } catch (uploadError) {
@@ -410,7 +402,6 @@ async function handleGenerate() {
   abortRef.value = new AbortController()
   let item: EditHistoryItem = {
     sourceImageId: sourceImageId.value,
-    sourceImage: sourceImage.value,
     instruction,
     status: "running",
     createdAt: Date.now(),
@@ -421,7 +412,7 @@ async function handleGenerate() {
     const editorMaskImage = maskCanvasRef.value?.toDataURL("image/png")
     const maskImageId = editorMaskImage ? await dbPutProductImage(editorMaskImage) : undefined
     const taskMaskImageId = await dbPutProductImage(apiMaskImage)
-    item = { ...item, maskImageId, maskImage: editorMaskImage }
+    item = { ...item, maskImageId }
     await persistEdit(item)
     history.value = [...history.value, item]
     activeHistoryIdx.value = history.value.length - 1
@@ -462,6 +453,7 @@ async function handleGenerate() {
       return
     }
     updateSessionCredits(result)
+    if (!result.imageId) throw new Error("改图任务未返回图片 ID")
     item = {
       ...item,
       status: "succeeded",
@@ -469,11 +461,9 @@ async function handleGenerate() {
       error: undefined,
       model: result.model,
       resultImageId: result.imageId,
-      resultBase64: result.base64,
       updatedAt: Date.now(),
     }
     resultImageId.value = result.imageId
-    resultBase64.value = result.base64 ?? null
     await persistEdit(item)
     resultImageId.value = item.resultImageId
     history.value = history.value.map((historyItem) =>
@@ -512,7 +502,6 @@ async function handleSelectHistory(index: number) {
   activeHistoryIdx.value = index
   editInstruction.value = item.instruction
   resultImageId.value = item.resultImageId
-  resultBase64.value = item.resultBase64 ?? null
   error.value = item.error ?? null
   if (item.sourceImageId) {
     const [restored] = await dbGetProductImages([item.sourceImageId])
@@ -557,7 +546,6 @@ function handleDownload() {
 }
 
 function getEditResultSrc(item: EditHistoryItem) {
-  if (item.resultBase64) return `data:image/png;base64,${item.resultBase64}`
   if (item.resultImageId) return dbImageFileUrl(item.resultImageId)
   return null
 }
