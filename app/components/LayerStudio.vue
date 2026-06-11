@@ -316,6 +316,33 @@ function updateLayerHistorySnapshot(
   item.updatedAt = Date.now()
 }
 
+function getLayerHistoryPersistSignature(item: LayerHistoryItem) {
+  return JSON.stringify({
+    sourceImageId: item.sourceImageId ?? "",
+    sourceDimensions: item.sourceDimensions
+      ? `${item.sourceDimensions.width}x${item.sourceDimensions.height}`
+      : "",
+    normalizedToSourceSize: !!item.normalizedToSourceSize,
+    layerBackground: item.layerBackground ?? "",
+    status: item.status,
+    error: item.error ?? "",
+    model: item.model ?? "",
+    taskId: item.taskId ?? "",
+    progress: item.progress
+      ? `${item.progress.done}/${item.progress.total}/${item.progress.current}`
+      : "",
+    layers: item.layers
+      .map((layer) => [
+        layer.id,
+        layer.imageId ?? "",
+        layer.name,
+        layer.role,
+        layer.index,
+      ].join(":"))
+      .join("|"),
+  })
+}
+
 async function persistLayer(
   item: LayerHistoryItem,
   options: { activate?: boolean } = {},
@@ -459,7 +486,14 @@ async function handleGenerate() {
     updatedAt: Date.now(),
   }
   let persistQueue = Promise.resolve()
-  const queuePersistLayer = () => {
+  let lastPersistSignature = ""
+  const markPersistSnapshot = () => {
+    lastPersistSignature = getLayerHistoryPersistSignature(historyItem)
+  }
+  const queuePersistLayerIfChanged = () => {
+    const nextSignature = getLayerHistoryPersistSignature(historyItem)
+    if (nextSignature === lastPersistSignature) return
+    lastPersistSignature = nextSignature
     persistQueue = persistQueue
       .catch(() => undefined)
       .then(() => persistLayer(historyItem))
@@ -467,6 +501,7 @@ async function handleGenerate() {
 
   try {
     await persistLayer(historyItem)
+    markPersistSnapshot()
     const created = await createLayerTask({
       sourceImageId: sourceImageId.value,
       sourceDimensions: sourceDimensions.value ?? undefined,
@@ -476,12 +511,13 @@ async function handleGenerate() {
     updateSessionCredits({ status: "pending", ...created })
     updateLayerHistorySnapshot(historyItem, { status: "running", taskId: created.taskId, error: null })
     await persistLayer(historyItem)
+    markPersistSnapshot()
     const result = await pollLayerTask(created.taskId, undefined, abortRef.value.signal, async (next) => {
       await syncLayersFromTask(next)
       if (!next.progress) return
       progress.value = normalizeLayerProgress(next.progress)
       updateLayerHistorySnapshot(historyItem, { status: "running", error: null })
-      queuePersistLayer()
+      queuePersistLayerIfChanged()
     })
     await syncLayersFromTask(result, { preferPreview: result.status === "succeeded" })
     await persistQueue
