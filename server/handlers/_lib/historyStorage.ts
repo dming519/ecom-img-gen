@@ -33,6 +33,7 @@ export interface HistoryStorageEnv extends PostgresEnv {
 
 export interface HistoryStorageBindings extends HistoryStorageEnv {
   HISTORY_BUCKET: HistoryR2Bucket;
+  sql?: AppSql;
 }
 
 export interface HistoryStorageFunctionEnv extends HistoryStorageEnv {
@@ -116,8 +117,8 @@ export function json(data: unknown, init?: ResponseInit) {
   });
 }
 
-export function getHistorySql(env: HistoryStorageEnv) {
-  return getPostgres(env, "业务数据");
+export function getHistorySql(env: HistoryStorageEnv & { sql?: AppSql }) {
+  return env.sql ?? getPostgres(env, "业务数据");
 }
 
 export async function ensureHistorySchema(sql: AppSql) {
@@ -130,6 +131,7 @@ function requireHistoryBindings(env: HistoryStorageEnv) {
   }
   const sql = getHistorySql(env);
   return {
+    ...env,
     sql,
     HISTORY_BUCKET: env.HISTORY_BUCKET,
   };
@@ -139,11 +141,11 @@ export async function requireUserHistoryStorage(
   context: { request: Request; env: HistoryStorageFunctionEnv },
   unauthenticatedMessage: string,
 ) {
-  const session = await requireSession(context.request, context.env);
-  if (!session) {
-    return { response: json({ error: unauthenticatedMessage }, { status: 401 }) };
-  }
   try {
+    const session = await requireSession(context.request, context.env);
+    if (!session) {
+      return { response: json({ error: unauthenticatedMessage }, { status: 401 }) };
+    }
     return {
       userKey: getUserKey(session.user),
       storage: requireHistoryBindings(context.env),

@@ -140,7 +140,7 @@ export async function generateDetailPrompts(
 // 文案生成是异步任务：先创建 taskId，再每 2 秒查一次状态直到成功或失败。
 async function pollPromptTask(
   taskId: string,
-  timeoutMs = 6 * 60 * 1000,
+  timeoutMs = 20 * 60 * 1000,
 ): Promise<PromptTaskStatus> {
   const startedAt = Date.now();
   const deadline = Date.now() + timeoutMs;

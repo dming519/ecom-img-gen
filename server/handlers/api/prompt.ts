@@ -225,6 +225,8 @@ export async function handlePost(context: RequestContext) {
   await writePromptTask(kv, taskId, {
     status: "pending",
     userKey,
+    imageModes,
+    imageCount,
     createdAt: now,
     updatedAt: now,
   });
@@ -258,6 +260,8 @@ export async function handlePost(context: RequestContext) {
     await writePromptTask(kv, taskId, {
       status: "failed",
       userKey,
+      imageModes,
+      imageCount,
       createdAt: now,
       updatedAt: Date.now(),
       error:

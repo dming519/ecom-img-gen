@@ -37,7 +37,7 @@ interface PromptTaskRecord {
 }
 
 const TASK_TTL_SECONDS = 3600;
-const TASK_TIMEOUT_MS = 8 * 60 * 1000;
+const TASK_TIMEOUT_MS = 20 * 60 * 1000;
 
 function taskKey(taskId: string) {
   return `prompt-task:${taskId}`;

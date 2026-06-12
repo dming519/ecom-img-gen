@@ -555,6 +555,44 @@ function parsePromptJson(text: string) {
   };
 }
 
+function createPromptBatchUserText(
+  userText: string,
+  mode: DetailImageMode,
+  imageCount = resolveDetailImageCount(mode),
+  offset = 0,
+  total = resolveDetailImageCount(mode),
+) {
+  const modeLabel = detailImageModeLabel(mode);
+  const composition =
+    mode === "main"
+      ? "主图按 1:1 方图构图，输出商城主图轮播，不要输出详情页模块。"
+      : "详情图按 3:4 竖版构图，输出详情页模块，不要输出主图轮播。";
+  const rangeText =
+    imageCount === total
+      ? `本次只规划${modeLabel} ${imageCount} 张。`
+      : `本次只规划整套${modeLabel}中的第 ${offset + 1} 到第 ${offset + imageCount} 张，共 ${imageCount} 条；整套${modeLabel}总计 ${total} 张。`;
+
+  return [
+    userText
+      .replace(/^图包类型：.*$/m, `图包类型：${modeLabel}`)
+      .replace(/^图片数量：.*$/m, `图片数量：${modeLabel} ${imageCount} 张，总计 ${imageCount} 张`)
+      .replace(
+        /^按图包类型规划每张图主题：.*$/m,
+        `按图包类型规划每张图主题：${rangeText}title 要体现该张图的成交任务，而不是机械套用固定模板。`,
+      )
+      .replace(
+        /^prompts 数组长度必须等于 .*$/m,
+        `prompts 数组长度必须等于 ${imageCount}。每个数组项必须包含 imageMode，且 imageMode 必须写 "${mode}"。每个 prompt 必须是完整单张图片生成提示词，并包含图包类型、统一 Campaign Style Lock、单张 Frame Objective、短中文图内文案、构图、参考图一致性或参考图特征提取要求。${composition}不要输出“负面提示词”或“Negative Prompt”段落。`,
+      ),
+    "",
+    "【本次分批生成硬性约束】",
+    rangeText,
+    `本次返回数量必须严格等于 ${imageCount} 条。`,
+    `所有 prompts[].imageMode 必须写 "${mode}"。`,
+    "只返回 JSON，不要解释，不要 Markdown。",
+  ].join("\n");
+}
+
 function extractContentFromSse(text: string) {
   let content = "";
   for (const line of text.split(/\r?\n/)) {
@@ -707,6 +745,75 @@ async function createPromptRequestWithRetry(
   }
 
   throw new Error("文本识别请求重试失败");
+}
+
+async function requestPromptBatch(options: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  systemTemplate: string;
+  userText: string;
+  productImages: string[];
+  mode: DetailImageMode;
+  count?: number;
+  offset?: number;
+  total?: number;
+  shouldStop: () => Promise<boolean>;
+}) {
+  const imageCount = options.count ?? resolveDetailImageCount(options.mode);
+  const offset = options.offset ?? 0;
+  const total = options.total ?? resolveDetailImageCount(options.mode);
+  const upstream = await createPromptRequestWithRetry(
+    options.baseUrl,
+    options.apiKey,
+    options.model,
+    options.systemTemplate,
+    createPromptBatchUserText(options.userText, options.mode, imageCount, offset, total),
+    options.productImages,
+    options.shouldStop,
+  );
+  const { response, text, retryErrors } = upstream;
+
+  if (!response.ok) {
+    let detail = summarizeRawText(text);
+    try {
+      const payload = JSON.parse(text) as ChatCompletionPayload;
+      if (payload.error?.message) detail = payload.error.message;
+      if (payload.message) detail = payload.message;
+    } catch {
+      // Keep raw response.
+    }
+    const retryDetail = retryErrors.length ? `；重试记录：${retryErrors.join("；")}` : "";
+    throw new Error(`图包方案生成失败: HTTP ${response.status}: ${detail}${retryDetail}`);
+  }
+
+  const content = extractChatContent(text);
+  if (!content) {
+    throw new Error(`图包方案服务未返回内容：${summarizeRawText(text) || "空响应"}`);
+  }
+
+  const parsed = parsePromptJson(content);
+  const prompts = (parsed.prompts ?? [])
+    .map((item, index) => {
+      const imageMode = resolvePromptItemMode(item.imageMode, [options.mode], index);
+      return {
+        imageMode,
+        title:
+          item.title?.trim() ||
+          `第${offset + index + 1}张${detailImageModeLabel(imageMode)}`,
+        promptId: crypto.randomUUID(),
+        prompt: normalizeGeneratedPromptText(item.prompt ?? ""),
+      };
+    })
+    .filter((item) => item.prompt);
+
+  if (prompts.length !== imageCount) {
+    throw new Error(
+      `${detailImageModeLabel(options.mode)}方案数量不匹配：期望 ${imageCount} 条，实际 ${prompts.length} 条`,
+    );
+  }
+
+  return prompts;
 }
 
 function getQualityInstruction(quality: ImageQuality) {
@@ -1804,7 +1911,14 @@ export class PromptTasksDO {
     if (await isImageTaskCanceled(this.env, taskKey)) return;
     await this.env.TASKS_KV.put(
       taskKey,
-      JSON.stringify({ status: "running", userKey, createdAt, updatedAt: createdAt }),
+      JSON.stringify({
+        status: "running",
+        userKey,
+        imageModes,
+        imageCount,
+        createdAt,
+        updatedAt: createdAt,
+      }),
       { expirationTtl: 3600 },
     );
 
@@ -1812,49 +1926,44 @@ export class PromptTasksDO {
       if (!apiKey || !baseUrl || !model) {
         throw new Error("服务端未配置图包方案生成接口");
       }
-      const upstream = await createPromptRequest(
-        baseUrl,
-        apiKey,
-        model,
-        systemTemplate,
-        userText,
-        productImages,
-      );
-      const text = await upstream.text();
-
-      if (!upstream.ok) {
-        let detail = summarizeRawText(text);
-        try {
-          const payload = JSON.parse(text) as ChatCompletionPayload;
-          if (payload.error?.message) detail = payload.error.message;
-          if (payload.message) detail = payload.message;
-        } catch {
-          // Keep raw response.
+      const promptBatches = imageModes.flatMap((mode) => {
+        const total = resolveDetailImageCount(mode);
+        const chunkSize = mode === "detail" ? 4 : total;
+        const batches: Array<{
+          mode: DetailImageMode;
+          count: number;
+          offset: number;
+          total: number;
+        }> = [];
+        for (let offset = 0; offset < total; offset += chunkSize) {
+          batches.push({
+            mode,
+            count: Math.min(chunkSize, total - offset),
+            offset,
+            total,
+          });
         }
-        throw new Error(`图包方案生成失败: HTTP ${upstream.status}: ${detail}`);
-      }
-
-      const content = extractChatContent(text);
-      if (!content) {
-        throw new Error(
-          `图包方案服务未返回内容：${summarizeRawText(text) || "空响应"}`,
-        );
-      }
-
-      const parsed = parsePromptJson(content);
-      const prompts = (parsed.prompts ?? [])
-        .map((item, index) => {
-          const imageMode = resolvePromptItemMode(item.imageMode, imageModes, index);
-          return {
-            imageMode,
-            title:
-              item.title?.trim() ||
-              `第${index + 1}张${detailImageModeLabel(imageMode)}`,
-            promptId: crypto.randomUUID(),
-            prompt: normalizeGeneratedPromptText(item.prompt ?? ""),
-          };
-        })
-        .filter((item) => item.prompt);
+        return batches;
+      });
+      const prompts = (
+        await Promise.all(
+          promptBatches.map((batch) =>
+            requestPromptBatch({
+              baseUrl,
+              apiKey,
+              model,
+              systemTemplate,
+              userText,
+              productImages,
+              mode: batch.mode,
+              count: batch.count,
+              offset: batch.offset,
+              total: batch.total,
+              shouldStop: () => isImageTaskCanceled(this.env, taskKey),
+            }),
+          ),
+        )
+      ).flat();
 
       if (prompts.length !== imageCount) {
         throw new Error(
