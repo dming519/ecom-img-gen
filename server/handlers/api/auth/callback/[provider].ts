@@ -1,16 +1,17 @@
 import { handleCallbackRequest } from "../../../_lib/auth";
-import type { PostgresEnv } from "../../../_lib/postgres";
+import type { HistoryD1Database } from "../../../_lib/historyStorage";
 import type { UserKvNamespace } from "../../../_lib/users";
 import type { OAuthProvider } from "../../../_lib/auth";
 
 interface RequestContext {
   request: Request;
-  env: PostgresEnv & {
+  env: {
     AUTH_SECRET?: string;
     AUTH_GITHUB_ID?: string;
     AUTH_GITHUB_SECRET?: string;
     AUTH_GOOGLE_ID?: string;
     AUTH_GOOGLE_SECRET?: string;
+    HISTORY_DB?: HistoryD1Database;
     TASKS_KV?: UserKvNamespace;
   };
   params?: {

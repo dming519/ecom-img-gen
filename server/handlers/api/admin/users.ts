@@ -4,13 +4,14 @@ import {
   updateManagedUser,
   type UserKvNamespace,
 } from "../../_lib/users";
-import type { PostgresEnv } from "../../_lib/postgres";
+import type { HistoryD1Database } from "../../_lib/historyStorage";
 import type { UserRole } from "@/lib/types";
 
 interface RequestContext {
   request: Request;
-  env: PostgresEnv & {
+  env: {
     AUTH_SECRET?: string;
+    HISTORY_DB?: HistoryD1Database;
     TASKS_KV?: UserKvNamespace;
   };
 }

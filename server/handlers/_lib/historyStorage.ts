@@ -6,9 +6,32 @@ import type {
   LayerHistoryItem,
   MultiViewHistoryItem,
 } from "@/lib/types";
-import { getPostgres, runSchemaOnce, toNumber, type AppSql, type PostgresEnv } from "./postgres";
 import { requireSession } from "./auth";
 import { getUserKey, type UserKvNamespace } from "./users";
+
+interface HistoryD1Result {
+  success?: boolean;
+  meta?: {
+    changes?: number;
+    last_row_id?: number;
+  };
+}
+
+interface HistoryD1AllResult<T> {
+  results?: T[];
+}
+
+interface HistoryD1PreparedStatement {
+  bind: (...values: unknown[]) => HistoryD1PreparedStatement;
+  first: <T = Record<string, unknown>>() => Promise<T | null>;
+  all: <T = Record<string, unknown>>() => Promise<HistoryD1AllResult<T>>;
+  run: () => Promise<HistoryD1Result>;
+}
+
+export interface HistoryD1Database {
+  exec: (query: string) => Promise<unknown>;
+  prepare: (query: string) => HistoryD1PreparedStatement;
+}
 
 interface HistoryR2Object {
   body?: ReadableStream;
@@ -27,13 +50,9 @@ interface HistoryR2Bucket {
   ) => Promise<unknown>;
 }
 
-export interface HistoryStorageEnv extends PostgresEnv {
+export interface HistoryStorageEnv {
+  HISTORY_DB?: HistoryD1Database;
   HISTORY_BUCKET?: HistoryR2Bucket;
-}
-
-export interface HistoryStorageBindings extends HistoryStorageEnv {
-  HISTORY_BUCKET: HistoryR2Bucket;
-  sql?: AppSql;
 }
 
 export interface HistoryStorageFunctionEnv extends HistoryStorageEnv {
@@ -44,7 +63,7 @@ export interface HistoryStorageFunctionEnv extends HistoryStorageEnv {
 type HistoryKind = "detail" | "cutout" | "edit" | "multi-view" | "layer";
 
 interface HistoryRow {
-  id: number | string;
+  id: number;
   payload: string;
 }
 
@@ -64,48 +83,6 @@ interface DetailPromptRecordInput {
 
 const DEFAULT_IMAGE_MIME = "image/png";
 
-const HISTORY_SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS history_records (
-    id BIGSERIAL PRIMARY KEY,
-    user_key TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    payload TEXT NOT NULL,
-    created_at BIGINT NOT NULL,
-    updated_at BIGINT NOT NULL
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_history_records_user_kind_id
-    ON history_records(user_key, kind, id)`,
-  `CREATE TABLE IF NOT EXISTS cutout_drafts (
-    user_key TEXT PRIMARY KEY,
-    payload TEXT NOT NULL,
-    updated_at BIGINT NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS stored_images (
-    id TEXT PRIMARY KEY,
-    user_key TEXT NOT NULL,
-    r2_key TEXT NOT NULL,
-    mime_type TEXT NOT NULL,
-    byte_size BIGINT NOT NULL,
-    created_at BIGINT NOT NULL
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_stored_images_user
-    ON stored_images(user_key, created_at)`,
-  `CREATE TABLE IF NOT EXISTS detail_prompts (
-    id TEXT PRIMARY KEY,
-    user_key TEXT NOT NULL,
-    title TEXT NOT NULL,
-    prompt TEXT NOT NULL,
-    source_task_id TEXT,
-    prompt_index INTEGER,
-    created_at BIGINT NOT NULL,
-    updated_at BIGINT NOT NULL
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_detail_prompts_user
-    ON detail_prompts(user_key, created_at)`,
-];
-
-const historySchemaReady = new WeakMap<AppSql, Promise<void>>();
-
 export function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
     ...init,
@@ -117,22 +94,15 @@ export function json(data: unknown, init?: ResponseInit) {
   });
 }
 
-export function getHistorySql(env: HistoryStorageEnv & { sql?: AppSql }) {
-  return env.sql ?? getPostgres(env, "业务数据");
-}
-
-export async function ensureHistorySchema(sql: AppSql) {
-  await runSchemaOnce(historySchemaReady, sql, HISTORY_SCHEMA);
-}
-
 function requireHistoryBindings(env: HistoryStorageEnv) {
+  if (!env.HISTORY_DB) {
+    throw new Error("服务端未配置 HISTORY_DB D1 数据库");
+  }
   if (!env.HISTORY_BUCKET) {
     throw new Error("服务端未配置 HISTORY_BUCKET R2 存储桶");
   }
-  const sql = getHistorySql(env);
   return {
-    ...env,
-    sql,
+    HISTORY_DB: env.HISTORY_DB,
     HISTORY_BUCKET: env.HISTORY_BUCKET,
   };
 }
@@ -141,11 +111,11 @@ export async function requireUserHistoryStorage(
   context: { request: Request; env: HistoryStorageFunctionEnv },
   unauthenticatedMessage: string,
 ) {
+  const session = await requireSession(context.request, context.env);
+  if (!session) {
+    return { response: json({ error: unauthenticatedMessage }, { status: 401 }) };
+  }
   try {
-    const session = await requireSession(context.request, context.env);
-    if (!session) {
-      return { response: json({ error: unauthenticatedMessage }, { status: 401 }) };
-    }
     return {
       userKey: getUserKey(session.user),
       storage: requireHistoryBindings(context.env),
@@ -157,6 +127,52 @@ export async function requireUserHistoryStorage(
         { status: 500 },
       ),
     };
+  }
+}
+
+async function ensureHistorySchema(db: HistoryD1Database) {
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS history_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_key TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_history_records_user_kind_id
+      ON history_records(user_key, kind, id)`,
+    `CREATE TABLE IF NOT EXISTS cutout_drafts (
+      user_key TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS stored_images (
+      id TEXT PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      r2_key TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_stored_images_user
+      ON stored_images(user_key, created_at)`,
+    `CREATE TABLE IF NOT EXISTS detail_prompts (
+      id TEXT PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      source_task_id TEXT,
+      prompt_index INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_detail_prompts_user
+      ON detail_prompts(user_key, created_at)`,
+  ];
+
+  for (const statement of statements) {
+    await db.prepare(statement).run();
   }
 }
 
@@ -206,7 +222,7 @@ function parseImagePayload(value: string, defaultMime = DEFAULT_IMAGE_MIME) {
 }
 
 async function writeImage(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   value: string,
   defaultMime = DEFAULT_IMAGE_MIME,
@@ -216,14 +232,11 @@ async function writeImage(
 }
 
 async function writeImageBytes(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   bytes: Uint8Array,
   mimeType = DEFAULT_IMAGE_MIME,
 ) {
-  const sql = getHistorySql(env);
-  await ensureHistorySchema(sql);
-
   const id = crypto.randomUUID();
   const now = Date.now();
   const extension = mimeToExtension(mimeType);
@@ -232,12 +245,13 @@ async function writeImageBytes(
   await env.HISTORY_BUCKET.put(r2Key, bytes, {
     httpMetadata: { contentType: mimeType },
   });
-  await sql`
-    INSERT INTO stored_images
+  await env.HISTORY_DB.prepare(
+    `INSERT INTO stored_images
       (id, user_key, r2_key, mime_type, byte_size, created_at)
-    VALUES
-      (${id}, ${userKey}, ${r2Key}, ${mimeType}, ${bytes.byteLength}, ${now})
-  `;
+      VALUES (?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(id, userKey, r2Key, mimeType, bytes.byteLength, now)
+    .run();
 
   return id;
 }
@@ -251,23 +265,24 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-async function readImageRow(sql: AppSql, userKey: string, id: string) {
-  const rows = await sql<ImageRow[]>`
-    SELECT id, r2_key, mime_type
-    FROM stored_images
-    WHERE id = ${id} AND user_key = ${userKey}
-  `;
-  return rows[0] ?? null;
+async function readImageRow(db: HistoryD1Database, userKey: string, id: string) {
+  return db
+    .prepare(
+      `SELECT id, r2_key, mime_type
+       FROM stored_images
+       WHERE id = ? AND user_key = ?`,
+    )
+    .bind(id, userKey)
+    .first<ImageRow>();
 }
 
 export async function readStoredImageFile(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   id: string,
 ) {
-  const sql = getHistorySql(env);
-  await ensureHistorySchema(sql);
-  const row = await readImageRow(sql, userKey, id);
+  await ensureHistorySchema(env.HISTORY_DB);
+  const row = await readImageRow(env.HISTORY_DB, userKey, id);
   if (!row) return null;
   const object = await env.HISTORY_BUCKET.get(row.r2_key);
   if (!object) return null;
@@ -277,8 +292,15 @@ export async function readStoredImageFile(
   };
 }
 
+function requireHistoryDb(env: HistoryStorageEnv) {
+  if (!env.HISTORY_DB) {
+    throw new Error("服务端未配置 HISTORY_DB D1 数据库");
+  }
+  return env.HISTORY_DB;
+}
+
 export async function readStoredImageDataUrl(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   id: string,
 ) {
@@ -295,7 +317,7 @@ export async function storeHistoryImage(
   defaultMime = DEFAULT_IMAGE_MIME,
 ) {
   const storage = requireHistoryBindings(env);
-  await ensureHistorySchema(storage.sql);
+  await ensureHistorySchema(storage.HISTORY_DB);
   return writeImage(storage, userKey, value, defaultMime);
 }
 
@@ -304,8 +326,8 @@ export async function storeDetailPrompt(
   userKey: string,
   input: DetailPromptRecordInput,
 ) {
-  const sql = getHistorySql(env);
-  await ensureHistorySchema(sql);
+  const db = requireHistoryDb(env);
+  await ensureHistorySchema(db);
 
   const prompt = input.prompt.trim();
   if (!prompt) {
@@ -318,19 +340,20 @@ export async function storeDetailPrompt(
   const taskId = input.taskId?.trim() || null;
   const now = Date.now();
 
-  await sql`
-    INSERT INTO detail_prompts
+  await db.prepare(
+    `INSERT INTO detail_prompts
       (id, user_key, title, prompt, source_task_id, prompt_index, created_at, updated_at)
-    VALUES
-      (${id}, ${userKey}, ${title}, ${prompt}, ${taskId}, ${index}, ${now}, ${now})
-    ON CONFLICT(id)
-    DO UPDATE SET
-      title = excluded.title,
-      prompt = excluded.prompt,
-      source_task_id = excluded.source_task_id,
-      prompt_index = excluded.prompt_index,
-      updated_at = excluded.updated_at
-  `;
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id)
+      DO UPDATE SET
+        title = excluded.title,
+        prompt = excluded.prompt,
+        source_task_id = excluded.source_task_id,
+        prompt_index = excluded.prompt_index,
+        updated_at = excluded.updated_at`,
+  )
+    .bind(id, userKey, title, prompt, taskId, index, now, now)
+    .run();
 
   return id;
 }
@@ -340,18 +363,20 @@ export async function readDetailPrompt(
   userKey: string,
   id: string,
 ) {
-  const sql = getHistorySql(env);
-  await ensureHistorySchema(sql);
-  const rows = await sql<Array<{ id: string; title: string; prompt: string }>>`
-    SELECT id, title, prompt
-    FROM detail_prompts
-    WHERE id = ${id} AND user_key = ${userKey}
-  `;
-  return rows[0] ?? null;
+  const db = requireHistoryDb(env);
+  await ensureHistorySchema(db);
+  const row = await db.prepare(
+    `SELECT id, title, prompt
+     FROM detail_prompts
+     WHERE id = ? AND user_key = ?`,
+  )
+    .bind(id, userKey)
+    .first<{ id: string; title: string; prompt: string }>();
+  return row ?? null;
 }
 
 async function serializeDetailItem(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   item: HistoryItem,
 ) {
@@ -372,7 +397,7 @@ async function serializeDetailItem(
 }
 
 async function serializeCutoutItem(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   item: CutoutHistoryItem,
 ) {
@@ -382,7 +407,7 @@ async function serializeCutoutItem(
 }
 
 async function serializeEditItem(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   item: EditHistoryItem,
 ) {
@@ -392,7 +417,7 @@ async function serializeEditItem(
 }
 
 async function serializeMultiViewItem(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   item: MultiViewHistoryItem,
 ) {
@@ -405,7 +430,7 @@ async function serializeMultiViewItem(
 }
 
 async function serializeLayerItem(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   item: LayerHistoryItem,
 ) {
@@ -415,7 +440,7 @@ async function serializeLayerItem(
 }
 
 async function serializeCutoutDraft(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   draft: Omit<CutoutDraft, "id"> & { id?: "active" },
 ) {
@@ -428,48 +453,58 @@ async function serializeCutoutDraft(
 }
 
 async function insertHistoryRecord(
-  sql: AppSql,
+  db: HistoryD1Database,
   userKey: string,
   kind: HistoryKind,
   payload: unknown,
   now: number,
 ) {
-  const rows = await sql<Array<{ id: number | string }>>`
-    INSERT INTO history_records
-      (user_key, kind, payload, created_at, updated_at)
-    VALUES
-      (${userKey}, ${kind}, ${JSON.stringify(payload)}, ${now}, ${now})
-    RETURNING id
-  `;
-  const id = toNumber(rows[0]?.id, NaN);
+  const result = await db
+    .prepare(
+      `INSERT INTO history_records
+        (user_key, kind, payload, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)`,
+    )
+    .bind(userKey, kind, JSON.stringify(payload), now, now)
+    .run();
+  const id = result.meta?.last_row_id;
   if (!Number.isFinite(id)) {
-    throw new Error("Postgres 未返回新历史记录 ID");
+    throw new Error("D1 未返回新历史记录 ID");
   }
-  return id;
+  return Number(id);
 }
 
 async function updateHistoryRecord(
-  sql: AppSql,
+  db: HistoryD1Database,
   userKey: string,
   kind: HistoryKind,
   id: number,
   payload: unknown,
   now: number,
 ) {
-  const rows = await sql<Array<{ id: number | string }>>`
-    UPDATE history_records
-    SET payload = ${JSON.stringify(payload)}, updated_at = ${now}
-    WHERE id = ${id} AND user_key = ${userKey} AND kind = ${kind}
-    RETURNING id
-  `;
-  if (!rows[0]) {
+  const existing = await db
+    .prepare(
+      `SELECT id FROM history_records
+       WHERE id = ? AND user_key = ? AND kind = ?`,
+    )
+    .bind(id, userKey, kind)
+    .first<{ id: number }>();
+  if (!existing) {
     throw new Error("历史记录不存在或无权访问");
   }
+  await db
+    .prepare(
+      `UPDATE history_records
+       SET payload = ?, updated_at = ?
+       WHERE id = ? AND user_key = ? AND kind = ?`,
+    )
+    .bind(JSON.stringify(payload), now, id, userKey, kind)
+    .run();
 }
 
 function parseHistoryRow<T extends { id?: number }>(row: HistoryRow) {
   const item = parseJson<T>(row.payload);
-  return item ? { ...item, id: toNumber(row.id) } : null;
+  return item ? { ...item, id: row.id } : null;
 }
 
 function isPresent<T>(item: T | null): item is T {
@@ -477,229 +512,325 @@ function isPresent<T>(item: T | null): item is T {
 }
 
 async function listHistoryRows(
-  sql: AppSql,
+  db: HistoryD1Database,
   userKey: string,
   kind: HistoryKind,
 ) {
-  return sql<HistoryRow[]>`
-    SELECT id, payload
-    FROM history_records
-    WHERE user_key = ${userKey} AND kind = ${kind}
-    ORDER BY id ASC
-  `;
+  const result = await db
+    .prepare(
+      `SELECT id, payload
+       FROM history_records
+       WHERE user_key = ? AND kind = ?
+       ORDER BY id ASC`,
+    )
+    .bind(userKey, kind)
+    .all<HistoryRow>();
+  return result.results ?? [];
 }
 
-async function saveHistoryItem<T extends { id?: number }>(
-  env: HistoryStorageBindings,
+export async function saveDetailHistory(
+  env: Required<HistoryStorageEnv>,
   userKey: string,
-  kind: HistoryKind,
-  item: T,
-  serialize: (env: HistoryStorageBindings, userKey: string, item: T) => Promise<T>,
+  item: HistoryItem,
 ) {
-  const sql = getHistorySql(env);
-  await ensureHistorySchema(sql);
+  await ensureHistorySchema(env.HISTORY_DB);
   const now = Date.now();
-  const payload = await serialize(env, userKey, item);
+  const payload = await serializeDetailItem(env, userKey, item);
   let id = item.id;
   if (id == null) {
-    id = await insertHistoryRecord(sql, userKey, kind, payload, now);
+    id = await insertHistoryRecord(env.HISTORY_DB, userKey, "detail", payload, now);
   } else {
-    await updateHistoryRecord(sql, userKey, kind, id, payload, now);
+    await updateHistoryRecord(env.HISTORY_DB, userKey, "detail", id, payload, now);
   }
   return { ...payload, id };
 }
 
-async function listHistoryItems<T extends { id?: number }>(
-  env: HistoryStorageBindings,
-  userKey: string,
-  kind: HistoryKind,
-) {
-  const sql = getHistorySql(env);
-  await ensureHistorySchema(sql);
-  const rows = await listHistoryRows(sql, userKey, kind);
-  return rows.map((row) => parseHistoryRow<T>(row)).filter(isPresent);
-}
-
-async function deleteHistoryItem(
-  env: HistoryStorageBindings,
-  userKey: string,
-  kind: HistoryKind,
-  id?: number,
-) {
-  const sql = getHistorySql(env);
-  await ensureHistorySchema(sql);
-  if (id == null) {
-    await sql`
-      DELETE FROM history_records
-      WHERE user_key = ${userKey} AND kind = ${kind}
-    `;
-    return;
-  }
-  await sql`
-    DELETE FROM history_records
-    WHERE id = ${id} AND user_key = ${userKey} AND kind = ${kind}
-  `;
-}
-
-export async function saveDetailHistory(
-  env: HistoryStorageBindings,
-  userKey: string,
-  item: HistoryItem,
-) {
-  return saveHistoryItem(env, userKey, "detail", item, serializeDetailItem);
-}
-
 export async function listDetailHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
 ) {
-  return listHistoryItems<HistoryItem>(env, userKey, "detail");
+  await ensureHistorySchema(env.HISTORY_DB);
+  const rows = await listHistoryRows(env.HISTORY_DB, userKey, "detail");
+  return rows
+    .map((row) => parseHistoryRow<HistoryItem>(row))
+    .filter(isPresent);
 }
 
 export async function deleteDetailHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   id?: number,
 ) {
-  return deleteHistoryItem(env, userKey, "detail", id);
+  await ensureHistorySchema(env.HISTORY_DB);
+  if (id == null) {
+    await env.HISTORY_DB.prepare(
+      `DELETE FROM history_records
+       WHERE user_key = ? AND kind = 'detail'`,
+    )
+      .bind(userKey)
+      .run();
+    return;
+  }
+  await env.HISTORY_DB.prepare(
+    `DELETE FROM history_records
+     WHERE id = ? AND user_key = ? AND kind = 'detail'`,
+  )
+    .bind(id, userKey)
+    .run();
 }
 
 export async function saveCutoutHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   item: CutoutHistoryItem,
 ) {
-  return saveHistoryItem(env, userKey, "cutout", item, serializeCutoutItem);
+  await ensureHistorySchema(env.HISTORY_DB);
+  const now = Date.now();
+  const payload = await serializeCutoutItem(env, userKey, item);
+  let id = item.id;
+  if (id == null) {
+    id = await insertHistoryRecord(env.HISTORY_DB, userKey, "cutout", payload, now);
+  } else {
+    await updateHistoryRecord(env.HISTORY_DB, userKey, "cutout", id, payload, now);
+  }
+  return { ...payload, id };
 }
 
 export async function listCutoutHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
 ) {
-  return listHistoryItems<CutoutHistoryItem>(env, userKey, "cutout");
+  await ensureHistorySchema(env.HISTORY_DB);
+  const rows = await listHistoryRows(env.HISTORY_DB, userKey, "cutout");
+  return rows
+    .map((row) => parseHistoryRow<CutoutHistoryItem>(row))
+    .filter(isPresent);
 }
 
 export async function deleteCutoutHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   id?: number,
 ) {
-  return deleteHistoryItem(env, userKey, "cutout", id);
+  await ensureHistorySchema(env.HISTORY_DB);
+  if (id == null) {
+    await env.HISTORY_DB.prepare(
+      `DELETE FROM history_records
+       WHERE user_key = ? AND kind = 'cutout'`,
+    )
+      .bind(userKey)
+      .run();
+    return;
+  }
+  await env.HISTORY_DB.prepare(
+    `DELETE FROM history_records
+     WHERE id = ? AND user_key = ? AND kind = 'cutout'`,
+  )
+    .bind(id, userKey)
+    .run();
 }
 
 export async function saveEditHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   item: EditHistoryItem,
 ) {
-  return saveHistoryItem(env, userKey, "edit", item, serializeEditItem);
+  await ensureHistorySchema(env.HISTORY_DB);
+  const now = Date.now();
+  const payload = await serializeEditItem(env, userKey, item);
+  let id = item.id;
+  if (id == null) {
+    id = await insertHistoryRecord(env.HISTORY_DB, userKey, "edit", payload, now);
+  } else {
+    await updateHistoryRecord(env.HISTORY_DB, userKey, "edit", id, payload, now);
+  }
+  return { ...payload, id };
 }
 
 export async function listEditHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
 ) {
-  return listHistoryItems<EditHistoryItem>(env, userKey, "edit");
+  await ensureHistorySchema(env.HISTORY_DB);
+  const rows = await listHistoryRows(env.HISTORY_DB, userKey, "edit");
+  return rows
+    .map((row) => parseHistoryRow<EditHistoryItem>(row))
+    .filter(isPresent);
 }
 
 export async function deleteEditHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   id?: number,
 ) {
-  return deleteHistoryItem(env, userKey, "edit", id);
+  await ensureHistorySchema(env.HISTORY_DB);
+  if (id == null) {
+    await env.HISTORY_DB.prepare(
+      `DELETE FROM history_records
+       WHERE user_key = ? AND kind = 'edit'`,
+    )
+      .bind(userKey)
+      .run();
+    return;
+  }
+  await env.HISTORY_DB.prepare(
+    `DELETE FROM history_records
+     WHERE id = ? AND user_key = ? AND kind = 'edit'`,
+  )
+    .bind(id, userKey)
+    .run();
 }
 
 export async function saveMultiViewHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   item: MultiViewHistoryItem,
 ) {
-  return saveHistoryItem(env, userKey, "multi-view", item, serializeMultiViewItem);
+  await ensureHistorySchema(env.HISTORY_DB);
+  const now = Date.now();
+  const payload = await serializeMultiViewItem(env, userKey, item);
+  let id = item.id;
+  if (id == null) {
+    id = await insertHistoryRecord(env.HISTORY_DB, userKey, "multi-view", payload, now);
+  } else {
+    await updateHistoryRecord(env.HISTORY_DB, userKey, "multi-view", id, payload, now);
+  }
+  return { ...payload, id };
 }
 
 export async function listMultiViewHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
 ) {
-  return listHistoryItems<MultiViewHistoryItem>(env, userKey, "multi-view");
+  await ensureHistorySchema(env.HISTORY_DB);
+  const rows = await listHistoryRows(env.HISTORY_DB, userKey, "multi-view");
+  return rows
+    .map((row) => parseHistoryRow<MultiViewHistoryItem>(row))
+    .filter(isPresent);
 }
 
 export async function deleteMultiViewHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   id?: number,
 ) {
-  return deleteHistoryItem(env, userKey, "multi-view", id);
+  await ensureHistorySchema(env.HISTORY_DB);
+  if (id == null) {
+    await env.HISTORY_DB.prepare(
+      `DELETE FROM history_records
+       WHERE user_key = ? AND kind = 'multi-view'`,
+    )
+      .bind(userKey)
+      .run();
+    return;
+  }
+  await env.HISTORY_DB.prepare(
+    `DELETE FROM history_records
+     WHERE id = ? AND user_key = ? AND kind = 'multi-view'`,
+  )
+    .bind(id, userKey)
+    .run();
 }
 
 export async function saveLayerHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   item: LayerHistoryItem,
 ) {
-  return saveHistoryItem(env, userKey, "layer", item, serializeLayerItem);
+  await ensureHistorySchema(env.HISTORY_DB);
+  const now = Date.now();
+  const payload = await serializeLayerItem(env, userKey, item);
+  let id = item.id;
+  if (id == null) {
+    id = await insertHistoryRecord(env.HISTORY_DB, userKey, "layer", payload, now);
+  } else {
+    await updateHistoryRecord(env.HISTORY_DB, userKey, "layer", id, payload, now);
+  }
+  return { ...payload, id };
 }
 
 export async function listLayerHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
 ) {
-  return listHistoryItems<LayerHistoryItem>(env, userKey, "layer");
+  await ensureHistorySchema(env.HISTORY_DB);
+  const rows = await listHistoryRows(env.HISTORY_DB, userKey, "layer");
+  return rows
+    .map((row) => parseHistoryRow<LayerHistoryItem>(row))
+    .filter(isPresent);
 }
 
 export async function deleteLayerHistory(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   id?: number,
 ) {
-  return deleteHistoryItem(env, userKey, "layer", id);
+  await ensureHistorySchema(env.HISTORY_DB);
+  if (id == null) {
+    await env.HISTORY_DB.prepare(
+      `DELETE FROM history_records
+       WHERE user_key = ? AND kind = 'layer'`,
+    )
+      .bind(userKey)
+      .run();
+    return;
+  }
+  await env.HISTORY_DB.prepare(
+    `DELETE FROM history_records
+     WHERE id = ? AND user_key = ? AND kind = 'layer'`,
+  )
+    .bind(id, userKey)
+    .run();
 }
 
 export async function getCutoutDraft(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
 ) {
-  const sql = getHistorySql(env);
-  await ensureHistorySchema(sql);
-  const rows = await sql<Array<{ payload: string }>>`
-    SELECT payload FROM cutout_drafts WHERE user_key = ${userKey}
-  `;
-  return parseJson<CutoutDraft>(rows[0]?.payload);
+  await ensureHistorySchema(env.HISTORY_DB);
+  const row = await env.HISTORY_DB.prepare(
+    `SELECT payload FROM cutout_drafts WHERE user_key = ?`,
+  )
+    .bind(userKey)
+    .first<{ payload: string }>();
+  return parseJson<CutoutDraft>(row?.payload);
 }
 
 export async function saveCutoutDraft(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   draft: Omit<CutoutDraft, "id"> & { id?: "active" },
 ) {
-  const sql = getHistorySql(env);
-  await ensureHistorySchema(sql);
+  await ensureHistorySchema(env.HISTORY_DB);
   const now = Date.now();
   const payload = await serializeCutoutDraft(env, userKey, draft);
-  await sql`
-    INSERT INTO cutout_drafts (user_key, payload, updated_at)
-    VALUES (${userKey}, ${JSON.stringify(payload)}, ${now})
-    ON CONFLICT(user_key)
-    DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at
-  `;
+  await env.HISTORY_DB.prepare(
+    `INSERT INTO cutout_drafts (user_key, payload, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(user_key)
+     DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`,
+  )
+    .bind(userKey, JSON.stringify(payload), now)
+    .run();
   return payload;
 }
 
 export async function deleteCutoutDraft(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
 ) {
-  const sql = getHistorySql(env);
-  await ensureHistorySchema(sql);
-  await sql`DELETE FROM cutout_drafts WHERE user_key = ${userKey}`;
+  await ensureHistorySchema(env.HISTORY_DB);
+  await env.HISTORY_DB.prepare(`DELETE FROM cutout_drafts WHERE user_key = ?`)
+    .bind(userKey)
+    .run();
 }
 
 export async function storeProductImage(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   dataUrl: string,
 ) {
+  await ensureHistorySchema(env.HISTORY_DB);
   if (!dataUrl.startsWith("data:image/")) {
     throw new Error("图片数据必须是 data:image 格式");
   }
@@ -707,10 +838,11 @@ export async function storeProductImage(
 }
 
 export async function storeProductImageFile(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   file: File,
 ) {
+  await ensureHistorySchema(env.HISTORY_DB);
   const mimeType = file.type || DEFAULT_IMAGE_MIME;
   if (!mimeType.startsWith("image/")) {
     throw new Error("图片文件必须是 image/* 格式");
@@ -719,15 +851,14 @@ export async function storeProductImageFile(
 }
 
 export async function readProductImages(
-  env: HistoryStorageBindings,
+  env: Required<HistoryStorageEnv>,
   userKey: string,
   ids: string[],
 ) {
-  const sql = getHistorySql(env);
-  await ensureHistorySchema(sql);
+  await ensureHistorySchema(env.HISTORY_DB);
   const images = await Promise.all(
     ids.map(async (id) => {
-      const row = await readImageRow(sql, userKey, id);
+      const row = await readImageRow(env.HISTORY_DB, userKey, id);
       return row ? `/api/history/image-file?id=${encodeURIComponent(id)}` : null;
     }),
   );
@@ -740,6 +871,6 @@ export async function readProductImageDataUrls(
   ids: string[],
 ) {
   const storage = requireHistoryBindings(env);
-  await ensureHistorySchema(storage.sql);
+  await ensureHistorySchema(storage.HISTORY_DB);
   return Promise.all(ids.map((id) => readStoredImageDataUrl(storage, userKey, id)));
 }

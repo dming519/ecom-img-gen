@@ -2,13 +2,14 @@ import {
   handleTaskCancelRequest,
   type TaskKvNamespace,
 } from "../../_lib/tasks";
-import type { PostgresEnv } from "../../_lib/postgres";
+import type { HistoryD1Database } from "../../_lib/historyStorage";
 
 interface RequestContext {
   request: Request;
-  env: PostgresEnv & {
+  env: {
     TASKS_KV?: TaskKvNamespace;
     AUTH_SECRET?: string;
+    HISTORY_DB?: HistoryD1Database;
   };
 }
 

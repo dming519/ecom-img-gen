@@ -1,5 +1,5 @@
 import type { AuthUser, AdminUserRow, UserRole } from "@/lib/types";
-import { getPostgres, runSchemaOnce, toNumber, type AppSql, type PostgresEnv } from "./postgres";
+import type { HistoryD1Database } from "./historyStorage";
 
 const DAILY_IMAGE_CREDITS = 10;
 const DAILY_RESET_OFFSET_MS = 8 * 60 * 60 * 1000;
@@ -11,7 +11,9 @@ export interface UserKvNamespace {
   put: (key: string, value: string, options?: { expirationTtl?: number }) => Promise<void>;
 }
 
-export type UserEnv = PostgresEnv;
+export interface UserEnv {
+  HISTORY_DB?: HistoryD1Database;
+}
 
 interface UserRecord {
   userKey: string;
@@ -47,37 +49,35 @@ interface UserRow {
   email: string | null;
   image: string | null;
   role: UserRole;
-  created_at: number | string;
-  updated_at: number | string;
-  last_login_at: number | string;
+  created_at: number;
+  updated_at: number;
+  last_login_at: number;
 }
 
 interface UsageRow {
   user_key: string;
-  remaining_credits: number | string;
-  used_credits: number | string;
-  granted_credits: number | string;
+  remaining_credits: number;
+  used_credits: number;
+  granted_credits: number;
   daily_usage_date: string | null;
-  daily_used_credits: number | string;
-  credit_model_version: number | string;
-  created_at: number | string;
-  updated_at: number | string;
-  last_generated_at?: number | string | null;
+  daily_used_credits: number;
+  credit_model_version: number;
+  created_at: number;
+  updated_at: number;
+  last_generated_at?: number | null;
 }
 
 const META_ADMIN = "meta:superAdminUserKey";
 const CURRENT_CREDIT_MODEL_VERSION = 2;
-const adminSchemaReady = new WeakMap<AppSql, Promise<void>>();
 
 function getUsageDay(timestamp = Date.now()) {
   return new Date(timestamp + DAILY_RESET_OFFSET_MS).toISOString().slice(0, 10);
 }
 
 function clampDailyUsed(value: unknown) {
-  const parsed = Number(value);
   return Math.min(
     DAILY_IMAGE_CREDITS,
-    Math.max(0, Number.isFinite(parsed) ? Math.round(parsed) : 0),
+    Math.max(0, Number.isFinite(value) ? Math.round(Number(value)) : 0),
   );
 }
 
@@ -131,12 +131,12 @@ export function getUserKey(user: AuthUser) {
   return user.userKey || `${user.provider}:${user.id}`;
 }
 
-async function ensureAdminSchema(db: AppSql) {
+async function ensureAdminSchema(db: HistoryD1Database) {
   const statements = [
     `CREATE TABLE IF NOT EXISTS admin_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
-      updated_at BIGINT NOT NULL
+      updated_at INTEGER NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS managed_users (
       user_key TEXT PRIMARY KEY,
@@ -146,9 +146,9 @@ async function ensureAdminSchema(db: AppSql) {
       email TEXT,
       image TEXT,
       role TEXT NOT NULL,
-      created_at BIGINT NOT NULL,
-      updated_at BIGINT NOT NULL,
-      last_login_at BIGINT NOT NULL
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      last_login_at INTEGER NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_managed_users_last_login
       ON managed_users(last_login_at)`,
@@ -160,20 +160,20 @@ async function ensureAdminSchema(db: AppSql) {
       daily_usage_date TEXT,
       daily_used_credits INTEGER NOT NULL DEFAULT 0,
       credit_model_version INTEGER NOT NULL DEFAULT 2,
-      created_at BIGINT NOT NULL,
-      updated_at BIGINT NOT NULL,
-      last_generated_at BIGINT
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      last_generated_at INTEGER
     )`,
     `CREATE TABLE IF NOT EXISTS access_codes (
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,
       code_hash TEXT NOT NULL UNIQUE,
       code_text TEXT NOT NULL,
-      active BOOLEAN NOT NULL,
-      created_at BIGINT NOT NULL,
-      updated_at BIGINT NOT NULL,
+      active INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
       created_by TEXT,
-      last_used_at BIGINT,
+      last_used_at INTEGER,
       use_count INTEGER NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS access_code_hashes (
@@ -188,11 +188,11 @@ async function ensureAdminSchema(db: AppSql) {
       credits INTEGER NOT NULL,
       max_redemptions INTEGER NOT NULL,
       redeem_count INTEGER NOT NULL,
-      active BOOLEAN NOT NULL,
-      created_at BIGINT NOT NULL,
-      updated_at BIGINT NOT NULL,
+      active INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
       created_by TEXT,
-      last_redeemed_at BIGINT
+      last_redeemed_at INTEGER
     )`,
     `CREATE TABLE IF NOT EXISTS redeem_code_hashes (
       code_hash TEXT PRIMARY KEY,
@@ -203,18 +203,22 @@ async function ensureAdminSchema(db: AppSql) {
       user_key TEXT NOT NULL,
       id TEXT NOT NULL,
       credits INTEGER NOT NULL,
-      redeemed_at BIGINT NOT NULL,
+      redeemed_at INTEGER NOT NULL,
       PRIMARY KEY (code_id, user_key)
     )`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_redeem_code_uses_once
       ON redeem_code_uses(code_id)`,
   ];
 
-  await runSchemaOnce(adminSchemaReady, db, statements);
+  for (const statement of statements) {
+    await db.prepare(statement).run();
+  }
+
 }
 
 export async function requireAdminDb(env: UserEnv, label = "管理数据表") {
-  const db = getPostgres(env, label);
+  const db = env.HISTORY_DB;
+  if (!db) throw new Error(`服务端未配置 ${label} D1 数据库`);
   await ensureAdminSchema(db);
   return db;
 }
@@ -228,24 +232,24 @@ function fromUserRow(row: UserRow): UserRecord {
     email: row.email,
     image: row.image,
     role: normalizeRole(row.role),
-    createdAt: toNumber(row.created_at),
-    updatedAt: toNumber(row.updated_at),
-    lastLoginAt: toNumber(row.last_login_at),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastLoginAt: row.last_login_at,
   };
 }
 
 function fromUsageRow(row: UsageRow): UsageRecord {
   return {
     userKey: row.user_key,
-    remainingCredits: toNumber(row.remaining_credits),
-    usedCredits: toNumber(row.used_credits),
-    grantedCredits: toNumber(row.granted_credits),
+    remainingCredits: row.remaining_credits,
+    usedCredits: row.used_credits,
+    grantedCredits: row.granted_credits,
     dailyUsageDate: row.daily_usage_date ?? "",
     dailyUsedCredits: clampDailyUsed(row.daily_used_credits),
-    creditModelVersion: toNumber(row.credit_model_version, CURRENT_CREDIT_MODEL_VERSION),
-    createdAt: toNumber(row.created_at),
-    updatedAt: toNumber(row.updated_at),
-    lastGeneratedAt: row.last_generated_at == null ? undefined : toNumber(row.last_generated_at),
+    creditModelVersion: row.credit_model_version ?? CURRENT_CREDIT_MODEL_VERSION,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastGeneratedAt: row.last_generated_at ?? undefined,
   };
 }
 
@@ -294,97 +298,126 @@ function toAdminRow(record: UserRecord, usage: UsageRecord): AdminUserRow {
   };
 }
 
-async function readMeta(db: AppSql, key: string) {
-  const rows = await db<Array<{ value: string }>>`
-    SELECT value FROM admin_meta WHERE key = ${key}
-  `;
-  return rows[0]?.value ?? null;
+async function readMeta(db: HistoryD1Database, key: string) {
+  const row = await db
+    .prepare(`SELECT value FROM admin_meta WHERE key = ?`)
+    .bind(key)
+    .first<{ value: string }>();
+  return row?.value ?? null;
 }
 
-async function writeMeta(db: AppSql, key: string, value: string) {
-  await db`
-    INSERT INTO admin_meta (key, value, updated_at)
-    VALUES (${key}, ${value}, ${Date.now()})
-    ON CONFLICT(key)
-    DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-  `;
+async function writeMeta(db: HistoryD1Database, key: string, value: string) {
+  await db
+    .prepare(
+      `INSERT INTO admin_meta (key, value, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(key)
+       DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    )
+    .bind(key, value, Date.now())
+    .run();
 }
 
-async function readSuperAdminKey(db: AppSql) {
+async function readSuperAdminKey(db: HistoryD1Database) {
   return readMeta(db, META_ADMIN);
 }
 
-async function readUserRecord(db: AppSql, userKey: string) {
-  const rows = await db<UserRow[]>`
-    SELECT user_key, provider, provider_id, name, email, image, role,
-      created_at, updated_at, last_login_at
-    FROM managed_users
-    WHERE user_key = ${userKey}
-  `;
-  const row = rows[0];
+async function readUserRecord(db: HistoryD1Database, userKey: string) {
+  const row = await db
+    .prepare(
+      `SELECT user_key, provider, provider_id, name, email, image, role,
+        created_at, updated_at, last_login_at
+       FROM managed_users
+       WHERE user_key = ?`,
+    )
+    .bind(userKey)
+    .first<UserRow>();
   return row ? fromUserRow(row) : null;
 }
 
-async function writeUserRecord(db: AppSql, record: UserRecord) {
-  await db`
-    INSERT INTO managed_users
-      (user_key, provider, provider_id, name, email, image, role,
-       created_at, updated_at, last_login_at)
-    VALUES
-      (${record.userKey}, ${record.provider}, ${record.providerId}, ${record.name},
-       ${record.email}, ${record.image}, ${record.role}, ${record.createdAt},
-       ${record.updatedAt}, ${record.lastLoginAt})
-    ON CONFLICT(user_key)
-    DO UPDATE SET
-      provider = excluded.provider,
-      provider_id = excluded.provider_id,
-      name = excluded.name,
-      email = excluded.email,
-      image = excluded.image,
-      role = excluded.role,
-      updated_at = excluded.updated_at,
-      last_login_at = excluded.last_login_at
-  `;
+async function writeUserRecord(db: HistoryD1Database, record: UserRecord) {
+  await db
+    .prepare(
+      `INSERT INTO managed_users
+        (user_key, provider, provider_id, name, email, image, role,
+         created_at, updated_at, last_login_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_key)
+       DO UPDATE SET
+         provider = excluded.provider,
+         provider_id = excluded.provider_id,
+         name = excluded.name,
+         email = excluded.email,
+         image = excluded.image,
+         role = excluded.role,
+         updated_at = excluded.updated_at,
+         last_login_at = excluded.last_login_at`,
+    )
+    .bind(
+      record.userKey,
+      record.provider,
+      record.providerId,
+      record.name,
+      record.email,
+      record.image,
+      record.role,
+      record.createdAt,
+      record.updatedAt,
+      record.lastLoginAt,
+    )
+    .run();
 }
 
-async function readUsageRecord(db: AppSql, userKey: string) {
-  const rows = await db<UsageRow[]>`
-    SELECT user_key, remaining_credits, used_credits, granted_credits,
-      daily_usage_date, daily_used_credits, credit_model_version,
-      created_at, updated_at, last_generated_at
-    FROM user_usage
-    WHERE user_key = ${userKey}
-  `;
-  const row = rows[0];
+async function readUsageRecord(db: HistoryD1Database, userKey: string) {
+  const row = await db
+    .prepare(
+      `SELECT user_key, remaining_credits, used_credits, granted_credits,
+        daily_usage_date, daily_used_credits, credit_model_version,
+        created_at, updated_at, last_generated_at
+       FROM user_usage
+       WHERE user_key = ?`,
+    )
+    .bind(userKey)
+    .first<UsageRow>();
   return row ? fromUsageRow(row) : null;
 }
 
-async function writeUsageRecord(db: AppSql, usage: UsageRecord) {
-  await db`
-    INSERT INTO user_usage
-      (user_key, remaining_credits, used_credits, granted_credits,
-       daily_usage_date, daily_used_credits, credit_model_version,
-       created_at, updated_at, last_generated_at)
-    VALUES
-      (${usage.userKey}, ${usage.remainingCredits}, ${usage.usedCredits},
-       ${usage.grantedCredits}, ${usage.dailyUsageDate}, ${usage.dailyUsedCredits},
-       ${usage.creditModelVersion}, ${usage.createdAt}, ${usage.updatedAt},
-       ${usage.lastGeneratedAt ?? null})
-    ON CONFLICT(user_key)
-    DO UPDATE SET
-      remaining_credits = excluded.remaining_credits,
-      used_credits = excluded.used_credits,
-      granted_credits = excluded.granted_credits,
-      daily_usage_date = excluded.daily_usage_date,
-      daily_used_credits = excluded.daily_used_credits,
-      credit_model_version = excluded.credit_model_version,
-      updated_at = excluded.updated_at,
-      last_generated_at = excluded.last_generated_at
-  `;
+async function writeUsageRecord(db: HistoryD1Database, usage: UsageRecord) {
+  await db
+    .prepare(
+      `INSERT INTO user_usage
+        (user_key, remaining_credits, used_credits, granted_credits,
+         daily_usage_date, daily_used_credits, credit_model_version,
+         created_at, updated_at, last_generated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_key)
+       DO UPDATE SET
+         remaining_credits = excluded.remaining_credits,
+         used_credits = excluded.used_credits,
+         granted_credits = excluded.granted_credits,
+         daily_usage_date = excluded.daily_usage_date,
+         daily_used_credits = excluded.daily_used_credits,
+         credit_model_version = excluded.credit_model_version,
+         updated_at = excluded.updated_at,
+         last_generated_at = excluded.last_generated_at`,
+    )
+    .bind(
+      usage.userKey,
+      usage.remainingCredits,
+      usage.usedCredits,
+      usage.grantedCredits,
+      usage.dailyUsageDate,
+      usage.dailyUsedCredits,
+      usage.creditModelVersion,
+      usage.createdAt,
+      usage.updatedAt,
+      usage.lastGeneratedAt ?? null,
+    )
+    .run();
 }
 
 async function readUsage(
-  db: AppSql,
+  db: HistoryD1Database,
   userKey: string,
   now = Date.now(),
 ) {
@@ -421,10 +454,8 @@ async function readUsage(
 }
 
 export async function ensureManagedUser(env: UserEnv, authUser: AuthUser) {
-  let db: AppSql;
-  try {
-    db = await requireAdminDb(env, "用户表");
-  } catch {
+  const db = env.HISTORY_DB;
+  if (!db) {
     return {
       user: {
         ...authUser,
@@ -435,6 +466,7 @@ export async function ensureManagedUser(env: UserEnv, authUser: AuthUser) {
       usage: null,
     };
   }
+  await ensureAdminSchema(db);
 
   const now = Date.now();
   const userKey = getUserKey(authUser);
@@ -473,12 +505,9 @@ export async function ensureManagedUser(env: UserEnv, authUser: AuthUser) {
 }
 
 export async function hydrateManagedUser(env: UserEnv, authUser: AuthUser) {
-  let db: AppSql;
-  try {
-    db = await requireAdminDb(env, "用户表");
-  } catch {
-    return ensureManagedUser(env, authUser);
-  }
+  const db = env.HISTORY_DB;
+  if (!db) return ensureManagedUser(env, authUser);
+  await ensureAdminSchema(db);
 
   const userKey = getUserKey(authUser);
   const record = await readUserRecord(db, userKey);
@@ -554,7 +583,7 @@ export async function consumeImageCreditByUserKey(env: UserEnv, userKey: string)
 
 export async function requireImageCredit(env: UserEnv, authUser: AuthUser) {
   const managed = await hydrateManagedUser(env, authUser);
-  if (!managed.usage) {
+  if (!env.HISTORY_DB || !managed.usage) {
     throw new Error("服务端未配置用户次数表");
   }
   if (managed.user.role === "super_admin") {
@@ -599,15 +628,17 @@ export async function grantImageCredits(env: UserEnv, authUser: AuthUser, amount
 export async function listManagedUsers(env: UserEnv) {
   const db = await requireAdminDb(env, "用户表");
   const superAdminKey = await readSuperAdminKey(db);
-  const result = await db<UserRow[]>`
-    SELECT user_key, provider, provider_id, name, email, image, role,
-      created_at, updated_at, last_login_at
-    FROM managed_users
-    ORDER BY last_login_at DESC
-  `;
+  const result = await db
+    .prepare(
+      `SELECT user_key, provider, provider_id, name, email, image, role,
+        created_at, updated_at, last_login_at
+       FROM managed_users
+       ORDER BY last_login_at DESC`,
+    )
+    .all<UserRow>();
 
   const rows: AdminUserRow[] = [];
-  for (const row of result) {
+  for (const row of result.results ?? []) {
     const record = fromUserRow(row);
     const role: UserRole =
       superAdminKey === record.userKey ? "super_admin" : normalizeRole(record.role);

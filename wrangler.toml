@@ -10,29 +10,11 @@ LLM_BASE_URL = "https://sub2api.easyauto.app"
 binding = "TASKS_KV"
 id = "6a7ee075ab4b4cbe9cfd80ed9fb0b40a"
 
-[[hyperdrive]]
-binding = "HYPERDRIVE"
-id = "5331cfb2bd4a45038ac17671fed6d1d8"
+[[d1_databases]]
+binding = "HISTORY_DB"
+database_name = "ecom-img-gen-history"
+database_id = "47b2ddfa-9418-4c60-b3ba-7f71112196c1"
 
 [[r2_buckets]]
-binding = "HISTORY_BUCKET"
-bucket_name = "ecom-img-gen-images"
-
-[env.production]
-compatibility_date = "2026-06-07"
-
-[env.production.vars]
-LLM_MODEL = "gpt-5.5"
-LLM_BASE_URL = "https://sub2api.easyauto.app"
-
-[[env.production.kv_namespaces]]
-binding = "TASKS_KV"
-id = "6a7ee075ab4b4cbe9cfd80ed9fb0b40a"
-
-[[env.production.hyperdrive]]
-binding = "HYPERDRIVE"
-id = "5331cfb2bd4a45038ac17671fed6d1d8"
-
-[[env.production.r2_buckets]]
 binding = "HISTORY_BUCKET"
 bucket_name = "ecom-img-gen-images"

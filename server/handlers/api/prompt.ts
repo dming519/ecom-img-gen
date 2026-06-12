@@ -19,7 +19,7 @@ interface PromptRequestBody {
   productImageIds?: string[];
 }
 
-// Nuxt/Nitro 会把运行时环境变量、KV、Hyperdrive 等都放进 context.env。
+// Nuxt/Nitro 会把运行时环境变量、KV、D1 等都放进 context.env。
 interface RequestContext {
   request: Request;
   env: {

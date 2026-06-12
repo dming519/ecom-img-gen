@@ -11,7 +11,7 @@ interface ErrorPayload {
   error?: string | { message?: string };
 }
 
-// 这个文件名字叫 db，是为了保留前端调用习惯；实际数据已经存到服务端 Postgres/R2。
+// 这个文件名字叫 db，是为了保留前端调用习惯；实际数据已经存到服务端 D1/R2。
 // 前端只负责把历史记录整理成适合接口保存的结构。
 
 function extractError(text: string) {
