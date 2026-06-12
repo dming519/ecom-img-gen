@@ -86,14 +86,19 @@ async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit) {
   return response;
 }
 
-// 详情图流程第一步：根据商品资料和参考图生成多条“可用于生图”的 prompt。
+// 图包流程第一步：根据商品资料和参考图生成多条“可用于生图”的 prompt。
 export async function generateDetailPrompts(
   options: GeneratePromptOptions,
 ): Promise<GeneratePromptResult> {
   const body = JSON.stringify({
     name: options.name,
     sellingPoints: options.sellingPoints,
-    imageCount: options.imageCount,
+    imageModes: options.imageModes,
+    targetPlatform: options.targetPlatform,
+    audience: options.audience,
+    priceBand: options.priceBand,
+    proofMaterials: options.proofMaterials,
+    offer: options.offer,
     productImageIds: options.productImageIds,
   });
   if (body.length > MAX_PROMPT_PAYLOAD_CHARS) {
@@ -114,16 +119,16 @@ export async function generateDetailPrompts(
   const payload = JSON.parse(text) as CreatePromptTaskPayload;
   if (!payload.taskId) {
     throw new Error(
-      typeof payload.error === "string" ? payload.error : "创建详情图文案任务失败",
+      typeof payload.error === "string" ? payload.error : "创建图包方案任务失败",
     );
   }
 
   const task = await pollPromptTask(payload.taskId);
   if (task.status === "failed") {
-    throw new Error(task.error || "详情图文案生成失败");
+    throw new Error(task.error || "图包方案生成失败");
   }
   if (!task.prompts?.length) {
-    throw new Error("详情图文案任务未返回内容");
+    throw new Error("图包方案任务未返回内容");
   }
 
   return {
@@ -174,12 +179,12 @@ async function pollPromptTask(
 
   throw new Error(
     lastError
-      ? `详情图文案任务超时，请重试。最后一次状态：${lastError}`
-      : "详情图文案任务超时，请重试",
+      ? `图包方案任务超时，请重试。最后一次状态：${lastError}`
+      : "图包方案任务超时，请重试",
   );
 }
 
-// 详情图流程第二步：提交单条 prompt 和参考图，创建图片生成任务。
+// 图包流程第二步：提交单条 prompt 和参考图，创建图片生成任务。
 export async function createImageTask(
   options: CreateImageTaskOptions,
   signal?: AbortSignal,

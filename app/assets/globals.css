@@ -1242,6 +1242,19 @@ button:disabled {
   line-height: 1.48;
 }
 
+.context-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.compact-textarea {
+  min-height: 70px;
+  height: 70px;
+  max-height: 140px;
+  margin-bottom: 12px;
+  font-size: 0.8rem;
+  line-height: 1.46;
+}
+
 #product-name {
   font-size: 0.8rem;
 }
@@ -1420,8 +1433,54 @@ button:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.count-segments {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+.image-mode-toggle-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.image-mode-toggle {
+  min-width: 0;
+  min-height: 48px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid rgba(191, 204, 222, 0.76);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--text-sub);
+  font-size: 0.78rem;
+  font-weight: 780;
+  transition:
+    transform 0.16s var(--ease),
+    border-color 0.16s var(--ease),
+    background 0.16s var(--ease),
+    color 0.16s var(--ease),
+    box-shadow 0.16s var(--ease);
+}
+
+.image-mode-toggle small {
+  color: var(--text-mute);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.image-mode-toggle:hover:not(:disabled) {
+  color: var(--accent-ink);
+  border-color: rgba(23, 105, 255, 0.38);
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+}
+
+.image-mode-toggle.is-active {
+  border-color: rgba(23, 105, 255, 0.58);
+  background: #f7fbff;
+  color: var(--accent-ink);
+  box-shadow:
+    0 0 0 1px rgba(23, 105, 255, 0.16),
+    0 8px 18px rgba(23, 105, 255, 0.12);
 }
 
 .segment-option {

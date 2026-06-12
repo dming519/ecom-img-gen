@@ -30,6 +30,10 @@ function getPromptSrc(prompt: DetailPromptItem | undefined) {
 function getReversed(history: HistoryItem[]) {
   return history.map((item, idx) => ({ item, idx })).reverse()
 }
+
+function getHistoryModeLabel(item: HistoryItem) {
+  return item.product.imageModes.map((mode) => (mode === "main" ? "主图" : "详情图")).join("+")
+}
 </script>
 
 <template>
@@ -44,7 +48,7 @@ function getReversed(history: HistoryItem[]) {
     </button>
   </div>
   <div class="history-grid">
-    <div v-if="history.length === 0" class="empty">还没有商品详情图历史</div>
+    <div v-if="history.length === 0" class="empty">还没有商品图历史</div>
     <div
       v-for="{ item, idx } in getReversed(history)"
       v-else
@@ -67,14 +71,10 @@ function getReversed(history: HistoryItem[]) {
         <strong :title="item.product.name">{{ item.product.name }}</strong>
         <p :title="item.product.sellingPoints">{{ item.product.sellingPoints }}</p>
         <small :title="item.prompts.slice(0, 2).map((prompt) => prompt.title).join(' / ')">
-          {{ item.prompts.slice(0, 2).map((prompt) => prompt.title).join(" / ") || "暂无详情图文案" }}
+          {{ item.prompts.slice(0, 2).map((prompt) => prompt.title).join(" / ") || "暂无图包方案" }}
         </small>
         <span class="history-meta-pill">
-          {{
-            item.generation
-              ? `${item.generation.aspectRatio ?? "Auto"} · ${item.generation.quality ?? "1K"}`
-              : "默认参数"
-          }}
+          {{ `${getHistoryModeLabel(item)} · ${item.generation?.quality ?? "1K"}` }}
         </span>
       </div>
       <div class="history-card-foot">

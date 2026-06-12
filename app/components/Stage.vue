@@ -34,8 +34,8 @@ function getItemSrc(item: DetailPromptItem) {
   <div v-if="!prompts.length" class="stage">
     <div class="stage-empty-card" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px;">
       <Icon name="image" class="icon-large" />
-      <div class="icon-hint">您的商品详情图将在这里呈现</div>
-      <p class="empty-tip" style="margin-bottom: 8px;">先填写商品资料并生成方案，然后点击"批量生成详情图"</p>
+      <div class="icon-hint">您的商品图将在这里呈现</div>
+      <p class="empty-tip" style="margin-bottom: 8px;">先填写商品资料并生成方案，然后点击"批量生成商品图"</p>
       <button
         type="button"
         class="btn-secondary"
@@ -81,7 +81,7 @@ function getItemSrc(item: DetailPromptItem) {
       </div>
     </div>
 
-    <div class="result-strip" aria-label="详情图生成结果">
+    <div class="result-strip" aria-label="商品图生成结果">
       <button
         v-for="(item, index) in prompts"
         :key="item.id"

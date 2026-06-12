@@ -20,18 +20,17 @@ import { resolveImageSize } from "@/lib/imageOptions"
 import type {
   AspectRatio,
   AuthSession,
+  DetailImageMode,
   DetailPromptItem,
   HistoryItem,
   ImageQuality,
   ProductInput,
 } from "@/lib/types"
 import AdminPanel from "./AdminPanel.vue"
-import AspectRatioSelector from "./AspectRatioSelector.vue"
 import CutoutStudio from "./CutoutStudio.vue"
 import EditStudio from "./EditStudio.vue"
 import HistoryGrid from "./HistoryGrid.vue"
 import Icon from "./Icon.vue"
-import ImageCountSelector from "./ImageCountSelector.vue"
 import LayerStudio from "./LayerStudio.vue"
 import Lightbox from "./Lightbox.vue"
 import MultiViewStudio from "./MultiViewStudio.vue"
@@ -48,14 +47,17 @@ const props = withDefaults(defineProps<{
 })
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
-const MAX_PRODUCT_IMAGE_EDGE = 1280
-const PRODUCT_IMAGE_QUALITY = 0.82
+const MAX_PRODUCT_IMAGE_EDGE = 1800
+const PRODUCT_IMAGE_QUALITY = 0.9
 const MAX_PROMPT_IMAGE_CHARS = 1_500_000
 const MAX_PROMPT_IMAGE_TOTAL_CHARS = 6_000_000
-const MAX_DETAIL_IMAGES = 8
-const DRAFT_KEY = "ecomimggen_draft_v3"
-const ASPECT_RATIO_VALUES: AspectRatio[] = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16"]
+const DRAFT_KEY = "ecomimggen_draft_v5"
 const IMAGE_QUALITY_VALUES: ImageQuality[] = ["1K", "2K", "4K"]
+const IMAGE_MODE_ORDER: DetailImageMode[] = ["main", "detail"]
+const IMAGE_MODE_OPTIONS: Array<{ label: string; value: DetailImageMode }> = [
+  { label: "主图", value: "main" },
+  { label: "详情图", value: "detail" },
+]
 const STATUS_LABEL: Record<DetailPromptItem["status"], string> = {
   draft: "待生成",
   queued: "排队中",
@@ -67,9 +69,13 @@ const STATUS_LABEL: Record<DetailPromptItem["status"], string> = {
 interface DraftState {
   productName: string
   sellingPoints: string
-  imageCount: number
+  imageModes: DetailImageMode[]
+  targetPlatform?: string
+  audience?: string
+  priceBand?: string
+  proofMaterials?: string
+  offer?: string
   prompts: DetailPromptItem[]
-  aspectRatio?: AspectRatio
   quality?: ImageQuality
   productImageIds?: string[]
 }
@@ -77,7 +83,7 @@ interface DraftState {
 // 自定义错误类型：用来区分“用户主动取消”和“真正生成失败”。
 class ImageGenerationCancelledError extends Error {
   constructor() {
-    super("已中断生成详情图")
+    super("已中断生成商品图")
     this.name = "ImageGenerationCancelledError"
   }
 }
@@ -86,10 +92,14 @@ class ImageGenerationCancelledError extends Error {
 const studioMode = shallowRef<StudioMode>(props.initialMode)
 const productName = shallowRef("")
 const sellingPoints = shallowRef("")
-const imageCount = shallowRef(5)
+const imageModes = ref<DetailImageMode[]>(["main", "detail"])
+const targetPlatform = shallowRef("淘宝 / 天猫 / 京东 / 抖音商城 / 小红书")
+const audience = shallowRef("")
+const priceBand = shallowRef("")
+const proofMaterials = shallowRef("")
+const offer = shallowRef("")
 const productImages = ref<string[]>([])
 const productImageIds = ref<string[]>([])
-const aspectRatio = shallowRef<AspectRatio>("3:4")
 const quality = shallowRef<ImageQuality>("1K")
 const prompts = ref<DetailPromptItem[]>([])
 const history = ref<HistoryItem[]>([])
@@ -115,18 +125,67 @@ const wakeLockRef = shallowRef<WakeLockSentinelLike | null>(null)
 const imageAbortRef = shallowRef<AbortController | null>(null)
 const imageCancelRequestedRef = shallowRef(false)
 const currentImageTaskIdRef = shallowRef<string | null>(null)
+const suppressImageModeReset = shallowRef(false)
+
+function getImageModeCount(mode: DetailImageMode) {
+  return mode === "main" ? 5 : 8
+}
+
+function getImageModeAspectRatio(mode: DetailImageMode): AspectRatio {
+  return mode === "main" ? "1:1" : "3:4"
+}
+
+function getImageModeLabel(mode: DetailImageMode) {
+  return mode === "main" ? "主图" : "详情图"
+}
+
+function normalizeImageModes(value: unknown): DetailImageMode[] {
+  const source = Array.isArray(value) ? value : []
+  const seen = new Set<DetailImageMode>()
+  for (const mode of source) {
+    if (mode === "main" || mode === "detail") seen.add(mode)
+  }
+  const ordered = IMAGE_MODE_ORDER.filter((mode) => seen.has(mode))
+  return ordered.length ? ordered : [...IMAGE_MODE_ORDER]
+}
+
+function getImageModesCount(modes: DetailImageMode[]) {
+  return modes.reduce((sum, mode) => sum + getImageModeCount(mode), 0)
+}
+
+function getImageModesLabel(modes: DetailImageMode[]) {
+  return modes.map((mode) => `${getImageModeLabel(mode)} ${getImageModeCount(mode)} 张`).join(" + ")
+}
+
+function getPromptImageMode(item: DetailPromptItem | null | undefined): DetailImageMode {
+  return item?.imageMode ?? "detail"
+}
+
+function getPromptAspectRatio(item: DetailPromptItem | null | undefined): AspectRatio {
+  return getImageModeAspectRatio(getPromptImageMode(item))
+}
+
+function getPromptSize(item: DetailPromptItem | null | undefined) {
+  return resolveImageSize(getPromptAspectRatio(item))
+}
 
 // computed 是派生状态：不直接存数据，而是根据上面的源状态实时计算。
+const imageCount = computed(() => getImageModesCount(imageModes.value))
 const currentProduct = computed<ProductInput>(() => ({
   name: productName.value.trim(),
   sellingPoints: sellingPoints.value.trim(),
+  imageModes: [...imageModes.value],
   imageCount: imageCount.value,
+  targetPlatform: targetPlatform.value.trim(),
+  audience: audience.value.trim(),
+  priceBand: priceBand.value.trim(),
+  proofMaterials: proofMaterials.value.trim(),
+  offer: offer.value.trim(),
   productImages: productImages.value,
   productImageIds: productImageIds.value,
 }))
-const resolvedSize = computed(() => resolveImageSize(aspectRatio.value))
 const generationLabel = computed(() =>
-  `${aspectRatio.value === "auto" ? "Auto" : aspectRatio.value} · ${quality.value}`,
+  `${getImageModesLabel(imageModes.value)} · 共 ${imageCount.value} 张 · ${quality.value}`,
 )
 const authenticated = computed(() => !!session.value?.authenticated)
 const authLabel = computed(() =>
@@ -186,6 +245,9 @@ const activePromptIndex = computed(() =>
     : 0,
 )
 const activePrompt = computed(() => prompts.value[activePromptIndex.value] ?? null)
+const activePromptMode = computed(() => getPromptImageMode(activePrompt.value))
+const activePromptModeLabel = computed(() => getImageModeLabel(activePromptMode.value))
+const activePromptAspectRatio = computed(() => getImageModeAspectRatio(activePromptMode.value))
 
 // 上传的原图可能很大；先压缩再转成 data URL，减少接口请求体大小。
 function fileToCompressedDataURL(file: File): Promise<string> {
@@ -208,6 +270,8 @@ function fileToCompressedDataURL(file: File): Promise<string> {
           reject(new Error("浏览器不支持图片压缩，请更换图片后重试"))
           return
         }
+        ctx.fillStyle = "#ffffff"
+        ctx.fillRect(0, 0, width, height)
         ctx.drawImage(image, 0, 0, width, height)
         resolve(canvas.toDataURL("image/jpeg", PRODUCT_IMAGE_QUALITY))
       }
@@ -219,12 +283,20 @@ function fileToCompressedDataURL(file: File): Promise<string> {
   })
 }
 
-// 服务端只返回 title/promptId，这里补上前端需要跟踪的 id、index 和状态。
-function createPromptItem(index: number, title: string, promptId: string): DetailPromptItem {
+// 服务端返回 title/promptId/prompt，这里补上前端需要跟踪的 id、index 和状态。
+function createPromptItem(
+  index: number,
+  title: string,
+  promptId: string,
+  prompt: string | undefined,
+  imageMode: DetailImageMode,
+): DetailPromptItem {
   return {
     id: crypto.randomUUID(),
     index,
     title,
+    imageMode,
+    prompt,
     promptId,
     status: "draft",
   }
@@ -264,10 +336,17 @@ function resetActiveGenerationPrompts(items: DetailPromptItem[]): DetailPromptIt
 
 // 保存历史前复制商品输入，避免用户继续编辑表单时影响已经创建的历史记录。
 function cloneProduct(input: ProductInput): ProductInput {
+  const modes = normalizeImageModes(input.imageModes)
   return {
     name: input.name,
     sellingPoints: input.sellingPoints,
-    imageCount: input.imageCount,
+    imageModes: modes,
+    imageCount: getImageModesCount(modes),
+    targetPlatform: input.targetPlatform ?? "",
+    audience: input.audience ?? "",
+    priceBand: input.priceBand ?? "",
+    proofMaterials: input.proofMaterials ?? "",
+    offer: input.offer ?? "",
     productImages: [...input.productImages],
     productImageIds: input.productImageIds ? [...input.productImageIds] : [],
   }
@@ -376,7 +455,7 @@ async function handleHomeLinkClick(event: MouseEvent) {
   window.location.assign("/")
 }
 
-// 写入详情图历史。新增时拿服务端返回的 id，更新时保留当前记录。
+// 写入商品图历史。新增时拿服务端返回的 id，更新时保留当前记录。
 async function persistHistory(item: HistoryItem) {
   try {
     if (item.id == null) {
@@ -451,10 +530,14 @@ function handleResetProductInput() {
   error.value = null
   productName.value = ""
   sellingPoints.value = ""
-  imageCount.value = 5
+  imageModes.value = ["main", "detail"]
+  targetPlatform.value = "淘宝 / 天猫 / 京东 / 抖音商城 / 小红书"
+  audience.value = ""
+  priceBand.value = ""
+  proofMaterials.value = ""
+  offer.value = ""
   productImages.value = []
   productImageIds.value = []
-  aspectRatio.value = "3:4"
   quality.value = "1K"
   prompts.value = []
   activePromptIdx.value = 0
@@ -486,8 +569,12 @@ function validateProduct() {
 async function handleLoadDemoData() {
   productName.value = "玻尿酸多效修护精华液"
   sellingPoints.value = "• 深层补水：玻尿酸微分子渗透技术\n• 修护屏障：神经酰胺+角鲨烷双重修护\n• 适合人群：敏感肌、干燥肌、熟龄肌\n• 规格：30ml 旅行装 / 50ml 标准装\n• 使用感：清爽不油腻，快速吸收"
-  imageCount.value = 5
-  aspectRatio.value = "3:4"
+  imageModes.value = ["main", "detail"]
+  targetPlatform.value = "天猫 / 抖音商城"
+  audience.value = "敏感肌、干燥肌、换季修护人群，日常护肤和妆前补水场景"
+  priceBand.value = "中高客单护肤品"
+  proofMaterials.value = "玻尿酸、神经酰胺、角鲨烷成分信息；无真实检测报告编号"
+  offer.value = "旅行装可选，强调安心试用和售后咨询"
   quality.value = "1K"
   const canvas = document.createElement("canvas")
   canvas.width = 900
@@ -510,7 +597,7 @@ async function handleLoadDemoData() {
   productImages.value = [canvas.toDataURL("image/png")]
 }
 
-// 第一步：根据商品资料生成详情图文案，不直接生成图片。
+// 第一步：根据商品资料生成图包方案，不直接生成图片。
 async function handleGeneratePrompts() {
   error.value = null
   if (!validateProduct()) return
@@ -519,11 +606,16 @@ async function handleGeneratePrompts() {
     const result = await generateDetailPrompts({
       name: productName.value.trim(),
       sellingPoints: sellingPoints.value.trim(),
-      imageCount: imageCount.value,
+      imageModes: imageModes.value,
+      targetPlatform: targetPlatform.value.trim(),
+      audience: audience.value.trim(),
+      priceBand: priceBand.value.trim(),
+      proofMaterials: proofMaterials.value.trim(),
+      offer: offer.value.trim(),
       productImageIds: await ensureProductImageIds(),
     })
     prompts.value = result.prompts.map((item, index) =>
-      createPromptItem(index, item.title, item.promptId),
+      createPromptItem(index, item.title, item.promptId, item.prompt, item.imageMode),
     )
     activePromptIdx.value = 0
   } catch (event) {
@@ -535,6 +627,23 @@ async function handleGeneratePrompts() {
 
 function handleTitleChange(id: string, value: string) {
   prompts.value = prompts.value.map((item) => (item.id === id ? { ...item, title: value } : item))
+}
+
+function handlePromptChange(id: string, value: string) {
+  prompts.value = prompts.value.map((item) => (item.id === id ? { ...item, prompt: value } : item))
+}
+
+function isImageModeSelected(mode: DetailImageMode) {
+  return imageModes.value.includes(mode)
+}
+
+function handleImageModeToggle(mode: DetailImageMode) {
+  if (promptBusy.value || imageBusy.value) return
+  const selected = isImageModeSelected(mode)
+  if (selected && imageModes.value.length <= 1) return
+  imageModes.value = selected
+    ? imageModes.value.filter((item) => item !== mode)
+    : IMAGE_MODE_ORDER.filter((item) => item === mode || imageModes.value.includes(item))
 }
 
 // 长时间生成时尽量保持屏幕唤醒；浏览器不支持也不影响核心功能。
@@ -567,11 +676,11 @@ async function handleGenerateImages() {
   error.value = null
   if (!validateProduct()) return
   if (!prompts.value.length) {
-    error.value = "请先生成详情图方案。"
+    error.value = "请先生成图包方案。"
     return
   }
   if (prompts.value.some((item) => !item.promptId)) {
-    error.value = "详情图方案缺少后端引用，请重新生成详情图方案。"
+    error.value = "图包方案缺少后端引用，请重新生成图包方案。"
     return
   }
 
@@ -587,9 +696,7 @@ async function handleGenerateImages() {
     })),
     timestamp: Date.now(),
     generation: {
-      aspectRatio: aspectRatio.value,
       quality: quality.value,
-      size: resolvedSize.value,
     },
   }
 
@@ -618,8 +725,9 @@ async function handleGenerateImages() {
       const task = await createImageTask(
         {
           promptId: working[index]?.promptId ?? "",
-          size: resolvedSize.value,
-          aspectRatio: aspectRatio.value,
+          prompt: working[index]?.prompt,
+          size: getPromptSize(working[index]),
+          aspectRatio: getPromptAspectRatio(working[index]),
           quality: quality.value,
           inputImageIds: generationImageIds,
         },
@@ -656,7 +764,7 @@ async function handleGenerateImages() {
       }
       updateSessionCredits(result)
       if (!result.imageId) {
-        throw new Error(`${working[index]?.title ?? `第${index + 1}张详情图`}未返回图片 ID`)
+        throw new Error(`${working[index]?.title ?? `第${index + 1}张商品图`}未返回图片 ID`)
       }
 
       working = working.map((item, itemIndex) =>
@@ -693,18 +801,18 @@ async function handleGenerateImages() {
   }
 }
 
-// 只重新生成当前选中的一张详情图，其余已完成图片保持不变。
+// 只重新生成当前选中的一张商品图，其余已完成图片保持不变。
 async function handleRegenerateActiveImage() {
   error.value = null
   if (!validateProduct()) return
   if (!prompts.value.length) {
-    error.value = "请先生成详情图方案。"
+    error.value = "请先生成图包方案。"
     return
   }
   const targetIndex = Math.min(Math.max(activePromptIdx.value, 0), prompts.value.length - 1)
   const target = prompts.value[targetIndex]
   if (!target?.promptId) {
-    error.value = "当前详情图方案缺少后端引用，请重新生成详情图方案。"
+    error.value = "当前图包方案缺少后端引用，请重新生成图包方案。"
     return
   }
 
@@ -718,9 +826,7 @@ async function handleRegenerateActiveImage() {
         prompts: prompts.value.map(resetInterruptedPrompt),
         timestamp: Date.now(),
         generation: {
-          aspectRatio: aspectRatio.value,
           quality: quality.value,
-          size: resolvedSize.value,
         },
       }
     : {
@@ -728,9 +834,7 @@ async function handleRegenerateActiveImage() {
         prompts: prompts.value.map(resetInterruptedPrompt),
         timestamp: Date.now(),
         generation: {
-          aspectRatio: aspectRatio.value,
           quality: quality.value,
-          size: resolvedSize.value,
         },
       }
 
@@ -768,8 +872,9 @@ async function handleRegenerateActiveImage() {
     const task = await createImageTask(
       {
         promptId: working[targetIndex]?.promptId ?? "",
-        size: resolvedSize.value,
-        aspectRatio: aspectRatio.value,
+        prompt: working[targetIndex]?.prompt,
+        size: getPromptSize(working[targetIndex]),
+        aspectRatio: getPromptAspectRatio(working[targetIndex]),
         quality: quality.value,
         inputImageIds: generationImageIds,
       },
@@ -858,9 +963,16 @@ function handleSelectHistory(idx: number) {
   const item = history.value[idx]
   if (!item) return
   activeHistoryIdx.value = idx
+  suppressImageModeReset.value = true
   productName.value = item.product.name
   sellingPoints.value = item.product.sellingPoints
-  imageCount.value = Math.min(MAX_DETAIL_IMAGES, Math.max(1, item.product.imageCount))
+  const restoredModes = normalizeImageModes(item.product.imageModes)
+  imageModes.value = restoredModes
+  targetPlatform.value = item.product.targetPlatform || targetPlatform.value
+  audience.value = item.product.audience || ""
+  priceBand.value = item.product.priceBand || ""
+  proofMaterials.value = item.product.proofMaterials || ""
+  offer.value = item.product.offer || ""
   productImageIds.value = item.product.productImageIds ?? []
   productImages.value = item.product.productImages
   if (item.product.productImageIds?.length) {
@@ -870,14 +982,14 @@ function handleSelectHistory(idx: number) {
       })
       .catch((event) => console.warn("商品参考图恢复失败:", event))
   }
-  prompts.value = item.prompts.map(resetInterruptedPrompt)
-  if (item.generation?.aspectRatio && ASPECT_RATIO_VALUES.includes(item.generation.aspectRatio)) {
-    aspectRatio.value = item.generation.aspectRatio
-  }
+  prompts.value = item.prompts.map((prompt) => resetInterruptedPrompt(prompt))
   if (item.generation?.quality && IMAGE_QUALITY_VALUES.includes(item.generation.quality)) {
     quality.value = item.generation.quality
   }
   activePromptIdx.value = 0
+  window.setTimeout(() => {
+    suppressImageModeReset.value = false
+  }, 0)
 }
 
 // 删除单条历史时，同步维护当前选中的历史下标。
@@ -894,7 +1006,7 @@ function handleDeleteHistory(idx: number) {
 }
 
 async function handleClearHistory() {
-  if (!confirm("确定清空所有商品详情图历史？此操作不可撤销。")) return
+  if (!confirm("确定清空所有商品图历史？此操作不可撤销。")) return
   try {
     await dbClear()
   } catch (event) {
@@ -942,7 +1054,8 @@ function handleDownload(index: number) {
   if (!imageSrc) return
   const anchor = document.createElement("a")
   anchor.href = imageSrc
-  anchor.download = `ecom-detail-${productName.value || "product"}-${index + 1}.png`
+  const packType = getPromptImageMode(prompts.value[index]) === "main" ? "main" : "detail"
+  anchor.download = `ecom-${packType}-${productName.value || "product"}-${index + 1}.png`
   anchor.click()
 }
 
@@ -978,18 +1091,44 @@ watch(authPopoverOpen, (open) => {
   }
 })
 
+watch(() => imageModes.value.join(","), () => {
+  if (!draftLoaded.value) return
+  if (suppressImageModeReset.value) return
+  if (promptBusy.value || imageBusy.value) return
+  prompts.value = []
+  activePromptIdx.value = 0
+  activeHistoryIdx.value = -1
+})
+
 // 自动保存草稿到 localStorage。这里 deep: true 是为了监听 prompts 数组内部变化。
 watch(
-  [draftLoaded, productName, sellingPoints, imageCount, prompts, aspectRatio, quality, productImageIds],
+  [
+    draftLoaded,
+    productName,
+    sellingPoints,
+    imageModes,
+    targetPlatform,
+    audience,
+    priceBand,
+    proofMaterials,
+    offer,
+    prompts,
+    quality,
+    productImageIds,
+  ],
   () => {
     if (!draftLoaded.value || studioMode.value !== "image" || !import.meta.client) return
     try {
       const draft: DraftState = {
         productName: productName.value,
         sellingPoints: sellingPoints.value,
-        imageCount: imageCount.value,
+        imageModes: [...imageModes.value],
+        targetPlatform: targetPlatform.value,
+        audience: audience.value,
+        priceBand: priceBand.value,
+        proofMaterials: proofMaterials.value,
+        offer: offer.value,
         prompts: prompts.value,
-        aspectRatio: aspectRatio.value,
         quality: quality.value,
         productImageIds: productImageIds.value,
       }
@@ -1014,15 +1153,16 @@ onMounted(() => {
         const draft = JSON.parse(raw) as DraftState
         productName.value = draft.productName || ""
         sellingPoints.value = draft.sellingPoints || ""
-        imageCount.value = Number.isFinite(draft.imageCount)
-          ? Math.min(MAX_DETAIL_IMAGES, Math.max(1, Math.round(draft.imageCount)))
-          : 5
+        const restoredModes = normalizeImageModes(draft.imageModes)
+        imageModes.value = restoredModes
+        targetPlatform.value = draft.targetPlatform || targetPlatform.value
+        audience.value = draft.audience || ""
+        priceBand.value = draft.priceBand || ""
+        proofMaterials.value = draft.proofMaterials || ""
+        offer.value = draft.offer || ""
         prompts.value = Array.isArray(draft.prompts)
-          ? draft.prompts.map(resetInterruptedPrompt)
+          ? draft.prompts.map((prompt) => resetInterruptedPrompt(prompt))
           : []
-        if (draft.aspectRatio && ASPECT_RATIO_VALUES.includes(draft.aspectRatio)) {
-          aspectRatio.value = draft.aspectRatio
-        }
         if (draft.quality && IMAGE_QUALITY_VALUES.includes(draft.quality)) {
           quality.value = draft.quality
         }
@@ -1224,7 +1364,7 @@ onBeforeUnmount(() => {
             </template>
 
             <template v-else>
-              <p class="auth-popover-note">登录后才能生成详情图文案和商品详情图。</p>
+              <p class="auth-popover-note">登录后才能生成主图/详情图方案和商品图。</p>
               <form class="access-form access-form-compact" @submit.prevent="handleAccessLogin">
                 <label class="sr-only" for="access-code-popover-username">用户名</label>
                 <input
@@ -1320,6 +1460,56 @@ onBeforeUnmount(() => {
               placeholder="请输入商品核心卖点、适用人群、规格信息和购买理由。&#10;&#10;示例：&#10;• 深层补水：玻尿酸微分子渗透技术&#10;• 修护屏障：神经酰胺+角鲨烷双重修护&#10;• 适合人群：敏感肌、干燥肌、熟龄肌&#10;• 规格：30ml 旅行装 / 50ml 标准装&#10;• 使用感：清爽不油腻，快速吸收"
             />
 
+            <div class="form-grid context-grid">
+              <div>
+                <label for="target-platform">目标平台</label>
+                <input
+                  id="target-platform"
+                  v-model="targetPlatform"
+                  type="text"
+                  :disabled="controlsDisabled"
+                  placeholder="淘宝 / 天猫 / 京东 / 抖音商城 / 小红书"
+                >
+              </div>
+              <div>
+                <label for="price-band">价格带</label>
+                <input
+                  id="price-band"
+                  v-model="priceBand"
+                  type="text"
+                  :disabled="controlsDisabled"
+                  placeholder="示例：平价走量 | 中高客单 | 高端礼品"
+                >
+              </div>
+            </div>
+
+            <label for="audience">目标人群/购买场景</label>
+            <textarea
+              id="audience"
+              v-model="audience"
+              class="compact-textarea"
+              :disabled="controlsDisabled"
+              placeholder="示例：宝妈囤货、租房收纳、通勤办公、换季敏感肌、送礼场景"
+            />
+
+            <label for="proof-materials">证明素材/资质/评价</label>
+            <textarea
+              id="proof-materials"
+              v-model="proofMaterials"
+              class="compact-textarea"
+              :disabled="controlsDisabled"
+              placeholder="示例：检测报告、材质认证、用户好评关键词、真实参数。没有可留空，系统不会编造硬证据。"
+            />
+
+            <label for="offer">活动/售后/服务承诺</label>
+            <textarea
+              id="offer"
+              v-model="offer"
+              class="compact-textarea"
+              :disabled="controlsDisabled"
+              placeholder="示例：买一送一、7天无理由、赠品、包邮、质保、试用装"
+            />
+
             <div class="field-row-head">
               <label for="product-images">商品参考图 <span class="field-hint">(至少1张，最多8张)</span></label>
               <button
@@ -1381,34 +1571,28 @@ onBeforeUnmount(() => {
             <div class="settings-row">
               <div class="setting-block">
                 <div class="setting-head">
-                  <label>张数</label>
+                  <label>图包类型</label>
                   <span>{{ imageCount }} 张</span>
                 </div>
-                <div class="param-controls" aria-label="详情图张数">
-                  <ImageCountSelector
-                    :value="imageCount"
-                    :disabled="controlsDisabled"
-                    @change="imageCount = $event"
-                  />
+                <div class="image-mode-toggle-group" role="group" aria-label="图包类型">
+                  <button
+                    v-for="option in IMAGE_MODE_OPTIONS"
+                    :key="option.value"
+                    type="button"
+                    :class="['image-mode-toggle', { 'is-active': isImageModeSelected(option.value) }]"
+                    :aria-pressed="isImageModeSelected(option.value)"
+                    :disabled="controlsDisabled || (isImageModeSelected(option.value) && imageModes.length <= 1)"
+                    @click="handleImageModeToggle(option.value)"
+                  >
+                    <span>{{ option.label }}</span>
+                    <small>{{ getImageModeCount(option.value) }} 张 · {{ getImageModeAspectRatio(option.value) }}</small>
+                  </button>
                 </div>
               </div>
               <div class="setting-block">
                 <div class="setting-head">
-                  <label>画面比例</label>
-                  <span>{{ aspectRatio === "auto" ? "Auto" : aspectRatio }}</span>
-                </div>
-                <div class="param-controls" aria-label="画面比例">
-                  <AspectRatioSelector
-                    :value="aspectRatio"
-                    :disabled="controlsDisabled"
-                    @change="aspectRatio = $event"
-                  />
-                </div>
-              </div>
-              <div class="setting-block">
-                <div class="setting-head">
-                  <label>清晰度</label>
-                  <span>{{ quality }}</span>
+                  <label>比例/清晰度</label>
+                  <span>按图包自动 · {{ quality }}</span>
                 </div>
                 <div class="param-controls" aria-label="清晰度">
                   <QualitySelector
@@ -1424,7 +1608,7 @@ onBeforeUnmount(() => {
           <div class="input-action-bar">
             <button type="button" class="btn-primary" :disabled="controlsDisabled" @click="handleGeneratePrompts">
               <span v-if="promptBusy" class="btn-spinner" aria-hidden="true" />
-              {{ promptBusy ? "AI 生成方案中..." : "生成详情图方案" }}
+              {{ promptBusy ? "AI 生成方案中..." : "生成图包方案" }}
             </button>
             <div v-if="error" class="alert">{{ error }}</div>
           </div>
@@ -1432,7 +1616,7 @@ onBeforeUnmount(() => {
 
         <aside class="studio-panel prompt-rail">
           <div class="panel-heading">
-            <h2>详情图方案</h2>
+            <h2>图包方案</h2>
             <span class="panel-count">
               {{ activePrompt ? `${activePromptIndex + 1} / ${prompts.length}` : `${prompts.length} 个` }}
             </span>
@@ -1440,12 +1624,12 @@ onBeforeUnmount(() => {
           <div class="prompt-editor-list">
             <div v-if="promptBusy" class="busy-card">
               <span class="busy-orbit" aria-hidden="true" />
-              <strong>正在生成详情图方案</strong>
+              <strong>正在生成图包方案</strong>
               <p>AI 正在分析商品资料和参考图，预计需要 10-20 秒...</p>
             </div>
             <div v-else-if="!activePrompt" class="empty" style="display: flex; flex-direction: column; align-items: center; gap: 14px; justify-content: center; padding: 32px; text-align: center;">
               <Icon name="spark" style="width: 32px; height: 32px; color: var(--accent); opacity: 0.8;" />
-              <div style="font-size: 0.84rem; color: var(--text-sub);">还没有详情图生成方案。</div>
+              <div style="font-size: 0.84rem; color: var(--text-sub);">还没有图包生成方案。</div>
               <button
                 type="button"
                 class="btn-secondary"
@@ -1457,7 +1641,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
             <template v-else>
-              <div class="prompt-switcher" aria-label="详情图方案切换">
+              <div class="prompt-switcher" aria-label="图包方案切换">
                 <button
                   type="button"
                   class="prompt-nav-btn"
@@ -1466,7 +1650,7 @@ onBeforeUnmount(() => {
                 >
                   上一张
                 </button>
-                <div class="prompt-step-list" role="tablist" aria-label="切换详情图方案">
+                <div class="prompt-step-list" role="tablist" aria-label="切换图包方案">
                   <button
                     v-for="(item, index) in prompts"
                     :key="item.id"
@@ -1494,7 +1678,7 @@ onBeforeUnmount(() => {
                 <div class="prompt-editor-head">
                   <span class="prompt-index">{{ activePromptIndex + 1 }}</span>
                   <input
-                    aria-label="详情图方案标题"
+                    aria-label="图包方案标题"
                     type="text"
                     :value="activePrompt.title"
                     :disabled="imageBusy"
@@ -1505,9 +1689,18 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
                 <div class="prompt-plan-summary">
-                  <strong>{{ activePrompt.title || `第${activePromptIndex + 1}张详情图` }}</strong>
-                  <span>方案内容由系统在后端保存。</span>
+                  <strong>{{ activePrompt.title || `第${activePromptIndex + 1}张商品图` }}</strong>
+                  <span>{{ activePromptModeLabel }} · {{ activePromptAspectRatio }} · {{ activePromptIndex + 1 }} / {{ prompts.length }}</span>
                 </div>
+                <label class="sr-only" :for="`prompt-text-${activePrompt.id}`">生图 Prompt</label>
+                <textarea
+                  :id="`prompt-text-${activePrompt.id}`"
+                  class="prompt-textarea"
+                  :value="activePrompt.prompt || ''"
+                  :disabled="imageBusy"
+                  placeholder="当前方案没有返回 Prompt，请重新生成图包方案。"
+                  @input="event => handlePromptChange(activePrompt!.id, (event.target as HTMLTextAreaElement).value)"
+                />
               </div>
             </template>
           </div>
@@ -1520,7 +1713,7 @@ onBeforeUnmount(() => {
                 @click="handleGenerateImages"
               >
                 <span v-if="imageBusy" class="btn-spinner" aria-hidden="true" />
-                {{ imageBusy ? `生成中 (${activePromptIndex + 1}/${prompts.length})` : "批量生成详情图" }}
+                {{ imageBusy ? `生成中 (${activePromptIndex + 1}/${prompts.length})` : "批量生成商品图" }}
               </button>
               <button
                 v-if="!imageBusy"
@@ -1545,7 +1738,7 @@ onBeforeUnmount(() => {
 
         <section class="studio-panel canvas-panel">
           <div class="panel-heading">
-            <h2>详情图预览</h2>
+            <h2>商品图预览</h2>
             <span class="panel-count">{{ generationLabel }}</span>
           </div>
           <Stage

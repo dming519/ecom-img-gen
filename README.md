@@ -1,12 +1,13 @@
 # EcomImgGen
 
-商品详情图 Prompt 生成与逐张出图工作台。
+国内电商主图 / 详情图 Prompt 生成与逐张出图工作台。
 
 ## 功能
 
 - 登录后使用，支持 GitHub / Google OAuth。
-- 输入商品名称、商品图片、核心卖点和功效、图片张数。
-- 调用服务端 AI 接口，根据 `电商详情页Prompt自动生成器.md` 的规则生成商品详情图 Prompt。
+- 输入商品名称、商品图片、核心卖点、目标平台、人群场景、证明素材和活动售后信息。
+- 选择图包类型：主图固定 5 张，详情图固定 8 张，也可以同时选择一次生成 13 张。
+- 调用服务端 AI 接口生成国内电商图包 Prompt。
 - Prompt 会展示在页面，用户可以逐条修改标题和 Prompt 内容。
 - 点击生成后按顺序逐张创建图片任务，每张先返回 `taskId`，前端轮询状态，完成一张展示一张。
 - 表单草稿、Prompt 草稿保存在 `localStorage`。
@@ -51,7 +52,7 @@ Prompt 生成：
 1. 浏览器请求 `POST /api/prompt`
 2. Nuxt/Nitro API 校验登录态
 3. Nuxt/Nitro API 调用 OpenAI-compatible `chat/completions` 视觉模型
-4. 返回多条商品详情图 Prompt
+4. 返回固定数量的主图 / 详情图 Prompt，组合模式返回同一组历史里的 13 条 Prompt
 
 图片生成：
 

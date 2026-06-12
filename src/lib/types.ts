@@ -4,6 +4,7 @@ export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 export type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 export type LayerAspectRatio = "1:1" | "4:3" | "3:4";
 export type ImageQuality = "1K" | "2K" | "4K";
+export type DetailImageMode = "main" | "detail";
 export type MultiViewAngleId =
   | "front"
   | "left-side"
@@ -92,16 +93,22 @@ export interface RedeemCodeRow {
   lastRedeemedAt?: number;
 }
 
-// 详情图生成前，用户在左侧表单里填写的商品资料。
+// 图包生成前，用户在左侧表单里填写的商品资料。
 export interface ProductInput {
   name: string;
   sellingPoints: string;
+  imageModes: DetailImageMode[];
   imageCount: number;
+  targetPlatform?: string;
+  audience?: string;
+  priceBand?: string;
+  proofMaterials?: string;
+  offer?: string;
   productImages: string[];
   productImageIds?: string[];
 }
 
-// 单张详情图在前端生命周期里的状态。
+// 单张商品图在前端生命周期里的状态。
 type DetailImageStatus =
   | "draft"
   | "queued"
@@ -109,11 +116,13 @@ type DetailImageStatus =
   | "succeeded"
   | "failed";
 
-// 一条详情图方案引用，以及它对应的生成状态和结果图。真正 prompt 只保存在后端。
+// 一条图包方案，以及它对应的生成状态和结果图。
 export interface DetailPromptItem {
   id: string;
   index: number;
   title: string;
+  imageMode: DetailImageMode;
+  prompt?: string;
   promptId?: string;
   status: DetailImageStatus;
   taskId?: string;
@@ -124,25 +133,29 @@ export interface DetailPromptItem {
   updatedAt?: number;
 }
 
-// 一组详情图历史记录：商品资料 + 多张文案/图片 + 生成参数。
+// 一组商品图历史记录：商品资料 + 多张文案/图片 + 生成参数。
 export interface HistoryItem {
   id?: number;
   product: ProductInput;
   prompts: DetailPromptItem[];
   timestamp: number;
   generation?: {
-    aspectRatio?: AspectRatio;
     quality?: ImageQuality;
     size?: ImageSize;
   };
 }
 
-// 生成详情图文案时，前端提交给 `/api/prompt` 的参数。
+// 生成图包方案时，前端提交给 `/api/prompt` 的参数。
 // 本地预览用的 productImages 不允许进入请求体，公开接口只接收 imageId。
 export interface GeneratePromptOptions {
   name: string;
   sellingPoints: string;
-  imageCount: number;
+  imageModes: DetailImageMode[];
+  targetPlatform?: string;
+  audience?: string;
+  priceBand?: string;
+  proofMaterials?: string;
+  offer?: string;
   productImageIds: string[];
 }
 
@@ -151,6 +164,8 @@ export interface GeneratePromptResult {
   prompts: Array<{
     promptId: string;
     title: string;
+    imageMode: DetailImageMode;
+    prompt?: string;
     index: number;
   }>;
   model: string;
@@ -168,6 +183,7 @@ export interface PromptTaskStatus {
 
 export interface CreateDetailImageTaskOptions {
   promptId: string;
+  prompt?: string;
   size: ImageSize;
   aspectRatio?: AspectRatio;
   quality?: ImageQuality;

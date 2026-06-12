@@ -17,6 +17,7 @@ type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 type ImageQuality = "1K" | "2K" | "4K";
 type LayerAspectRatio = "1:1" | "3:4" | "4:3";
+type DetailImageMode = "main" | "detail";
 
 interface GenerateRequestBody {
   prompt?: string;
@@ -94,12 +95,46 @@ interface PromptRequestBody {
   taskId?: string;
   userKey?: string;
   userText?: string;
+  imageModes?: unknown;
   imageCount?: number;
   productImages?: string[];
   systemTemplate?: string;
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+}
+
+function resolveDetailImageCount(mode: DetailImageMode) {
+  return mode === "main" ? 5 : 8;
+}
+
+function normalizeDetailImageModes(value: unknown): DetailImageMode[] {
+  const source = Array.isArray(value) ? value : [];
+  const seen = new Set<DetailImageMode>();
+  for (const mode of source) {
+    if (mode === "main" || mode === "detail") seen.add(mode);
+  }
+  const ordered: DetailImageMode[] = [];
+  if (seen.has("main")) ordered.push("main");
+  if (seen.has("detail")) ordered.push("detail");
+  return ordered;
+}
+
+function resolveDetailImageModesCount(modes: DetailImageMode[]) {
+  return modes.reduce((sum, mode) => sum + resolveDetailImageCount(mode), 0);
+}
+
+function detailImageModeLabel(mode: DetailImageMode) {
+  return mode === "main" ? "主图" : "详情图";
+}
+
+function resolvePromptItemMode(
+  value: unknown,
+  modes: DetailImageMode[],
+  index: number,
+): DetailImageMode {
+  if ((value === "main" || value === "detail") && modes.includes(value)) return value;
+  throw new Error(`第${index + 1}条图包方案缺少合法 imageMode`);
 }
 
 interface ChatCompletionPayload {
@@ -516,7 +551,7 @@ function parsePromptJson(text: string) {
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
   const candidate = fenced || trimmed;
   return JSON.parse(candidate) as {
-    prompts?: Array<{ title?: string; prompt?: string }>;
+    prompts?: Array<{ imageMode?: string; title?: string; prompt?: string }>;
   };
 }
 
@@ -572,7 +607,7 @@ function extractChatContent(text: string) {
     }
 
     throw new Error(
-      `详情图文案服务返回了无法解析的响应：${summarizeRawText(text) || "空响应"}`,
+      `图包方案服务返回了无法解析的响应：${summarizeRawText(text) || "空响应"}`,
     );
   }
 }
@@ -1079,7 +1114,7 @@ export class ImageTasksDO {
           userKey,
           createdAt: now,
           updatedAt: now,
-          error: "缺少详情图文案",
+          error: "缺少图包方案",
         }),
         { expirationTtl: 3600 },
       );
@@ -1713,9 +1748,10 @@ export class PromptTasksDO {
 
     const userText = body.userText?.trim() ?? "";
     const systemTemplate = body.systemTemplate?.trim() ?? "";
-    const imageCount = Math.min(8, Math.max(1, Math.round(body.imageCount ?? 5)));
+    const imageModes = normalizeDetailImageModes(body.imageModes);
+    const imageCount = resolveDetailImageModesCount(imageModes);
     const productImages = (body.productImages ?? []).filter(Boolean).slice(0, 8);
-    if (!userText || !systemTemplate || !productImages.length) {
+    if (!userText || !systemTemplate || !imageModes.length || !productImages.length) {
       await this.env.TASKS_KV.put(
         taskKey,
         JSON.stringify({
@@ -1723,7 +1759,7 @@ export class PromptTasksDO {
           userKey,
           createdAt,
           updatedAt: Date.now(),
-          error: "详情图文案任务参数不完整",
+          error: "图包方案任务参数不完整",
         }),
         { expirationTtl: 3600 },
       );
@@ -1736,6 +1772,7 @@ export class PromptTasksDO {
       apiKey,
       baseUrl,
       model,
+      imageModes,
       imageCount,
       userKey,
       productImages,
@@ -1747,7 +1784,7 @@ export class PromptTasksDO {
     return json({ ok: true });
   }
 
-  // 调用文本模型生成详情图文案，并把规范化后的 prompts 写回 KV。
+  // 调用文本模型生成图包方案，并把规范化后的 prompts 写回 KV。
   async runTask(body: PromptRequestBody) {
     const taskId = body.taskId?.trim();
     if (!taskId) return;
@@ -1760,7 +1797,8 @@ export class PromptTasksDO {
     const model = body.model?.trim() || llmConfig.model;
     const userText = body.userText?.trim() ?? "";
     const systemTemplate = body.systemTemplate?.trim() ?? "";
-    const imageCount = Math.min(8, Math.max(1, Math.round(body.imageCount ?? 5)));
+    const imageModes = normalizeDetailImageModes(body.imageModes);
+    const imageCount = resolveDetailImageModesCount(imageModes);
     const productImages = (body.productImages ?? []).filter(Boolean).slice(0, 8);
 
     if (await isImageTaskCanceled(this.env, taskKey)) return;
@@ -1772,7 +1810,7 @@ export class PromptTasksDO {
 
     try {
       if (!apiKey || !baseUrl || !model) {
-        throw new Error("服务端未配置详情图文案生成接口");
+        throw new Error("服务端未配置图包方案生成接口");
       }
       const upstream = await createPromptRequest(
         baseUrl,
@@ -1793,29 +1831,44 @@ export class PromptTasksDO {
         } catch {
           // Keep raw response.
         }
-        throw new Error(`详情图文案生成失败: HTTP ${upstream.status}: ${detail}`);
+        throw new Error(`图包方案生成失败: HTTP ${upstream.status}: ${detail}`);
       }
 
       const content = extractChatContent(text);
       if (!content) {
         throw new Error(
-          `详情图文案服务未返回内容：${summarizeRawText(text) || "空响应"}`,
+          `图包方案服务未返回内容：${summarizeRawText(text) || "空响应"}`,
         );
       }
 
       const parsed = parsePromptJson(content);
       const prompts = (parsed.prompts ?? [])
-        .map((item, index) => ({
-          title: item.title?.trim() || `第${index + 1}张商品详情图`,
-          promptId: crypto.randomUUID(),
-          prompt: normalizeGeneratedPromptText(item.prompt ?? ""),
-        }))
+        .map((item, index) => {
+          const imageMode = resolvePromptItemMode(item.imageMode, imageModes, index);
+          return {
+            imageMode,
+            title:
+              item.title?.trim() ||
+              `第${index + 1}张${detailImageModeLabel(imageMode)}`,
+            promptId: crypto.randomUUID(),
+            prompt: normalizeGeneratedPromptText(item.prompt ?? ""),
+          };
+        })
         .filter((item) => item.prompt);
 
       if (prompts.length !== imageCount) {
         throw new Error(
-          `详情图文案数量不匹配：期望 ${imageCount} 条，实际 ${prompts.length} 条`,
+          `图包方案数量不匹配：期望 ${imageCount} 条，实际 ${prompts.length} 条`,
         );
+      }
+      for (const mode of imageModes) {
+        const actual = prompts.filter((item) => item.imageMode === mode).length;
+        const expected = resolveDetailImageCount(mode);
+        if (actual !== expected) {
+          throw new Error(
+            `${detailImageModeLabel(mode)}方案数量不匹配：期望 ${expected} 条，实际 ${actual} 条`,
+          );
+        }
       }
 
       if (await isImageTaskCanceled(this.env, taskKey)) return;
@@ -1844,7 +1897,7 @@ export class PromptTasksDO {
           updatedAt: Date.now(),
           error:
             error instanceof SyntaxError
-              ? "详情图文案服务未按 JSON 格式返回：" + error.message
+              ? "图包方案服务未按 JSON 格式返回：" + error.message
               : error instanceof Error
                 ? error.message
                 : String(error),

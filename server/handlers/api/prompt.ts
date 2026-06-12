@@ -5,11 +5,17 @@ import {
   type HistoryStorageEnv,
 } from "../_lib/historyStorage";
 import { getUserKey, type UserKvNamespace } from "../_lib/users";
+import type { DetailImageMode } from "../../../src/lib/types";
 
 interface PromptRequestBody {
   name?: string;
   sellingPoints?: string;
-  imageCount?: number;
+  imageModes?: unknown;
+  targetPlatform?: string;
+  audience?: string;
+  priceBand?: string;
+  proofMaterials?: string;
+  offer?: string;
   productImageIds?: string[];
 }
 
@@ -43,10 +49,38 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
-// 用户可以选 1-8 张详情图；非法值统一回落到默认 5 张。
-function normalizeCount(value: number | undefined) {
-  if (!Number.isFinite(value)) return 5;
-  return Math.min(8, Math.max(1, Math.round(value ?? 5)));
+function resolveImageModeCount(mode: DetailImageMode) {
+  return mode === "main" ? 5 : 8;
+}
+
+function normalizeImageModes(value: unknown): DetailImageMode[] {
+  const source = Array.isArray(value) ? value : [];
+  const seen = new Set<DetailImageMode>();
+  for (const mode of source) {
+    if (mode === "main" || mode === "detail") seen.add(mode);
+  }
+  const ordered: DetailImageMode[] = [];
+  if (seen.has("main")) ordered.push("main");
+  if (seen.has("detail")) ordered.push("detail");
+  return ordered;
+}
+
+function resolveImageModesCount(modes: DetailImageMode[]) {
+  return modes.reduce((sum, mode) => sum + resolveImageModeCount(mode), 0);
+}
+
+function describeImageModes(modes: DetailImageMode[]) {
+  return modes.map((mode) => (mode === "main" ? "主图" : "详情图")).join(" + ");
+}
+
+function describeImageModeCounts(modes: DetailImageMode[]) {
+  return modes
+    .map((mode) => `${mode === "main" ? "主图" : "详情图"} ${resolveImageModeCount(mode)} 张`)
+    .join("，");
+}
+
+function normalizeOptionalText(value: unknown) {
+  return typeof value === "string" ? value.trim().slice(0, 1200) : "";
 }
 
 // 只接受 data URL 或 http(s) 图片，并过滤超大图片。
@@ -77,12 +111,12 @@ async function writePromptTask(
   });
 }
 
-// POST /api/prompt：创建“详情图文案生成”任务。
+// POST /api/prompt：创建“图包方案生成”任务。
 export async function handlePost(context: RequestContext) {
   // 所有生成类接口都要求登录，避免匿名用户消耗模型额度。
   const session = await requireSession(context.request, context.env);
   if (!session) {
-    return json({ error: "请先登录后再生成详情图文案" }, { status: 401 });
+    return json({ error: "请先登录后再生成图包方案" }, { status: 401 });
   }
 
   let body: PromptRequestBody;
@@ -94,7 +128,13 @@ export async function handlePost(context: RequestContext) {
 
   const name = body.name?.trim() ?? "";
   const sellingPoints = body.sellingPoints?.trim() ?? "";
-  const imageCount = normalizeCount(body.imageCount);
+  const imageModes = normalizeImageModes(body.imageModes);
+  const imageCount = resolveImageModesCount(imageModes);
+  const targetPlatform = normalizeOptionalText(body.targetPlatform) || "淘宝 / 天猫 / 京东 / 抖音商城 / 小红书";
+  const audience = normalizeOptionalText(body.audience);
+  const priceBand = normalizeOptionalText(body.priceBand);
+  const proofMaterials = normalizeOptionalText(body.proofMaterials);
+  const offer = normalizeOptionalText(body.offer);
   const userKey = getUserKey(session.user);
   const productImageIds = normalizeImageIds(body.productImageIds);
   let storedImages: Array<string | null> = [];
@@ -121,6 +161,9 @@ export async function handlePost(context: RequestContext) {
   }
   if (!sellingPoints) {
     return json({ error: "请输入商品核心卖点和功效" }, { status: 400 });
+  }
+  if (!imageModes.length) {
+    return json({ error: "请选择图包类型：主图或详情图" }, { status: 400 });
   }
   if (!productImages.length) {
     return json({ error: "请至少上传一张商品图片" }, { status: 400 });
@@ -155,19 +198,26 @@ export async function handlePost(context: RequestContext) {
 
   // userText 是本次商品资料；DETAIL_PROMPT_TEMPLATE 是稳定的系统模板。
   const userText = [
-    "请严格根据系统模板和上传商品图生成商品详情图文案。",
+    "请严格根据系统模板和上传商品图生成国内电商图包方案。",
     "",
     `商品名称：${name}`,
-    `图片数量：${imageCount}`,
+    `图包类型：${describeImageModes(imageModes)}`,
+    `图片数量：${describeImageModeCounts(imageModes)}，总计 ${imageCount} 张`,
+    `目标平台：${targetPlatform}`,
+    `目标人群 / 购买场景：${audience || "未填写，请基于商品品类和卖点保守推断，并在 prompt 中使用通用国内电商场景。"}`,
+    `价格带 / 客单价：${priceBand || "未填写，请按中性价位表达，不要编造具体价格。"}`,
+    `证明素材 / 资质 / 用户评价：${proofMaterials || "未填写，不要编造具体认证、检测编号、真实评价截图或平台徽章；可使用温和的占位式表达。"}`,
+    `活动 / 售后 / 服务承诺：${offer || "未填写，可使用通用低风险购买表达，不要编造具体优惠力度。"}`,
     "商品核心卖点和功效：",
     sellingPoints,
     "",
     "输出格式要求：只返回 JSON，不要 Markdown，不要解释。",
-    `JSON 结构：{"prompts":[{"title":"第1张：商品主图 / 核心卖点总览","prompt":"完整可直接用于 GPT-Image-2 的单张详情图文案"}]}`,
+    `JSON 结构：{"prompts":[{"imageMode":"main","title":"第1张：首图核心卖点主视觉","prompt":"完整可直接用于 GPT-Image-2 的单张图片生成提示词"}]}`,
     "prompt 字段如需分段，必须使用 \\n 表示换行，保留清晰的段落结构。",
-    "生成前先识别商品所属品类，并按该品类详情页侧重点规划每张图主题；title 要体现该张图的品类化模块，而不是机械套用固定五段式。",
+    "生成前必须先在内部完成国内电商转化诊断、买家购买理由卡、图内文案门和统一风格锁；不要把诊断过程输出到 JSON 外。",
+    "按图包类型规划每张图主题：选中主图时必须输出 5 张商城主图轮播；选中详情图时必须输出 8 张竖版详情页模块；如果同时选中，必须先输出 5 张主图，再输出 8 张详情图。title 要体现该张图的成交任务，而不是机械套用固定五段式。",
     "参考图是商品事实来源，但不是每张图都必须完整展示参考图商品；可以根据该张图主题提取参考图里的材质、纹理、色彩、局部结构、包装标签、工艺细节、图案元素或使用状态。",
-    `prompts 数组长度必须等于 ${imageCount}。每个 prompt 必须是完整单张图片生成提示词，并包含统一视觉系统、构图、中文文案、4:5 竖版、参考图一致性或参考图特征提取要求。不要输出“负面提示词”或“Negative Prompt”段落。`,
+    `prompts 数组长度必须等于 ${imageCount}。每个数组项必须包含 imageMode，主图写 "main"，详情图写 "detail"。每个 prompt 必须是完整单张图片生成提示词，并包含图包类型、统一 Campaign Style Lock、单张 Frame Objective、短中文图内文案、构图、参考图一致性或参考图特征提取要求。主图按 1:1 方图构图；详情图按 3:4 竖版构图。不要输出“负面提示词”或“Negative Prompt”段落。`,
   ].join("\n");
 
   const taskId = crypto.randomUUID();
@@ -190,6 +240,7 @@ export async function handlePost(context: RequestContext) {
       body: JSON.stringify({
         taskId,
         userKey,
+        imageModes,
         imageCount,
         productImages,
         userText,
@@ -210,13 +261,13 @@ export async function handlePost(context: RequestContext) {
       createdAt: now,
       updatedAt: Date.now(),
       error:
-        "详情图文案任务派发失败：" +
+        "图包方案任务派发失败：" +
         (error instanceof Error ? error.message : String(error)),
     });
     return json(
       {
         error:
-          "详情图文案任务派发失败：" +
+          "图包方案任务派发失败：" +
           (error instanceof Error ? error.message : String(error)),
       },
       { status: 502 },

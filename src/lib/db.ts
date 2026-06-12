@@ -72,7 +72,7 @@ function assignSaved<T extends object>(target: T, saved: T) {
   return saved;
 }
 
-// 详情图历史保存后，把服务端返回的规范化字段合并回页面状态。
+// 商品图历史保存后，把服务端返回的规范化字段合并回页面状态。
 function mergeSavedDetail(target: HistoryItem, saved: HistoryItem) {
   const savedPromptById = new Map(saved.prompts.map((prompt) => [prompt.id, prompt]));
   target.id = saved.id;
@@ -96,7 +96,7 @@ function mergeSavedDetail(target: HistoryItem, saved: HistoryItem) {
   return target;
 }
 
-// 提交详情图历史前做瘦身：历史 JSON 只保留图片 ID 和 prompt ID。
+// 提交商品图历史前做瘦身：历史 JSON 只保留图片 ID 和 prompt ID。
 function toDetailRequestItem(item: HistoryItem): HistoryItem {
   return {
     ...item,
@@ -130,7 +130,7 @@ function toLayerRequestItem(item: LayerHistoryItem): LayerHistoryItem {
   return item;
 }
 
-// 新增一组详情图历史。
+// 新增一组商品图历史。
 export async function dbAdd(item: HistoryItem) {
   const payload = await requestJson<{ item: HistoryItem }>("/api/history/detail", {
     method: "POST",
@@ -143,7 +143,7 @@ export async function dbAdd(item: HistoryItem) {
   return saved.id;
 }
 
-// 更新已有详情图历史，例如某一张图生成完成后写回结果。
+// 更新已有商品图历史，例如某一张图生成完成后写回结果。
 export async function dbPut(item: HistoryItem) {
   const payload = await requestJson<{ item: HistoryItem }>("/api/history/detail", {
     method: "PUT",
@@ -156,7 +156,7 @@ export async function dbPut(item: HistoryItem) {
   return saved.id;
 }
 
-// 读取当前用户的全部详情图历史。
+// 读取当前用户的全部商品图历史。
 export async function dbAll() {
   const payload = await requestJson<{ items: HistoryItem[] }>("/api/history/detail");
   return payload.items;

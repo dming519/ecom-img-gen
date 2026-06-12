@@ -6,6 +6,7 @@ import {
 } from "../../_lib/historyStorage";
 import type { TaskKvNamespace } from "../../_lib/tasks";
 import { getUserKey } from "../../_lib/users";
+import type { DetailImageMode } from "../../../../src/lib/types";
 
 interface RequestContext {
   request: Request;
@@ -19,6 +20,7 @@ interface RequestContext {
 interface PromptTaskPrompt {
   promptId?: unknown;
   id?: unknown;
+  imageMode?: unknown;
   title?: unknown;
   prompt?: unknown;
   index?: unknown;
@@ -53,7 +55,12 @@ function normalizeIndex(value: unknown, fallback: number) {
 function normalizeTitle(value: unknown, index: number) {
   return typeof value === "string" && value.trim()
     ? value.trim()
-    : `第${index + 1}张商品详情图`;
+    : `第${index + 1}张商品图`;
+}
+
+function normalizeImageMode(value: unknown, index: number): DetailImageMode {
+  if (value === "main" || value === "detail") return value;
+  throw new Error(`第${index + 1}条图包方案缺少合法 imageMode`);
 }
 
 function hasPromptText(item: PromptTaskPrompt) {
@@ -69,7 +76,7 @@ function normalizeTaskStatus(task: PromptTaskRecord) {
     return {
       ...task,
       status: "failed",
-      error: "详情图文案任务已超时，请重新生成。",
+      error: "图包方案任务已超时，请重新生成。",
       updatedAt: Date.now(),
     };
   }
@@ -83,6 +90,8 @@ function stripPromptText(task: PromptTaskRecord): PromptTaskRecord {
     prompts: task.prompts.map((item, index) => ({
       promptId: normalizePromptId(item.promptId ?? item.id),
       title: normalizeTitle(item.title, index),
+      imageMode: normalizeImageMode(item.imageMode, index),
+      prompt: typeof item.prompt === "string" ? item.prompt : undefined,
       index: normalizeIndex(item.index, index),
     })),
   };
@@ -104,12 +113,14 @@ async function persistPrompts(
     task.prompts.map(async (item, index) => {
       const promptId = normalizePromptId(item.promptId ?? item.id) || crypto.randomUUID();
       const title = normalizeTitle(item.title, index);
+      const imageMode = normalizeImageMode(item.imageMode, index);
       const promptIndex = normalizeIndex(item.index, index);
+      const prompt = hasPromptText(item) ? String(item.prompt) : "";
       if (hasPromptText(item)) {
         await storeDetailPrompt(context.env, userKey, {
           id: promptId,
           title,
-          prompt: String(item.prompt),
+          prompt,
           taskId,
           index: promptIndex,
         });
@@ -117,6 +128,8 @@ async function persistPrompts(
       return {
         promptId,
         title,
+        imageMode,
+        prompt,
         index: promptIndex,
       };
     }),
@@ -135,7 +148,7 @@ async function persistPrompts(
 export async function handleGet(context: RequestContext) {
   const session = await requireSession(context.request, context.env);
   if (!session) {
-    return json({ error: "请先登录后再查询详情图文案任务" }, { status: 401 });
+    return json({ error: "请先登录后再查询图包方案任务" }, { status: 401 });
   }
 
   const kv = context.env.TASKS_KV;
@@ -174,7 +187,7 @@ export async function handleGet(context: RequestContext) {
     return json(
       {
         status: "failed",
-        error: `详情图文案保存失败：${error instanceof Error ? error.message : String(error)}`,
+        error: `图包方案保存失败：${error instanceof Error ? error.message : String(error)}`,
         updatedAt: Date.now(),
       },
       { status: 500 },
