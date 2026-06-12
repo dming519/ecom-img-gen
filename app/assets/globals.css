@@ -3529,6 +3529,158 @@ footer {
   justify-content: center;
 }
 
+/* 生图工作台布局修正 */
+.studio-grid {
+  grid-template-columns: minmax(330px, 360px) minmax(500px, 1fr) minmax(420px, 480px);
+  gap: 14px;
+}
+
+.input-rail,
+.prompt-rail,
+.canvas-panel {
+  height: var(--workbench-h);
+}
+
+.input-rail-body {
+  padding: 14px 16px 12px;
+}
+
+.selling-points {
+  height: 190px;
+  min-height: 190px;
+  max-height: 300px;
+}
+
+.compact-textarea {
+  min-height: 64px;
+  height: 64px;
+}
+
+.prompt-editor-list {
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 12px;
+}
+
+.prompt-switcher {
+  gap: 8px;
+  padding: 8px;
+}
+
+.prompt-step-list {
+  grid-template-columns: repeat(auto-fit, minmax(40px, 1fr));
+  min-width: 0;
+}
+
+.prompt-editor-single {
+  grid-template-rows: auto auto minmax(260px, 1fr);
+  gap: 8px;
+}
+
+.prompt-editor-single .prompt-editor-head {
+  margin-bottom: 0;
+}
+
+.prompt-plan-summary {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 0;
+  padding: 9px 11px;
+  gap: 8px;
+}
+
+.prompt-plan-summary strong,
+.prompt-plan-summary span {
+  min-width: 0;
+}
+
+.prompt-plan-summary strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-editor-single textarea,
+.prompt-editor-single .prompt-textarea {
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  padding: 11px 12px;
+  resize: none;
+  font-size: 0.86rem;
+  line-height: 1.68;
+}
+
+.detail-stage {
+  grid-template-rows: minmax(0, 1fr) auto;
+  padding: 12px;
+  gap: 10px;
+}
+
+.stage-main {
+  border: 1px solid rgba(174, 184, 199, 0.62);
+  background:
+    linear-gradient(rgba(17, 24, 39, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(17, 24, 39, 0.024) 1px, transparent 1px),
+    radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.18) 44%, transparent 72%),
+    var(--bg-canvas);
+  background-size: 28px 28px, 28px 28px, auto, auto;
+}
+
+.stage-main::before {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  border: 1px solid rgba(174, 184, 199, 0.3);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.stage-placeholder {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  width: min(78%, 372px);
+  min-height: 0;
+  padding: 24px;
+}
+
+.stage-placeholder.is-main {
+  aspect-ratio: 1;
+}
+
+.stage-placeholder.is-detail {
+  aspect-ratio: 3 / 4;
+  width: min(74%, 350px);
+}
+
+.stage-main img {
+  max-width: min(100%, 440px);
+}
+
+.stage-main.is-detail img {
+  max-width: min(100%, 390px);
+}
+
+.result-strip {
+  min-height: 78px;
+  max-height: 86px;
+  grid-auto-flow: column;
+  grid-auto-columns: 68px;
+  grid-template-columns: none;
+  justify-content: start;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.result-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.result-thumb {
+  height: 64px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -3754,13 +3906,13 @@ footer {
 
   .prompt-editor-single {
     height: auto;
-    min-height: 520px;
-    grid-template-rows: auto minmax(420px, 1fr);
+    min-height: 0;
+    grid-template-rows: auto auto minmax(360px, 1fr);
   }
 
   .prompt-editor-single textarea {
-    height: clamp(420px, 58vh, 640px);
-    min-height: clamp(420px, 58vh, 640px);
+    height: clamp(360px, 54vh, 620px);
+    min-height: clamp(360px, 54vh, 620px);
   }
 
   .canvas-panel > .panel-heading,
@@ -3889,13 +4041,13 @@ footer {
 
   .prompt-editor-single {
     height: auto;
-    min-height: 520px;
-    grid-template-rows: auto minmax(420px, 1fr);
+    min-height: 0;
+    grid-template-rows: auto auto minmax(360px, 1fr);
   }
 
   .prompt-editor-single textarea {
-    height: clamp(420px, 60vh, 640px);
-    min-height: clamp(420px, 60vh, 640px);
+    height: clamp(360px, 54vh, 620px);
+    min-height: clamp(360px, 54vh, 620px);
   }
 
   .canvas-panel > .panel-heading,
@@ -4171,12 +4323,13 @@ footer {
   }
 
   .prompt-editor-single {
-    min-height: 560px;
+    min-height: 0;
+    grid-template-rows: auto auto minmax(360px, 1fr);
   }
 
   .prompt-editor-single textarea {
-    height: clamp(440px, 64vh, 680px);
-    min-height: clamp(440px, 64vh, 680px);
+    height: clamp(360px, 54vh, 620px);
+    min-height: clamp(360px, 54vh, 620px);
   }
 
   .product-media {

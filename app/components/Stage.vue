@@ -23,6 +23,7 @@ const activeSrc = computed(() => {
   if (active.value.imageId) return dbImageFileUrl(active.value.imageId)
   return null
 })
+const activeModeClass = computed(() => (active.value?.imageMode === "main" ? "is-main" : "is-detail"))
 
 function getItemSrc(item: DetailPromptItem) {
   if (item.imageId) return dbImageFileUrl(item.imageId)
@@ -48,7 +49,7 @@ function getItemSrc(item: DetailPromptItem) {
   </div>
 
   <div v-else class="detail-stage">
-    <div class="stage-main">
+    <div class="stage-main" :class="activeModeClass">
       <template v-if="activeSrc">
         <img :src="activeSrc" :alt="active?.title ?? ''" @click="emit('zoom', activeIndex)">
         <div class="stage-caption">{{ active?.title }}</div>
@@ -64,7 +65,7 @@ function getItemSrc(item: DetailPromptItem) {
         </div>
       </template>
 
-      <div v-else class="stage-placeholder">
+      <div v-else :class="['stage-placeholder', activeModeClass]">
         <template v-if="busy && (active?.status === 'running' || active?.status === 'queued')">
           <div class="spinner" />
           <div class="loading-hint">正在生成：{{ active?.title }}</div>
