@@ -1096,55 +1096,55 @@ onBeforeUnmount(() => {
       </div>
 
       <nav class="creative-tabs" aria-label="创作类型">
-        <a href="/" class="creative-tab" @click="handleHomeLinkClick">
+        <NuxtLink to="/" class="creative-tab" @click="handleHomeLinkClick">
           <Icon name="brand" />
           <span>首页</span>
-        </a>
-        <a
-          href="/image/"
+        </NuxtLink>
+        <NuxtLink
+          to="/image/"
           :class="['creative-tab', { 'is-active': studioMode === 'image' }]"
           :aria-current="studioMode === 'image' ? 'page' : undefined"
           @click="event => handleModuleLinkClick(event, 'image')"
         >
           <Icon name="spark" />
-          <span>详情图</span>
-        </a>
-        <a
-          href="/cutout/"
+          <span>生图</span>
+        </NuxtLink>
+        <NuxtLink
+          to="/cutout/"
           :class="['creative-tab', { 'is-active': studioMode === 'cutout' }]"
           :aria-current="studioMode === 'cutout' ? 'page' : undefined"
           @click="event => handleModuleLinkClick(event, 'cutout')"
         >
           <Icon name="cutout" />
           <span>抠图</span>
-        </a>
-        <a
-          href="/multi-view/"
-          :class="['creative-tab', { 'is-active': studioMode === 'multi-view' }]"
-          :aria-current="studioMode === 'multi-view' ? 'page' : undefined"
-          @click="event => handleModuleLinkClick(event, 'multi-view')"
-        >
-          <Icon name="queue" />
-          <span>多视角</span>
-        </a>
-        <a
-          href="/edit/"
+        </NuxtLink>
+        <NuxtLink
+          to="/edit/"
           :class="['creative-tab', { 'is-active': studioMode === 'edit' }]"
           :aria-current="studioMode === 'edit' ? 'page' : undefined"
           @click="event => handleModuleLinkClick(event, 'edit')"
         >
           <Icon name="brush" />
           <span>改图</span>
-        </a>
-        <a
-          href="/layer/"
+        </NuxtLink>
+        <NuxtLink
+          to="/layer/"
           :class="['creative-tab', { 'is-active': studioMode === 'layer' }]"
           :aria-current="studioMode === 'layer' ? 'page' : undefined"
           @click="event => handleModuleLinkClick(event, 'layer')"
         >
           <Icon name="text" />
-          <span>分层</span>
-        </a>
+          <span>拆图</span>
+        </NuxtLink>
+        <NuxtLink
+          to="/multi-view/"
+          :class="['creative-tab', { 'is-active': studioMode === 'multi-view' }]"
+          :aria-current="studioMode === 'multi-view' ? 'page' : undefined"
+          @click="event => handleModuleLinkClick(event, 'multi-view')"
+        >
+          <Icon name="queue" />
+          <span>多视角</span>
+        </NuxtLink>
       </nav>
 
       <div class="top-actions">

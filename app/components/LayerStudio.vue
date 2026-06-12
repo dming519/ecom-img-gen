@@ -110,7 +110,7 @@ const progressText = computed(() => {
   if (!busy.value) return "待命"
   return progress.value.current
     ? `${progress.value.current} · ${progress.value.done}/${progress.value.total}`
-    : `正在准备分层 · ${progress.value.done}/${progress.value.total}`
+    : `正在准备拆图 · ${progress.value.done}/${progress.value.total}`
 })
 const busyStageLabel = computed(() =>
   progress.value.current.includes("识别") || progress.value.current.includes("规划")
@@ -356,7 +356,7 @@ async function persistLayer(
     }
     syncLayerHistoryList(item, options)
   } catch (event) {
-    console.warn("分层历史写入失败:", event)
+    console.warn("拆图历史写入失败:", event)
   }
 }
 
@@ -458,11 +458,11 @@ function updateSessionCredits(result: LayerTaskStatus) {
 async function handleGenerate() {
   error.value = null
   if (!props.authenticated) {
-    error.value = "请先登录后再使用分层。"
+    error.value = "请先登录后再使用拆图。"
     return
   }
   if (!sourceImageId.value) {
-    error.value = "请先上传需要分层的图片。"
+    error.value = "请先上传需要拆图的图片。"
     return
   }
   if (!sourceDimensions.value && sourceImage.value) {
@@ -522,15 +522,15 @@ async function handleGenerate() {
     await syncLayersFromTask(result, { preferPreview: result.status === "succeeded" })
     await persistQueue
     if (result.status === "canceled") {
-      updateLayerHistorySnapshot(historyItem, { status: "canceled", error: "分层已中断", taskId: null })
+      updateLayerHistorySnapshot(historyItem, { status: "canceled", error: "拆图已中断", taskId: null })
       await persistLayer(historyItem)
-      error.value = "分层已中断"
+      error.value = "拆图已中断"
       return
     }
     if (result.status === "failed") {
-      updateLayerHistorySnapshot(historyItem, { status: "failed", error: result.error || "分层失败", taskId: null })
+      updateLayerHistorySnapshot(historyItem, { status: "failed", error: result.error || "拆图失败", taskId: null })
       await persistLayer(historyItem)
-      error.value = result.error || "分层失败"
+      error.value = result.error || "拆图失败"
       return
     }
     progress.value = normalizeLayerProgress({
@@ -549,13 +549,13 @@ async function handleGenerate() {
       taskId: null,
     })
     await persistLayer(historyItem)
-    if (!layers.value.length) error.value = "分层任务未返回图层"
+    if (!layers.value.length) error.value = "拆图任务未返回图层"
   } catch (generateError) {
     await persistQueue
     if (generateError instanceof DOMException && generateError.name === "AbortError") {
-      updateLayerHistorySnapshot(historyItem, { status: "canceled", error: "分层已中断", taskId: null })
+      updateLayerHistorySnapshot(historyItem, { status: "canceled", error: "拆图已中断", taskId: null })
       await persistLayer(historyItem)
-      error.value = "分层已中断"
+      error.value = "拆图已中断"
     } else {
       const message = generateError instanceof Error ? generateError.message : String(generateError)
       updateLayerHistorySnapshot(historyItem, { status: "failed", error: message, taskId: null })
@@ -571,7 +571,7 @@ async function handleGenerate() {
 
 function handleCancel() {
   const taskId = taskIdRef.value
-  if (taskId) cancelLayerTask(taskId).catch((event) => console.warn("取消分层任务失败:", event))
+  if (taskId) cancelLayerTask(taskId).catch((event) => console.warn("取消拆图任务失败:", event))
   abortRef.value?.abort()
   busy.value = false
 }
@@ -742,7 +742,7 @@ function handleDeleteHistory(index: number) {
 }
 
 async function handleClearHistory() {
-  if (!confirm("确定清空所有分层历史？此操作不可撤销。")) return
+  if (!confirm("确定清空所有拆图历史？此操作不可撤销。")) return
   await dbClearLayers()
   history.value = []
   activeHistoryIdx.value = -1
@@ -764,7 +764,7 @@ async function loadLayerHistoryIfAuthenticated() {
     history.value = items
     activeHistoryIdx.value = items.length ? items.length - 1 : -1
   } catch (event) {
-    console.warn("分层历史读取失败:", event)
+    console.warn("拆图历史读取失败:", event)
   }
 }
 
@@ -778,24 +778,24 @@ watch(
 </script>
 
 <template>
-  <div class="run-status cutout-status" aria-label="分层任务状态">
+  <div class="run-status cutout-status" aria-label="拆图任务状态">
     <span>{{ sourceImage ? "原图已上传" : "等待上传" }}</span>
-    <span>{{ outputLayerCount ? `${outputLayerCount} 个图层` : "未分层" }}</span>
+    <span>{{ outputLayerCount ? `${outputLayerCount} 个图层` : "未拆图" }}</span>
     <span>{{ isSuperAdmin ? "不限次数" : creditLabel }}</span>
-    <span>{{ busy ? "分层中" : "待命" }}</span>
+    <span>{{ busy ? "拆图中" : "待命" }}</span>
   </div>
 
   <div class="cutout-grid layer-grid">
     <aside class="studio-panel cutout-panel cutout-source-panel layer-source-panel">
       <div class="panel-heading">
         <h2>商品图片</h2>
-        <span class="panel-count">分层源图</span>
+        <span class="panel-count">拆图源图</span>
       </div>
       <div class="cutout-panel-body layer-source-body">
         <label
           :class="['cutout-upload-zone', { 'has-image': sourceImage, 'is-disabled': controlsDisabled }]"
         >
-          <img v-if="sourceImage" :src="sourceImage" alt="待分层原图">
+          <img v-if="sourceImage" :src="sourceImage" alt="待拆图原图">
           <span v-else>
             <Icon name="upload" />
             <strong>上传商品图片</strong>
@@ -832,7 +832,7 @@ watch(
       <div v-if="error" class="alert cutout-alert">{{ error }}</div>
       <div class="cutout-action-bar">
         <button v-if="busy" type="button" class="btn-danger" @click="handleCancel">
-          中断分层
+          中断拆图
         </button>
         <button
           v-else
@@ -842,7 +842,7 @@ watch(
           @click="handleGenerate"
         >
           <Icon name="text" />
-          开始分层
+          开始拆图
         </button>
       </div>
     </aside>
@@ -863,7 +863,7 @@ watch(
             ]"
             @click="emit('zoom', previewSrc)"
           >
-            <img :src="previewSrc" :alt="previewLayer?.name ?? '分层预览'">
+            <img :src="previewSrc" :alt="previewLayer?.name ?? '拆图预览'">
           </button>
         <div class="stage-actions">
             <button type="button" class="btn-ghost" :disabled="!canDownloadZip || zipBusy" @click="handleDownloadZip">
@@ -892,7 +892,7 @@ watch(
         </div>
         <div v-else class="stage-placeholder cutout-result-empty">
           <Icon name="text" class="icon-large" />
-          <div class="icon-hint">上传图片后预览分层结果</div>
+          <div class="icon-hint">上传图片后预览拆图结果</div>
         </div>
         <div v-if="busy && previewSrc" class="layer-progress-overlay" role="status" aria-live="polite">
           <div class="layer-progress-copy">
@@ -968,7 +968,7 @@ watch(
           </div>
         </div>
         <div v-else class="empty layer-list-empty">
-          上传图片并开始分层后，这里会显示可下载图层。
+          上传图片并开始拆图后，这里会显示可下载图层。
         </div>
       </div>
     </aside>
@@ -976,7 +976,7 @@ watch(
 
   <section class="studio-panel history-dock cutout-history-dock layer-history-dock">
     <div class="history-bar">
-      <h2>分层历史</h2>
+      <h2>拆图历史</h2>
       <button type="button" class="inline-action" :disabled="!history.length" @click="handleClearHistory">
         清空历史
       </button>
@@ -989,16 +989,16 @@ watch(
       >
         <button type="button" class="cutout-history-main" @click="handleSelectHistory(index)">
           <div class="cutout-history-image layer-history-image">
-            <img v-if="getLayerHistoryCover(item)" :src="getLayerHistoryCover(item)!" alt="分层历史结果">
+            <img v-if="getLayerHistoryCover(item)" :src="getLayerHistoryCover(item)!" alt="拆图历史结果">
             <span v-else>{{ item.status === "failed" ? "失败" : "处理中" }}</span>
           </div>
           <div>
             <strong>
               {{
                 item.status === "succeeded"
-                  ? "商品分层"
+                  ? "商品拆图"
                   : item.status === "failed"
-                    ? "分层失败"
+                    ? "拆图失败"
                     : item.status === "canceled"
                       ? "已中断"
                       : "处理中"
@@ -1008,12 +1008,12 @@ watch(
             <small>{{ new Date(item.createdAt).toLocaleString() }}</small>
           </div>
         </button>
-        <button type="button" class="tile-del" aria-label="删除分层历史" @click="handleDeleteHistory(index)">
+        <button type="button" class="tile-del" aria-label="删除拆图历史" @click="handleDeleteHistory(index)">
           <Icon name="trash" />
         </button>
       </article>
     </div>
-    <div v-else class="empty">暂无分层历史。</div>
+    <div v-else class="empty">暂无拆图历史。</div>
   </section>
 </template>
 
