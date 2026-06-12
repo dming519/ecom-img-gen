@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue"
+import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from "vue"
 import {
   cancelImageTask,
   createImageTask,
@@ -16,7 +16,7 @@ import {
   dbPut,
   dbPutProductImage,
 } from "@/lib/db"
-import { resolveImageSize } from "@/lib/imageOptions"
+import {resolveImageSize} from "@/lib/imageOptions"
 import type {
   AspectRatio,
   AuthSession,
@@ -55,8 +55,8 @@ const DRAFT_KEY = "ecomimggen_draft_v5"
 const IMAGE_QUALITY_VALUES: ImageQuality[] = ["1K", "2K", "4K"]
 const IMAGE_MODE_ORDER: DetailImageMode[] = ["main", "detail"]
 const IMAGE_MODE_OPTIONS: Array<{ label: string; value: DetailImageMode }> = [
-  { label: "主图", value: "main" },
-  { label: "详情图", value: "detail" },
+  {label: "主图", value: "main"},
+  {label: "详情图", value: "detail"},
 ]
 const STATUS_LABEL: Record<DetailPromptItem["status"], string> = {
   draft: "待生成",
@@ -185,44 +185,44 @@ const currentProduct = computed<ProductInput>(() => ({
   productImageIds: productImageIds.value,
 }))
 const generationLabel = computed(() =>
-  `${getImageModesLabel(imageModes.value)} · 共 ${imageCount.value} 张 · ${quality.value}`,
+    `${getImageModesLabel(imageModes.value)} · 共 ${imageCount.value} 张 · ${quality.value}`,
 )
 const authenticated = computed(() => !!session.value?.authenticated)
 const authLabel = computed(() =>
-  authenticated.value ? `${session.value?.user?.name || "已登录用户"} 账户菜单` : "打开登录菜单",
+    authenticated.value ? `${session.value?.user?.name || "已登录用户"} 账户菜单` : "打开登录菜单",
 )
 const controlsDisabled = computed(
-  () =>
-    sessionLoading.value ||
-    accessBusy.value ||
-    promptBusy.value ||
-    imageBusy.value ||
-    !authenticated.value,
+    () =>
+        sessionLoading.value ||
+        accessBusy.value ||
+        promptBusy.value ||
+        imageBusy.value ||
+        !authenticated.value,
 )
 const providerLabel = computed(() =>
-  session.value?.user?.provider === "github"
-    ? "GitHub"
-    : session.value?.user?.provider === "google"
-      ? "Google"
-      : "访问码",
+    session.value?.user?.provider === "github"
+        ? "GitHub"
+        : session.value?.user?.provider === "google"
+            ? "Google"
+            : "访问码",
 )
 const authRedirectPath = computed(() =>
-  studioMode.value === "cutout"
-    ? "/cutout/"
-    : studioMode.value === "multi-view"
-      ? "/multi-view/"
-      : studioMode.value === "edit"
-        ? "/edit/"
-        : studioMode.value === "layer"
-          ? "/layer/"
-        : "/image/",
+    studioMode.value === "cutout"
+        ? "/cutout/"
+        : studioMode.value === "multi-view"
+            ? "/multi-view/"
+            : studioMode.value === "edit"
+                ? "/edit/"
+                : studioMode.value === "layer"
+                    ? "/layer/"
+                    : "/image/",
 )
 const isAdmin = computed(
-  () => session.value?.user?.role === "admin" || session.value?.user?.role === "super_admin",
+    () => session.value?.user?.role === "admin" || session.value?.user?.role === "super_admin",
 )
 const isSuperAdmin = computed(() => session.value?.user?.role === "super_admin")
 const dailyRemainingCredits = computed(
-  () => session.value?.user?.dailyRemainingCredits ?? session.value?.user?.remainingCredits ?? 0,
+    () => session.value?.user?.dailyRemainingCredits ?? session.value?.user?.remainingCredits ?? 0,
 )
 const permanentRemainingCredits = computed(() => session.value?.user?.permanentRemainingCredits ?? 0)
 const dailyUsedCredits = computed(() => session.value?.user?.dailyUsedCredits ?? 0)
@@ -230,19 +230,19 @@ const dailyRemainingLabel = computed(() => (isSuperAdmin.value ? "不限" : `${d
 const permanentRemainingLabel = computed(() => (isSuperAdmin.value ? "不限" : `${permanentRemainingCredits.value} 次`))
 const dailyUsedLabel = computed(() => `${dailyUsedCredits.value} 次`)
 const creditLabel = computed(() =>
-  authenticated.value
-    ? isSuperAdmin.value
-      ? "不限次数"
-      : `今日剩余 ${dailyRemainingCredits.value} 次 · 永久 ${permanentRemainingCredits.value} 次`
-    : "未登录",
+    authenticated.value
+        ? isSuperAdmin.value
+            ? "不限次数"
+            : `今日剩余 ${dailyRemainingCredits.value} 次 · 永久 ${permanentRemainingCredits.value} 次`
+        : "未登录",
 )
 const showUserImage = computed(
-  () => !!(authenticated.value && session.value?.user?.image && !avatarFailed.value),
+    () => !!(authenticated.value && session.value?.user?.image && !avatarFailed.value),
 )
 const activePromptIndex = computed(() =>
-  prompts.value.length
-    ? Math.min(Math.max(activePromptIdx.value, 0), prompts.value.length - 1)
-    : 0,
+    prompts.value.length
+        ? Math.min(Math.max(activePromptIdx.value, 0), prompts.value.length - 1)
+        : 0,
 )
 const activePrompt = computed(() => prompts.value[activePromptIndex.value] ?? null)
 const activePromptMode = computed(() => getPromptImageMode(activePrompt.value))
@@ -257,15 +257,15 @@ function fileToCompressedDataURL(file: File): Promise<string> {
       const image = new Image()
       image.onload = () => {
         const scale = Math.min(
-          1,
-          MAX_PRODUCT_IMAGE_EDGE / Math.max(image.naturalWidth, image.naturalHeight),
+            1,
+            MAX_PRODUCT_IMAGE_EDGE / Math.max(image.naturalWidth, image.naturalHeight),
         )
         const width = Math.max(1, Math.round(image.naturalWidth * scale))
         const height = Math.max(1, Math.round(image.naturalHeight * scale))
         const canvas = document.createElement("canvas")
         canvas.width = width
         canvas.height = height
-        const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true })
+        const ctx = canvas.getContext("2d", {alpha: false, desynchronized: true})
         if (!ctx) {
           reject(new Error("浏览器不支持图片压缩，请更换图片后重试"))
           return
@@ -285,11 +285,11 @@ function fileToCompressedDataURL(file: File): Promise<string> {
 
 // 服务端返回 title/promptId/prompt，这里补上前端需要跟踪的 id、index 和状态。
 function createPromptItem(
-  index: number,
-  title: string,
-  promptId: string,
-  prompt: string | undefined,
-  imageMode: DetailImageMode,
+    index: number,
+    title: string,
+    promptId: string,
+    prompt: string | undefined,
+    imageMode: DetailImageMode,
 ): DetailPromptItem {
   return {
     id: crypto.randomUUID(),
@@ -322,15 +322,15 @@ function resetInterruptedPrompt(item: DetailPromptItem): DetailPromptItem {
 // 批量生成被取消时，需要把所有未完成项一起恢复。
 function resetActiveGenerationPrompts(items: DetailPromptItem[]): DetailPromptItem[] {
   return items.map((item) =>
-    item.status === "queued" || item.status === "running"
-      ? {
-          ...item,
-          status: hasPromptImage(item) ? "succeeded" : "draft",
-          taskId: hasPromptImage(item) ? item.taskId : undefined,
-          error: undefined,
-          updatedAt: Date.now(),
-        }
-      : item,
+      item.status === "queued" || item.status === "running"
+          ? {
+            ...item,
+            status: hasPromptImage(item) ? "succeeded" : "draft",
+            taskId: hasPromptImage(item) ? item.taskId : undefined,
+            error: undefined,
+            updatedAt: Date.now(),
+          }
+          : item,
   )
 }
 
@@ -368,7 +368,7 @@ function blobToDataUrl(blob: Blob) {
 async function imageSrcToDataUrl(src: string) {
   const value = src.trim()
   if (value.startsWith("data:image/")) return value
-  const response = await fetch(value, { credentials: "same-origin", cache: "no-store" })
+  const response = await fetch(value, {credentials: "same-origin", cache: "no-store"})
   if (!response.ok) throw new Error("商品参考图读取失败，请重新上传图片。")
   const blob = await response.blob()
   if (!blob.type.startsWith("image/")) throw new Error("商品参考图格式无效，请重新上传图片。")
@@ -379,11 +379,11 @@ async function imageSrcToDataUrl(src: string) {
 async function ensureProductImageIds() {
   const images = productImages.value.slice(0, 8)
   const nextIds = productImageIds.value.slice(0, images.length)
-  const missing = images.map((image, index) => ({ image, index })).filter((item) => !nextIds[item.index])
+  const missing = images.map((image, index) => ({image, index})).filter((item) => !nextIds[item.index])
   const dataUrls = await Promise.all(missing.map((item) => imageSrcToDataUrl(item.image)))
   const validDataUrls = dataUrls
-    .filter((image) => image.startsWith("data:image/"))
-    .filter((image) => image.length <= MAX_PROMPT_IMAGE_CHARS)
+      .filter((image) => image.startsWith("data:image/"))
+      .filter((image) => image.length <= MAX_PROMPT_IMAGE_CHARS)
   const total = validDataUrls.reduce((sum, image) => sum + image.length, 0)
   if (missing.length && validDataUrls.length !== missing.length) {
     throw new Error("商品参考图过大或格式无效，请重新上传图片。")
@@ -436,15 +436,15 @@ async function handleModuleLinkClick(event: MouseEvent, mode: StudioMode) {
   event.preventDefault()
   await flushCutoutDraftIfNeeded()
   window.location.assign(
-    mode === "cutout"
-      ? "/cutout/"
-      : mode === "multi-view"
-        ? "/multi-view/"
-        : mode === "edit"
-          ? "/edit/"
-          : mode === "layer"
-            ? "/layer/"
-          : "/image/",
+      mode === "cutout"
+          ? "/cutout/"
+          : mode === "multi-view"
+              ? "/multi-view/"
+              : mode === "edit"
+                  ? "/edit/"
+                  : mode === "layer"
+                      ? "/layer/"
+                      : "/image/",
   )
 }
 
@@ -579,7 +579,7 @@ async function handleLoadDemoData() {
   const canvas = document.createElement("canvas")
   canvas.width = 900
   canvas.height = 1200
-  const context = canvas.getContext("2d", { alpha: false })
+  const context = canvas.getContext("2d", {alpha: false})
   if (!context) return
   context.fillStyle = "#f8fafc"
   context.fillRect(0, 0, canvas.width, canvas.height)
@@ -615,7 +615,7 @@ async function handleGeneratePrompts() {
       productImageIds: await ensureProductImageIds(),
     })
     prompts.value = result.prompts.map((item, index) =>
-      createPromptItem(index, item.title, item.promptId, item.prompt, item.imageMode),
+        createPromptItem(index, item.title, item.promptId, item.prompt, item.imageMode),
     )
     activePromptIdx.value = 0
   } catch (event) {
@@ -626,11 +626,11 @@ async function handleGeneratePrompts() {
 }
 
 function handleTitleChange(id: string, value: string) {
-  prompts.value = prompts.value.map((item) => (item.id === id ? { ...item, title: value } : item))
+  prompts.value = prompts.value.map((item) => (item.id === id ? {...item, title: value} : item))
 }
 
 function handlePromptChange(id: string, value: string) {
-  prompts.value = prompts.value.map((item) => (item.id === id ? { ...item, prompt: value } : item))
+  prompts.value = prompts.value.map((item) => (item.id === id ? {...item, prompt: value} : item))
 }
 
 function isImageModeSelected(mode: DetailImageMode) {
@@ -642,17 +642,17 @@ function handleImageModeToggle(mode: DetailImageMode) {
   const selected = isImageModeSelected(mode)
   if (selected && imageModes.value.length <= 1) return
   imageModes.value = selected
-    ? imageModes.value.filter((item) => item !== mode)
-    : IMAGE_MODE_ORDER.filter((item) => item === mode || imageModes.value.includes(item))
+      ? imageModes.value.filter((item) => item !== mode)
+      : IMAGE_MODE_ORDER.filter((item) => item === mode || imageModes.value.includes(item))
 }
 
 // 长时间生成时尽量保持屏幕唤醒；浏览器不支持也不影响核心功能。
 async function requestWakeLock() {
   try {
     const maybeWakeLock = (
-      navigator as Navigator & {
-        wakeLock?: { request: (type: "screen") => Promise<WakeLockSentinelLike> }
-      }
+        navigator as Navigator & {
+          wakeLock?: { request: (type: "screen") => Promise<WakeLockSentinelLike> }
+        }
     ).wakeLock
     if (maybeWakeLock) wakeLockRef.value = await maybeWakeLock.request("screen")
   } catch {
@@ -702,7 +702,7 @@ async function handleGenerateImages() {
 
   try {
     const generationImageIds = await ensureProductImageIds()
-    historyItem = { ...historyItem, product: cloneProduct(currentProduct.value) }
+    historyItem = {...historyItem, product: cloneProduct(currentProduct.value)}
     await requestWakeLock()
     await persistHistory(historyItem)
     history.value = [...history.value, historyItem]
@@ -714,35 +714,35 @@ async function handleGenerateImages() {
       if (imageCancelRequestedRef.value) throw new ImageGenerationCancelledError()
       activePromptIdx.value = index
       working = working.map((item, itemIndex) =>
-        itemIndex === index
-          ? { ...item, status: "queued", error: undefined, updatedAt: Date.now() }
-          : item,
+          itemIndex === index
+              ? {...item, status: "queued", error: undefined, updatedAt: Date.now()}
+              : item,
       )
-      historyItem = { ...historyItem, prompts: working }
+      historyItem = {...historyItem, prompts: working}
       prompts.value = working
       await persistHistory(historyItem)
 
       const task = await createImageTask(
-        {
-          promptId: working[index]?.promptId ?? "",
-          prompt: working[index]?.prompt,
-          size: getPromptSize(working[index]),
-          aspectRatio: getPromptAspectRatio(working[index]),
-          quality: quality.value,
-          inputImageIds: generationImageIds,
-        },
-        imageAbortRef.value?.signal,
+          {
+            promptId: working[index]?.promptId ?? "",
+            prompt: working[index]?.prompt,
+            size: getPromptSize(working[index]),
+            aspectRatio: getPromptAspectRatio(working[index]),
+            quality: quality.value,
+            inputImageIds: generationImageIds,
+          },
+          imageAbortRef.value?.signal,
       )
       currentImageTaskIdRef.value = task.taskId
       updateSessionCredits(task)
 
       // 创建任务成功后进入 running；真正图片结果要等 pollImageTask 返回。
       working = working.map((item, itemIndex) =>
-        itemIndex === index
-          ? { ...item, status: "running", taskId: task.taskId, updatedAt: Date.now() }
-          : item,
+          itemIndex === index
+              ? {...item, status: "running", taskId: task.taskId, updatedAt: Date.now()}
+              : item,
       )
-      historyItem = { ...historyItem, prompts: working }
+      historyItem = {...historyItem, prompts: working}
       prompts.value = working
       await persistHistory(historyItem)
 
@@ -753,11 +753,11 @@ async function handleGenerateImages() {
       if (result.status === "failed") {
         const message = result.error || "任务执行失败"
         working = working.map((item, itemIndex) =>
-          itemIndex === index
-            ? { ...item, status: "failed", error: message, updatedAt: Date.now() }
-            : item,
+            itemIndex === index
+                ? {...item, status: "failed", error: message, updatedAt: Date.now()}
+                : item,
         )
-        historyItem = { ...historyItem, prompts: working }
+        historyItem = {...historyItem, prompts: working}
         prompts.value = working
         await persistHistory(historyItem)
         throw new Error(message)
@@ -768,17 +768,17 @@ async function handleGenerateImages() {
       }
 
       working = working.map((item, itemIndex) =>
-        itemIndex === index
-          ? {
-              ...item,
-              status: "succeeded",
-              imageId: result.imageId,
-              model: result.model,
-              updatedAt: Date.now(),
-            }
-          : item,
+          itemIndex === index
+              ? {
+                ...item,
+                status: "succeeded",
+                imageId: result.imageId,
+                model: result.model,
+                updatedAt: Date.now(),
+              }
+              : item,
       )
-      historyItem = { ...historyItem, prompts: working }
+      historyItem = {...historyItem, prompts: working}
       prompts.value = working
       currentImageTaskIdRef.value = null
       history.value = history.value.map((item) => (item.id === historyItem.id ? historyItem : item))
@@ -786,10 +786,10 @@ async function handleGenerateImages() {
     }
   } catch (event) {
     if (
-      event instanceof ImageGenerationCancelledError ||
-      (event instanceof DOMException && event.name === "AbortError")
+        event instanceof ImageGenerationCancelledError ||
+        (event instanceof DOMException && event.name === "AbortError")
     ) {
-      historyItem = { ...historyItem, prompts: resetActiveGenerationPrompts(historyItem.prompts) }
+      historyItem = {...historyItem, prompts: resetActiveGenerationPrompts(historyItem.prompts)}
       prompts.value = historyItem.prompts
       history.value = history.value.map((item) => (item.id === historyItem.id ? historyItem : item))
       await persistHistory(historyItem)
@@ -820,7 +820,7 @@ async function handleRegenerateActiveImage() {
   imageCancelRequestedRef.value = false
   imageAbortRef.value = new AbortController()
   let historyItem: HistoryItem = history.value[activeHistoryIdx.value]
-    ? {
+      ? {
         ...history.value[activeHistoryIdx.value],
         product: cloneProduct(currentProduct.value),
         prompts: prompts.value.map(resetInterruptedPrompt),
@@ -829,7 +829,7 @@ async function handleRegenerateActiveImage() {
           quality: quality.value,
         },
       }
-    : {
+      : {
         product: cloneProduct(currentProduct.value),
         prompts: prompts.value.map(resetInterruptedPrompt),
         timestamp: Date.now(),
@@ -840,7 +840,7 @@ async function handleRegenerateActiveImage() {
 
   try {
     const generationImageIds = await ensureProductImageIds()
-    historyItem = { ...historyItem, product: cloneProduct(currentProduct.value) }
+    historyItem = {...historyItem, product: cloneProduct(currentProduct.value)}
     await requestWakeLock()
     await persistHistory(historyItem)
     const existingIndex = history.value.findIndex((item) => item.id === historyItem.id)
@@ -853,42 +853,42 @@ async function handleRegenerateActiveImage() {
     }
 
     let working: DetailPromptItem[] = historyItem.prompts.map((item, itemIndex) =>
-      itemIndex === targetIndex
-        ? {
-            ...item,
-            status: "queued" as const,
-            imageId: undefined,
-            model: undefined,
-            taskId: undefined,
-            error: undefined,
-            updatedAt: Date.now(),
-          }
-        : item,
+        itemIndex === targetIndex
+            ? {
+              ...item,
+              status: "queued" as const,
+              imageId: undefined,
+              model: undefined,
+              taskId: undefined,
+              error: undefined,
+              updatedAt: Date.now(),
+            }
+            : item,
     )
-    historyItem = { ...historyItem, prompts: working }
+    historyItem = {...historyItem, prompts: working}
     prompts.value = working
     await persistHistory(historyItem)
 
     const task = await createImageTask(
-      {
-        promptId: working[targetIndex]?.promptId ?? "",
-        prompt: working[targetIndex]?.prompt,
-        size: getPromptSize(working[targetIndex]),
-        aspectRatio: getPromptAspectRatio(working[targetIndex]),
-        quality: quality.value,
-        inputImageIds: generationImageIds,
-      },
-      imageAbortRef.value?.signal,
+        {
+          promptId: working[targetIndex]?.promptId ?? "",
+          prompt: working[targetIndex]?.prompt,
+          size: getPromptSize(working[targetIndex]),
+          aspectRatio: getPromptAspectRatio(working[targetIndex]),
+          quality: quality.value,
+          inputImageIds: generationImageIds,
+        },
+        imageAbortRef.value?.signal,
     )
     currentImageTaskIdRef.value = task.taskId
     updateSessionCredits(task)
 
     working = working.map((item, itemIndex): DetailPromptItem =>
-      itemIndex === targetIndex
-        ? { ...item, status: "running" as const, taskId: task.taskId, updatedAt: Date.now() }
-        : item,
+        itemIndex === targetIndex
+            ? {...item, status: "running" as const, taskId: task.taskId, updatedAt: Date.now()}
+            : item,
     )
-    historyItem = { ...historyItem, prompts: working }
+    historyItem = {...historyItem, prompts: working}
     prompts.value = working
     await persistHistory(historyItem)
 
@@ -899,11 +899,11 @@ async function handleRegenerateActiveImage() {
     if (result.status === "failed") {
       const message = result.error || "任务执行失败"
       working = working.map((item, itemIndex): DetailPromptItem =>
-        itemIndex === targetIndex
-          ? { ...item, status: "failed" as const, error: message, updatedAt: Date.now() }
-          : item,
+          itemIndex === targetIndex
+              ? {...item, status: "failed" as const, error: message, updatedAt: Date.now()}
+              : item,
       )
-      historyItem = { ...historyItem, prompts: working }
+      historyItem = {...historyItem, prompts: working}
       prompts.value = working
       history.value = history.value.map((item) => (item.id === historyItem.id ? historyItem : item))
       await persistHistory(historyItem)
@@ -915,29 +915,29 @@ async function handleRegenerateActiveImage() {
     }
 
     working = working.map((item, itemIndex): DetailPromptItem =>
-      itemIndex === targetIndex
-        ? {
-            ...item,
-            status: "succeeded" as const,
-            imageId: result.imageId,
-            model: result.model,
-            taskId: undefined,
-            error: undefined,
-            updatedAt: Date.now(),
-          }
-        : item,
+        itemIndex === targetIndex
+            ? {
+              ...item,
+              status: "succeeded" as const,
+              imageId: result.imageId,
+              model: result.model,
+              taskId: undefined,
+              error: undefined,
+              updatedAt: Date.now(),
+            }
+            : item,
     )
-    historyItem = { ...historyItem, prompts: working }
+    historyItem = {...historyItem, prompts: working}
     prompts.value = working
     currentImageTaskIdRef.value = null
     history.value = history.value.map((item) => (item.id === historyItem.id ? historyItem : item))
     await persistHistory(historyItem)
   } catch (event) {
     if (
-      event instanceof ImageGenerationCancelledError ||
-      (event instanceof DOMException && event.name === "AbortError")
+        event instanceof ImageGenerationCancelledError ||
+        (event instanceof DOMException && event.name === "AbortError")
     ) {
-      historyItem = { ...historyItem, prompts: resetActiveGenerationPrompts(historyItem.prompts) }
+      historyItem = {...historyItem, prompts: resetActiveGenerationPrompts(historyItem.prompts)}
       prompts.value = historyItem.prompts
       history.value = history.value.map((item) => (item.id === historyItem.id ? historyItem : item))
       await persistHistory(historyItem)
@@ -977,10 +977,10 @@ function handleSelectHistory(idx: number) {
   productImages.value = item.product.productImages
   if (item.product.productImageIds?.length) {
     dbGetProductImages(item.product.productImageIds)
-      .then((images) => {
-        productImages.value = images.slice(0, 8)
-      })
-      .catch((event) => console.warn("商品参考图恢复失败:", event))
+        .then((images) => {
+          productImages.value = images.slice(0, 8)
+        })
+        .catch((event) => console.warn("商品参考图恢复失败:", event))
   }
   prompts.value = item.prompts.map((prompt) => resetInterruptedPrompt(prompt))
   if (item.generation?.quality && IMAGE_QUALITY_VALUES.includes(item.generation.quality)) {
@@ -1029,13 +1029,13 @@ async function handleAccessLogin() {
     const response = await fetch("/api/auth/login/access", {
       method: "POST",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({code}),
     })
     const payload = (await response.json().catch(() => null)) as AuthSession | { error?: string } | null
     if (!response.ok) {
       throw new Error(
-        payload && "error" in payload && payload.error ? payload.error : `HTTP ${response.status}`,
+          payload && "error" in payload && payload.error ? payload.error : `HTTP ${response.status}`,
       )
     }
     session.value = payload as AuthSession
@@ -1074,10 +1074,10 @@ function handleAuthEscape(event: KeyboardEvent) {
 }
 
 watch(
-  () => session.value?.user?.image,
-  () => {
-    avatarFailed.value = false
-  },
+    () => session.value?.user?.image,
+    () => {
+      avatarFailed.value = false
+    },
 )
 
 // 登录菜单打开时监听外部点击和 Escape；关闭时及时移除监听，避免泄漏。
@@ -1102,42 +1102,42 @@ watch(() => imageModes.value.join(","), () => {
 
 // 自动保存草稿到 localStorage。这里 deep: true 是为了监听 prompts 数组内部变化。
 watch(
-  [
-    draftLoaded,
-    productName,
-    sellingPoints,
-    imageModes,
-    targetPlatform,
-    audience,
-    priceBand,
-    proofMaterials,
-    offer,
-    prompts,
-    quality,
-    productImageIds,
-  ],
-  () => {
-    if (!draftLoaded.value || studioMode.value !== "image" || !import.meta.client) return
-    try {
-      const draft: DraftState = {
-        productName: productName.value,
-        sellingPoints: sellingPoints.value,
-        imageModes: [...imageModes.value],
-        targetPlatform: targetPlatform.value,
-        audience: audience.value,
-        priceBand: priceBand.value,
-        proofMaterials: proofMaterials.value,
-        offer: offer.value,
-        prompts: prompts.value,
-        quality: quality.value,
-        productImageIds: productImageIds.value,
+    [
+      draftLoaded,
+      productName,
+      sellingPoints,
+      imageModes,
+      targetPlatform,
+      audience,
+      priceBand,
+      proofMaterials,
+      offer,
+      prompts,
+      quality,
+      productImageIds,
+    ],
+    () => {
+      if (!draftLoaded.value || studioMode.value !== "image" || !import.meta.client) return
+      try {
+        const draft: DraftState = {
+          productName: productName.value,
+          sellingPoints: sellingPoints.value,
+          imageModes: [...imageModes.value],
+          targetPlatform: targetPlatform.value,
+          audience: audience.value,
+          priceBand: priceBand.value,
+          proofMaterials: proofMaterials.value,
+          offer: offer.value,
+          prompts: prompts.value,
+          quality: quality.value,
+          productImageIds: productImageIds.value,
+        }
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+      } catch {
+        // Ignore storage failures.
       }
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
-    } catch {
-      // Ignore storage failures.
-    }
-  },
-  { deep: true },
+    },
+    {deep: true},
 )
 
 // 页面初始化：恢复草稿、加载历史、读取登录态。
@@ -1161,18 +1161,18 @@ onMounted(() => {
         proofMaterials.value = draft.proofMaterials || ""
         offer.value = draft.offer || ""
         prompts.value = Array.isArray(draft.prompts)
-          ? draft.prompts.map((prompt) => resetInterruptedPrompt(prompt))
-          : []
+            ? draft.prompts.map((prompt) => resetInterruptedPrompt(prompt))
+            : []
         if (draft.quality && IMAGE_QUALITY_VALUES.includes(draft.quality)) {
           quality.value = draft.quality
         }
         if (Array.isArray(draft.productImageIds) && draft.productImageIds.length) {
           productImageIds.value = draft.productImageIds
           dbGetProductImages(draft.productImageIds)
-            .then((images) => {
-              productImages.value = images.slice(0, 8)
-            })
-            .catch((event) => console.warn("商品参考图恢复失败:", event))
+              .then((images) => {
+                productImages.value = images.slice(0, 8)
+              })
+              .catch((event) => console.warn("商品参考图恢复失败:", event))
         }
       }
     } catch {
@@ -1206,7 +1206,7 @@ onMounted(() => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       session.value = (await response.json()) as AuthSession
     } catch {
-      session.value = { authenticated: false, user: null }
+      session.value = {authenticated: false, user: null}
     } finally {
       sessionLoading.value = false
     }
@@ -1227,7 +1227,7 @@ onBeforeUnmount(() => {
     <header class="studio-topbar">
       <div class="brand-block">
         <span class="brand-mark" aria-hidden="true">
-          <Icon name="brand" />
+          <Icon name="brand"/>
         </span>
         <div>
           <h1>EcomImgGen</h1>
@@ -1237,52 +1237,52 @@ onBeforeUnmount(() => {
 
       <nav class="creative-tabs" aria-label="创作类型">
         <NuxtLink to="/" class="creative-tab" @click="handleHomeLinkClick">
-          <Icon name="brand" />
+          <Icon name="brand"/>
           <span>首页</span>
         </NuxtLink>
         <NuxtLink
-          to="/image/"
-          :class="['creative-tab', { 'is-active': studioMode === 'image' }]"
-          :aria-current="studioMode === 'image' ? 'page' : undefined"
-          @click="event => handleModuleLinkClick(event, 'image')"
+            to="/image/"
+            :class="['creative-tab', { 'is-active': studioMode === 'image' }]"
+            :aria-current="studioMode === 'image' ? 'page' : undefined"
+            @click="event => handleModuleLinkClick(event, 'image')"
         >
-          <Icon name="spark" />
+          <Icon name="spark"/>
           <span>生图</span>
         </NuxtLink>
         <NuxtLink
-          to="/cutout/"
-          :class="['creative-tab', { 'is-active': studioMode === 'cutout' }]"
-          :aria-current="studioMode === 'cutout' ? 'page' : undefined"
-          @click="event => handleModuleLinkClick(event, 'cutout')"
+            to="/cutout/"
+            :class="['creative-tab', { 'is-active': studioMode === 'cutout' }]"
+            :aria-current="studioMode === 'cutout' ? 'page' : undefined"
+            @click="event => handleModuleLinkClick(event, 'cutout')"
         >
-          <Icon name="cutout" />
+          <Icon name="cutout"/>
           <span>抠图</span>
         </NuxtLink>
         <NuxtLink
-          to="/edit/"
-          :class="['creative-tab', { 'is-active': studioMode === 'edit' }]"
-          :aria-current="studioMode === 'edit' ? 'page' : undefined"
-          @click="event => handleModuleLinkClick(event, 'edit')"
+            to="/edit/"
+            :class="['creative-tab', { 'is-active': studioMode === 'edit' }]"
+            :aria-current="studioMode === 'edit' ? 'page' : undefined"
+            @click="event => handleModuleLinkClick(event, 'edit')"
         >
-          <Icon name="brush" />
+          <Icon name="brush"/>
           <span>改图</span>
         </NuxtLink>
         <NuxtLink
-          to="/layer/"
-          :class="['creative-tab', { 'is-active': studioMode === 'layer' }]"
-          :aria-current="studioMode === 'layer' ? 'page' : undefined"
-          @click="event => handleModuleLinkClick(event, 'layer')"
+            to="/layer/"
+            :class="['creative-tab', { 'is-active': studioMode === 'layer' }]"
+            :aria-current="studioMode === 'layer' ? 'page' : undefined"
+            @click="event => handleModuleLinkClick(event, 'layer')"
         >
-          <Icon name="text" />
+          <Icon name="text"/>
           <span>拆图</span>
         </NuxtLink>
         <NuxtLink
-          to="/multi-view/"
-          :class="['creative-tab', { 'is-active': studioMode === 'multi-view' }]"
-          :aria-current="studioMode === 'multi-view' ? 'page' : undefined"
-          @click="event => handleModuleLinkClick(event, 'multi-view')"
+            to="/multi-view/"
+            :class="['creative-tab', { 'is-active': studioMode === 'multi-view' }]"
+            :aria-current="studioMode === 'multi-view' ? 'page' : undefined"
+            @click="event => handleModuleLinkClick(event, 'multi-view')"
         >
-          <Icon name="queue" />
+          <Icon name="queue"/>
           <span>多视角</span>
         </NuxtLink>
       </nav>
@@ -1290,25 +1290,25 @@ onBeforeUnmount(() => {
       <div class="top-actions">
         <div ref="authPopoverRef" class="auth-popover-wrap">
           <button
-            type="button"
-            :class="[
+              type="button"
+              :class="[
               'auth-toggle',
               { 'is-open': authPopoverOpen, 'is-authenticated': authenticated, 'is-guest': !authenticated },
             ]"
-            :aria-label="authLabel"
-            :aria-expanded="authPopoverOpen"
-            aria-haspopup="dialog"
-            :title="authenticated ? session?.user?.name || '账户' : '登录'"
-            @click="authPopoverOpen = !authPopoverOpen"
+              :aria-label="authLabel"
+              :aria-expanded="authPopoverOpen"
+              aria-haspopup="dialog"
+              :title="authenticated ? session?.user?.name || '账户' : '登录'"
+              @click="authPopoverOpen = !authPopoverOpen"
           >
             <img
-              v-if="showUserImage && session?.user?.image"
-              :src="session.user.image"
-              :alt="session.user.name"
-              class="auth-toggle-avatar"
-              @error="avatarFailed = true"
+                v-if="showUserImage && session?.user?.image"
+                :src="session.user.image"
+                :alt="session.user.name"
+                class="auth-toggle-avatar"
+                @error="avatarFailed = true"
             >
-            <Icon v-else name="user" class="auth-toggle-icon" />
+            <Icon v-else name="user" class="auth-toggle-icon"/>
           </button>
 
           <div v-if="authPopoverOpen" class="auth-popover" role="dialog" aria-label="登录菜单">
@@ -1317,11 +1317,11 @@ onBeforeUnmount(() => {
             <template v-else-if="authenticated && session?.user">
               <div class="auth-popover-user">
                 <img
-                  v-if="showUserImage && session.user.image"
-                  :src="session.user.image"
-                  :alt="session.user.name"
-                  class="auth-avatar"
-                  @error="avatarFailed = true"
+                    v-if="showUserImage && session.user.image"
+                    :src="session.user.image"
+                    :alt="session.user.name"
+                    class="auth-avatar"
+                    @error="avatarFailed = true"
                 >
                 <div v-else class="auth-avatar auth-avatar-fallback">
                   {{ session.user.name.slice(0, 1).toUpperCase() }}
@@ -1348,16 +1348,16 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <button
-                v-if="isAdmin"
-                class="btn-secondary auth-popover-link"
-                type="button"
-                @click="adminOpen = true; authPopoverOpen = false"
+                  v-if="isAdmin"
+                  class="btn-secondary auth-popover-link"
+                  type="button"
+                  @click="adminOpen = true; authPopoverOpen = false"
               >
                 后台管理
               </button>
               <a
-                class="btn-ghost auth-link auth-popover-link auth-popover-logout"
-                :href="`/api/auth/logout?redirectTo=${encodeURIComponent(authRedirectPath)}`"
+                  class="btn-ghost auth-link auth-popover-link auth-popover-logout"
+                  :href="`/api/auth/logout?redirectTo=${encodeURIComponent(authRedirectPath)}`"
               >
                 退出登录
               </a>
@@ -1368,39 +1368,39 @@ onBeforeUnmount(() => {
               <form class="access-form access-form-compact" @submit.prevent="handleAccessLogin">
                 <label class="sr-only" for="access-code-popover-username">用户名</label>
                 <input
-                  id="access-code-popover-username"
-                  class="sr-only"
-                  name="username"
-                  type="text"
-                  aria-label="用户名"
-                  value="access-code"
-                  readonly
-                  tabindex="-1"
-                  autocomplete="username"
+                    id="access-code-popover-username"
+                    class="sr-only"
+                    name="username"
+                    type="text"
+                    aria-label="用户名"
+                    value="access-code"
+                    readonly
+                    tabindex="-1"
+                    autocomplete="username"
                 >
                 <label class="sr-only" for="access-code-popover">访问码</label>
                 <input
-                  id="access-code-popover"
-                  v-model="accessCode"
-                  name="accessCode"
-                  type="password"
-                  placeholder="访问码"
-                  aria-label="访问码"
-                  autocomplete="current-password"
+                    id="access-code-popover"
+                    v-model="accessCode"
+                    name="accessCode"
+                    type="password"
+                    placeholder="访问码"
+                    aria-label="访问码"
+                    autocomplete="current-password"
                 >
                 <button class="btn-primary" type="submit" :disabled="accessBusy">
                   {{ accessBusy ? "登录中..." : "访问码登录" }}
                 </button>
               </form>
               <a
-                class="btn-ghost auth-link auth-popover-link"
-                :href="`/api/auth/login/github?redirectTo=${encodeURIComponent(authRedirectPath)}`"
+                  class="btn-ghost auth-link auth-popover-link"
+                  :href="`/api/auth/login/github?redirectTo=${encodeURIComponent(authRedirectPath)}`"
               >
                 使用 GitHub 登录
               </a>
               <a
-                class="btn-ghost auth-link auth-popover-link"
-                :href="`/api/auth/login/google?redirectTo=${encodeURIComponent(authRedirectPath)}`"
+                  class="btn-ghost auth-link auth-popover-link"
+                  :href="`/api/auth/login/google?redirectTo=${encodeURIComponent(authRedirectPath)}`"
               >
                 使用 Google 登录
               </a>
@@ -1428,10 +1428,10 @@ onBeforeUnmount(() => {
           <div class="panel-heading">
             <h2>商品资料</h2>
             <button
-              type="button"
-              class="inline-action panel-reset-action"
-              :disabled="promptBusy || imageBusy"
-              @click="handleResetProductInput"
+                type="button"
+                class="inline-action panel-reset-action"
+                :disabled="promptBusy || imageBusy"
+                @click="handleResetProductInput"
             >
               重置
             </button>
@@ -1442,130 +1442,122 @@ onBeforeUnmount(() => {
               <div>
                 <label for="product-name">商品名称</label>
                 <input
-                  id="product-name"
-                  v-model="productName"
-                  type="text"
-                  :disabled="controlsDisabled"
-                  placeholder="示例：玻尿酸修护精华液 | 真皮沙发双人座 | 儿童智能手表"
+                    id="product-name"
+                    v-model="productName"
+                    type="text"
+                    :disabled="controlsDisabled"
+                    placeholder="示例：玻尿酸修护精华液 | 真皮沙发双人座 | 儿童智能手表"
                 >
               </div>
             </div>
 
             <label for="selling-points">核心卖点/功效</label>
             <textarea
-              id="selling-points"
-              v-model="sellingPoints"
-              class="selling-points"
-              :disabled="controlsDisabled"
-              placeholder="请输入商品核心卖点、适用人群、规格信息和购买理由。&#10;&#10;示例：&#10;• 深层补水：玻尿酸微分子渗透技术&#10;• 修护屏障：神经酰胺+角鲨烷双重修护&#10;• 适合人群：敏感肌、干燥肌、熟龄肌&#10;• 规格：30ml 旅行装 / 50ml 标准装&#10;• 使用感：清爽不油腻，快速吸收"
+                id="selling-points"
+                v-model="sellingPoints"
+                class="selling-points"
+                :disabled="controlsDisabled"
+                placeholder="请输入商品核心卖点、适用人群、规格信息和购买理由。&#10;&#10;示例：&#10;• 深层补水：玻尿酸微分子渗透技术&#10;• 修护屏障：神经酰胺+角鲨烷双重修护&#10;• 适合人群：敏感肌、干燥肌、熟龄肌&#10;• 规格：30ml 旅行装 / 50ml 标准装&#10;• 使用感：清爽不油腻，快速吸收"
             />
-
-            <div class="form-grid context-grid">
-              <div>
-                <label for="target-platform">目标平台</label>
-                <input
-                  id="target-platform"
-                  v-model="targetPlatform"
-                  type="text"
-                  :disabled="controlsDisabled"
-                  placeholder="淘宝 / 天猫 / 京东 / 抖音商城 / 小红书"
-                >
-              </div>
-              <div>
-                <label for="price-band">价格带</label>
-                <input
-                  id="price-band"
-                  v-model="priceBand"
-                  type="text"
-                  :disabled="controlsDisabled"
-                  placeholder="示例：平价走量 | 中高客单 | 高端礼品"
-                >
-              </div>
-            </div>
-
+            <label for="target-platform">目标平台</label>
+            <input
+                id="target-platform"
+                v-model="targetPlatform"
+                type="text"
+                :disabled="controlsDisabled"
+                placeholder="淘宝 / 天猫 / 京东 / 抖音商城 / 小红书"
+            >
+            <label for="price-band">价格带</label>
+            <input
+                id="price-band"
+                v-model="priceBand"
+                type="text"
+                :disabled="controlsDisabled"
+                placeholder="示例：平价走量 | 中高客单 | 高端礼品"
+            >
             <label for="audience">目标人群/购买场景</label>
             <textarea
-              id="audience"
-              v-model="audience"
-              class="compact-textarea"
-              :disabled="controlsDisabled"
-              placeholder="示例：宝妈囤货、租房收纳、通勤办公、换季敏感肌、送礼场景"
+                id="audience"
+                v-model="audience"
+                class="compact-textarea"
+                :disabled="controlsDisabled"
+                placeholder="示例：宝妈囤货、租房收纳、通勤办公、换季敏感肌、送礼场景"
             />
 
             <label for="proof-materials">证明素材/资质/评价</label>
             <textarea
-              id="proof-materials"
-              v-model="proofMaterials"
-              class="compact-textarea"
-              :disabled="controlsDisabled"
-              placeholder="示例：检测报告、材质认证、用户好评关键词、真实参数。没有可留空，系统不会编造硬证据。"
+                id="proof-materials"
+                v-model="proofMaterials"
+                class="compact-textarea"
+                :disabled="controlsDisabled"
+                placeholder="示例：检测报告、材质认证、用户好评关键词、真实参数。没有可留空，系统不会编造硬证据。"
             />
 
             <label for="offer">活动/售后/服务承诺</label>
             <textarea
-              id="offer"
-              v-model="offer"
-              class="compact-textarea"
-              :disabled="controlsDisabled"
-              placeholder="示例：买一送一、7天无理由、赠品、包邮、质保、试用装"
+                id="offer"
+                v-model="offer"
+                class="compact-textarea"
+                :disabled="controlsDisabled"
+                placeholder="示例：买一送一、7天无理由、赠品、包邮、质保、试用装"
             />
 
             <div class="field-row-head">
               <label for="product-images">商品参考图 <span class="field-hint">(至少1张，最多8张)</span></label>
               <button
-                v-if="productImages.length > 0"
-                type="button"
-                class="inline-action"
-                :disabled="controlsDisabled"
-                @click="productImages = []; productImageIds = []"
+                  v-if="productImages.length > 0"
+                  type="button"
+                  class="inline-action"
+                  :disabled="controlsDisabled"
+                  @click="productImages = []; productImageIds = []"
               >
                 清空
               </button>
             </div>
             <div class="product-media">
               <div
-                v-for="(src, index) in productImages"
-                :key="`${src.slice(0, 32)}-${index}`"
-                class="prompt-thumb"
+                  v-for="(src, index) in productImages"
+                  :key="`${src.slice(0, 32)}-${index}`"
+                  class="prompt-thumb"
               >
                 <button
-                  type="button"
-                  class="prompt-thumb-preview"
-                  :aria-label="`查看商品图 ${index + 1}`"
-                  @click="lightboxSrc = src"
+                    type="button"
+                    class="prompt-thumb-preview"
+                    :aria-label="`查看商品图 ${index + 1}`"
+                    @click="lightboxSrc = src"
                 >
                   <img :src="src" :alt="`商品图 ${index + 1}`">
                 </button>
                 <button
-                  type="button"
-                  class="prompt-thumb-del"
-                  :disabled="controlsDisabled"
-                  :aria-label="`移除商品图 ${index + 1}`"
-                  @click="productImages = productImages.filter((_, i) => i !== index); productImageIds = productImageIds.filter((_, i) => i !== index)"
+                    type="button"
+                    class="prompt-thumb-del"
+                    :disabled="controlsDisabled"
+                    :aria-label="`移除商品图 ${index + 1}`"
+                    @click="productImages = productImages.filter((_, i) => i !== index); productImageIds = productImageIds.filter((_, i) => i !== index)"
                 >
-                  <Icon name="close" />
+                  <Icon name="close"/>
                 </button>
               </div>
               <button
-                type="button"
-                class="prompt-upload-tile"
-                :disabled="controlsDisabled"
-                @click="fileInputRef?.click()"
+                  type="button"
+                  class="prompt-upload-tile"
+                  :disabled="controlsDisabled"
+                  @click="fileInputRef?.click()"
               >
-                <Icon name="upload" />
+                <Icon name="upload"/>
                 <span>上传</span>
               </button>
             </div>
             <input
-              id="product-images"
-              ref="fileInputRef"
-              name="productImages"
-              type="file"
-              aria-label="上传商品参考图"
-              accept="image/*"
-              multiple
-              hidden
-              @change="event => handleSelectFiles((event.target as HTMLInputElement).files)"
+                id="product-images"
+                ref="fileInputRef"
+                name="productImages"
+                type="file"
+                aria-label="上传商品参考图"
+                accept="image/*"
+                multiple
+                hidden
+                @change="event => handleSelectFiles((event.target as HTMLInputElement).files)"
             >
 
             <div class="settings-row">
@@ -1576,16 +1568,18 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="image-mode-toggle-group" role="group" aria-label="图包类型">
                   <button
-                    v-for="option in IMAGE_MODE_OPTIONS"
-                    :key="option.value"
-                    type="button"
-                    :class="['image-mode-toggle', { 'is-active': isImageModeSelected(option.value) }]"
-                    :aria-pressed="isImageModeSelected(option.value)"
-                    :disabled="controlsDisabled || (isImageModeSelected(option.value) && imageModes.length <= 1)"
-                    @click="handleImageModeToggle(option.value)"
+                      v-for="option in IMAGE_MODE_OPTIONS"
+                      :key="option.value"
+                      type="button"
+                      :class="['image-mode-toggle', { 'is-active': isImageModeSelected(option.value) }]"
+                      :aria-pressed="isImageModeSelected(option.value)"
+                      :disabled="controlsDisabled || (isImageModeSelected(option.value) && imageModes.length <= 1)"
+                      @click="handleImageModeToggle(option.value)"
                   >
                     <span>{{ option.label }}</span>
-                    <small>{{ getImageModeCount(option.value) }} 张 · {{ getImageModeAspectRatio(option.value) }}</small>
+                    <small>{{ getImageModeCount(option.value) }} 张 · {{
+                        getImageModeAspectRatio(option.value)
+                      }}</small>
                   </button>
                 </div>
               </div>
@@ -1596,9 +1590,9 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="param-controls" aria-label="清晰度">
                   <QualitySelector
-                    :value="quality"
-                    :disabled="controlsDisabled"
-                    @change="quality = $event"
+                      :value="quality"
+                      :disabled="controlsDisabled"
+                      @change="quality = $event"
                   />
                 </div>
               </div>
@@ -1607,7 +1601,7 @@ onBeforeUnmount(() => {
 
           <div class="input-action-bar">
             <button type="button" class="btn-primary" :disabled="controlsDisabled" @click="handleGeneratePrompts">
-              <span v-if="promptBusy" class="btn-spinner" aria-hidden="true" />
+              <span v-if="promptBusy" class="btn-spinner" aria-hidden="true"/>
               {{ promptBusy ? "AI 生成方案中..." : "生成图包方案" }}
             </button>
             <div v-if="error" class="alert">{{ error }}</div>
@@ -1623,19 +1617,20 @@ onBeforeUnmount(() => {
           </div>
           <div class="prompt-editor-list">
             <div v-if="promptBusy" class="busy-card">
-              <span class="busy-orbit" aria-hidden="true" />
+              <span class="busy-orbit" aria-hidden="true"/>
               <strong>正在生成图包方案</strong>
               <p>AI 正在分析商品资料和参考图，预计需要 10-20 秒...</p>
             </div>
-            <div v-else-if="!activePrompt" class="empty" style="display: flex; flex-direction: column; align-items: center; gap: 14px; justify-content: center; padding: 32px; text-align: center;">
-              <Icon name="spark" style="width: 32px; height: 32px; color: var(--accent); opacity: 0.8;" />
+            <div v-else-if="!activePrompt" class="empty"
+                 style="display: flex; flex-direction: column; align-items: center; gap: 14px; justify-content: center; padding: 32px; text-align: center;">
+              <Icon name="spark" style="width: 32px; height: 32px; color: var(--accent); opacity: 0.8;"/>
               <div style="font-size: 0.84rem; color: var(--text-sub);">还没有图包生成方案。</div>
               <button
-                type="button"
-                class="btn-secondary"
-                style="min-height: 32px; padding: 6px 12px; font-size: 0.78rem; border-radius: var(--radius-control); cursor: pointer; font-weight: bold;"
-                :disabled="controlsDisabled"
-                @click="handleLoadDemoData"
+                  type="button"
+                  class="btn-secondary"
+                  style="min-height: 32px; padding: 6px 12px; font-size: 0.78rem; border-radius: var(--radius-control); cursor: pointer; font-weight: bold;"
+                  :disabled="controlsDisabled"
+                  @click="handleLoadDemoData"
               >
                 导入示例数据
               </button>
@@ -1643,32 +1638,32 @@ onBeforeUnmount(() => {
             <template v-else>
               <div class="prompt-switcher" aria-label="图包方案切换">
                 <button
-                  type="button"
-                  class="prompt-nav-btn"
-                  :disabled="activePromptIndex === 0"
-                  @click="activePromptIdx = Math.max(0, activePromptIndex - 1)"
+                    type="button"
+                    class="prompt-nav-btn"
+                    :disabled="activePromptIndex === 0"
+                    @click="activePromptIdx = Math.max(0, activePromptIndex - 1)"
                 >
                   上一张
                 </button>
                 <div class="prompt-step-list" role="tablist" aria-label="切换图包方案">
                   <button
-                    v-for="(item, index) in prompts"
-                    :key="item.id"
-                    type="button"
-                    role="tab"
-                    :aria-selected="index === activePromptIndex"
-                    :class="['prompt-step', { 'is-active': index === activePromptIndex }]"
-                    @click="activePromptIdx = index"
+                      v-for="(item, index) in prompts"
+                      :key="item.id"
+                      type="button"
+                      role="tab"
+                      :aria-selected="index === activePromptIndex"
+                      :class="['prompt-step', { 'is-active': index === activePromptIndex }]"
+                      @click="activePromptIdx = index"
                   >
                     <span>{{ index + 1 }}</span>
-                    <span :class="['prompt-step-status', `is-${item.status}`]" aria-hidden="true" />
+                    <span :class="['prompt-step-status', `is-${item.status}`]" aria-hidden="true"/>
                   </button>
                 </div>
                 <button
-                  type="button"
-                  class="prompt-nav-btn"
-                  :disabled="activePromptIndex >= prompts.length - 1"
-                  @click="activePromptIdx = Math.min(prompts.length - 1, activePromptIndex + 1)"
+                    type="button"
+                    class="prompt-nav-btn"
+                    :disabled="activePromptIndex >= prompts.length - 1"
+                    @click="activePromptIdx = Math.min(prompts.length - 1, activePromptIndex + 1)"
                 >
                   下一张
                 </button>
@@ -1678,11 +1673,11 @@ onBeforeUnmount(() => {
                 <div class="prompt-editor-head">
                   <span class="prompt-index">{{ activePromptIndex + 1 }}</span>
                   <input
-                    aria-label="图包方案标题"
-                    type="text"
-                    :value="activePrompt.title"
-                    :disabled="imageBusy"
-                    @input="event => handleTitleChange(activePrompt!.id, (event.target as HTMLInputElement).value)"
+                      aria-label="图包方案标题"
+                      type="text"
+                      :value="activePrompt.title"
+                      :disabled="imageBusy"
+                      @input="event => handleTitleChange(activePrompt!.id, (event.target as HTMLInputElement).value)"
                   >
                   <span :class="['status-pill', `is-${activePrompt.status}`]">
                     {{ STATUS_LABEL[activePrompt.status] }}
@@ -1690,16 +1685,18 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="prompt-plan-summary">
                   <strong>{{ activePrompt.title || `第${activePromptIndex + 1}张商品图` }}</strong>
-                  <span>{{ activePromptModeLabel }} · {{ activePromptAspectRatio }} · {{ activePromptIndex + 1 }} / {{ prompts.length }}</span>
+                  <span>{{ activePromptModeLabel }} · {{ activePromptAspectRatio }} · {{
+                      activePromptIndex + 1
+                    }} / {{ prompts.length }}</span>
                 </div>
                 <label class="sr-only" :for="`prompt-text-${activePrompt.id}`">生图 Prompt</label>
                 <textarea
-                  :id="`prompt-text-${activePrompt.id}`"
-                  class="prompt-textarea"
-                  :value="activePrompt.prompt || ''"
-                  :disabled="imageBusy"
-                  placeholder="当前方案没有返回 Prompt，请重新生成图包方案。"
-                  @input="event => handlePromptChange(activePrompt!.id, (event.target as HTMLTextAreaElement).value)"
+                    :id="`prompt-text-${activePrompt.id}`"
+                    class="prompt-textarea"
+                    :value="activePrompt.prompt || ''"
+                    :disabled="imageBusy"
+                    placeholder="当前方案没有返回 Prompt，请重新生成图包方案。"
+                    @input="event => handlePromptChange(activePrompt!.id, (event.target as HTMLTextAreaElement).value)"
                 />
               </div>
             </template>
@@ -1707,28 +1704,28 @@ onBeforeUnmount(() => {
           <div class="prompt-action-bar">
             <div class="generation-action-row">
               <button
-                type="button"
-                class="btn-secondary"
-                :disabled="controlsDisabled || !prompts.length"
-                @click="handleGenerateImages"
+                  type="button"
+                  class="btn-secondary"
+                  :disabled="controlsDisabled || !prompts.length"
+                  @click="handleGenerateImages"
               >
-                <span v-if="imageBusy" class="btn-spinner" aria-hidden="true" />
+                <span v-if="imageBusy" class="btn-spinner" aria-hidden="true"/>
                 {{ imageBusy ? `生成中 (${activePromptIndex + 1}/${prompts.length})` : "批量生成商品图" }}
               </button>
               <button
-                v-if="!imageBusy"
-                type="button"
-                class="btn-ghost"
-                :disabled="controlsDisabled || !activePrompt?.promptId"
-                @click="handleRegenerateActiveImage"
+                  v-if="!imageBusy"
+                  type="button"
+                  class="btn-ghost"
+                  :disabled="controlsDisabled || !activePrompt?.promptId"
+                  @click="handleRegenerateActiveImage"
               >
                 重新生成当前图
               </button>
               <button
-                v-if="imageBusy"
-                type="button"
-                class="btn-danger cancel-generation-btn"
-                @click="handleCancelImageGeneration"
+                  v-if="imageBusy"
+                  type="button"
+                  class="btn-danger cancel-generation-btn"
+                  @click="handleCancelImageGeneration"
               >
                 中断生成
               </button>
@@ -1742,13 +1739,13 @@ onBeforeUnmount(() => {
             <span class="panel-count">{{ generationLabel }}</span>
           </div>
           <Stage
-            :prompts="prompts"
-            :active-index="activePromptIndex"
-            :busy="imageBusy"
-            @select="activePromptIdx = $event"
-            @download="handleDownload"
-            @load-demo="handleLoadDemoData"
-            @zoom="index => {
+              :prompts="prompts"
+              :active-index="activePromptIndex"
+              :busy="imageBusy"
+              @select="activePromptIdx = $event"
+              @download="handleDownload"
+              @load-demo="handleLoadDemoData"
+              @zoom="index => {
               const imageSrc = getPromptImageSrc(prompts[index])
               if (imageSrc) lightboxSrc = imageSrc
             }"
@@ -1758,66 +1755,66 @@ onBeforeUnmount(() => {
 
       <section class="studio-panel history-dock">
         <HistoryGrid
-          :history="history"
-          :active-idx="activeHistoryIdx"
-          @select="handleSelectHistory"
-          @delete="handleDeleteHistory"
-          @clear-all="handleClearHistory"
+            :history="history"
+            :active-idx="activeHistoryIdx"
+            @select="handleSelectHistory"
+            @delete="handleDeleteHistory"
+            @clear-all="handleClearHistory"
         />
       </section>
     </template>
 
     <CutoutStudio
-      v-else-if="studioMode === 'cutout'"
-      :authenticated="authenticated"
-      :session-loading="sessionLoading"
-      :session="session"
-      @update:session="session = $event"
-      @zoom="lightboxSrc = $event"
+        v-else-if="studioMode === 'cutout'"
+        :authenticated="authenticated"
+        :session-loading="sessionLoading"
+        :session="session"
+        @update:session="session = $event"
+        @zoom="lightboxSrc = $event"
     />
 
     <MultiViewStudio
-      v-else-if="studioMode === 'multi-view'"
-      :authenticated="authenticated"
-      :session-loading="sessionLoading"
-      :session="session"
-      @update:session="session = $event"
-      @zoom="lightboxSrc = $event"
+        v-else-if="studioMode === 'multi-view'"
+        :authenticated="authenticated"
+        :session-loading="sessionLoading"
+        :session="session"
+        @update:session="session = $event"
+        @zoom="lightboxSrc = $event"
     />
 
     <EditStudio
-      v-else-if="studioMode === 'edit'"
-      :authenticated="authenticated"
-      :session-loading="sessionLoading"
-      :session="session"
-      @update:session="session = $event"
-      @zoom="lightboxSrc = $event"
+        v-else-if="studioMode === 'edit'"
+        :authenticated="authenticated"
+        :session-loading="sessionLoading"
+        :session="session"
+        @update:session="session = $event"
+        @zoom="lightboxSrc = $event"
     />
 
     <LayerStudio
-      v-else
-      :authenticated="authenticated"
-      :session-loading="sessionLoading"
-      :session="session"
-      @update:session="session = $event"
-      @zoom="lightboxSrc = $event"
+        v-else
+        :authenticated="authenticated"
+        :session-loading="sessionLoading"
+        :session="session"
+        @update:session="session = $event"
+        @zoom="lightboxSrc = $event"
     />
 
     <footer>
       EcomImgGen · 历史记录云端同步 · GitHub
       <a
-        class="github-link"
-        href="https://github.com/dming519/ecom-img-gen"
-        target="_blank"
-        rel="noreferrer"
-        aria-label="查看 GitHub 仓库"
-        title="查看 GitHub 仓库"
+          class="github-link"
+          href="https://github.com/dming519/ecom-img-gen"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="查看 GitHub 仓库"
+          title="查看 GitHub 仓库"
       >
         GH
       </a>
     </footer>
 
-    <Lightbox :src="lightboxSrc" @close="lightboxSrc = null" />
-    <AdminPanel :open="adminOpen" @close="adminOpen = false" />
+    <Lightbox :src="lightboxSrc" @close="lightboxSrc = null"/>
+    <AdminPanel :open="adminOpen" @close="adminOpen = false"/>
   </main>
 </template>
