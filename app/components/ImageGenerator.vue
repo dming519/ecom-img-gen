@@ -247,7 +247,6 @@ const activePromptIndex = computed(() =>
 const activePrompt = computed(() => prompts.value[activePromptIndex.value] ?? null)
 const activePromptMode = computed(() => getPromptImageMode(activePrompt.value))
 const activePromptModeLabel = computed(() => getImageModeLabel(activePromptMode.value))
-const activePromptAspectRatio = computed(() => getImageModeAspectRatio(activePromptMode.value))
 
 // 上传的原图可能很大；先压缩再转成 data URL，减少接口请求体大小。
 function fileToCompressedDataURL(file: File): Promise<string> {
@@ -1609,12 +1608,7 @@ onBeforeUnmount(() => {
         </aside>
 
         <aside class="studio-panel prompt-rail">
-          <div class="panel-heading">
-            <h2>图包方案</h2>
-            <span class="panel-count">
-              {{ activePrompt ? `${activePromptIndex + 1} / ${prompts.length}` : `${prompts.length} 个` }}
-            </span>
-          </div>
+          <h2 class="sr-only">图包方案</h2>
           <div class="prompt-editor-list">
             <div v-if="promptBusy" class="busy-card">
               <span class="busy-orbit" aria-hidden="true"/>
@@ -1636,41 +1630,18 @@ onBeforeUnmount(() => {
               </button>
             </div>
             <template v-else>
-              <div class="prompt-switcher" aria-label="图包方案切换">
-                <button
-                    type="button"
-                    class="prompt-nav-btn"
-                    :disabled="activePromptIndex === 0"
-                    @click="activePromptIdx = Math.max(0, activePromptIndex - 1)"
-                >
-                  上一张
-                </button>
-                <div class="prompt-step-list" role="tablist" aria-label="切换图包方案">
-                  <button
-                      v-for="(item, index) in prompts"
-                      :key="item.id"
-                      type="button"
-                      role="tab"
-                      :aria-selected="index === activePromptIndex"
-                      :class="['prompt-step', { 'is-active': index === activePromptIndex }]"
-                      @click="activePromptIdx = index"
-                  >
-                    <span>{{ index + 1 }}</span>
-                    <span :class="['prompt-step-status', `is-${item.status}`]" aria-hidden="true"/>
-                  </button>
-                </div>
-                <button
-                    type="button"
-                    class="prompt-nav-btn"
-                    :disabled="activePromptIndex >= prompts.length - 1"
-                    @click="activePromptIdx = Math.min(prompts.length - 1, activePromptIndex + 1)"
-                >
-                  下一张
-                </button>
-              </div>
-
               <div :key="activePrompt.id" class="prompt-editor prompt-editor-single is-active">
                 <div class="prompt-editor-head">
+                  <button
+                      type="button"
+                      class="prompt-title-nav"
+                      :disabled="activePromptIndex === 0"
+                      aria-label="上一张图包方案"
+                      title="上一张"
+                      @click="activePromptIdx = Math.max(0, activePromptIndex - 1)"
+                  >
+                    ‹
+                  </button>
                   <span class="prompt-index">{{ activePromptIndex + 1 }}</span>
                   <input
                       aria-label="图包方案标题"
@@ -1680,13 +1651,18 @@ onBeforeUnmount(() => {
                       @input="event => handleTitleChange(activePrompt!.id, (event.target as HTMLInputElement).value)"
                   >
                   <span :class="['status-pill', `is-${activePrompt.status}`]">
-                    {{ STATUS_LABEL[activePrompt.status] }}
+                    {{ activePromptModeLabel }} · {{ STATUS_LABEL[activePrompt.status] }}
                   </span>
-                </div>
-                <div class="prompt-plan-summary">
-                  <span>{{ activePromptModeLabel }} · {{ activePromptAspectRatio }} · {{
-                      activePromptIndex + 1
-                    }} / {{ prompts.length }}</span>
+                  <button
+                      type="button"
+                      class="prompt-title-nav"
+                      :disabled="activePromptIndex >= prompts.length - 1"
+                      aria-label="下一张图包方案"
+                      title="下一张"
+                      @click="activePromptIdx = Math.min(prompts.length - 1, activePromptIndex + 1)"
+                  >
+                    ›
+                  </button>
                 </div>
                 <label class="sr-only" :for="`prompt-text-${activePrompt.id}`">生图 Prompt</label>
                 <textarea
