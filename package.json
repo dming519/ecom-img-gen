@@ -8,7 +8,9 @@
     "start": "nuxt preview",
     "check": "nuxt prepare && vue-tsc --noEmit && tsc -p worker/tsconfig.json --noEmit",
     "preview": "wrangler pages dev dist --project-name ecom-img-gen",
-    "deploy": "nuxt build --preset=cloudflare_pages && wrangler pages deploy dist --project-name ecom-img-gen"
+    "deploy:pages": "nuxt build --preset=cloudflare_pages && wrangler pages deploy dist --project-name ecom-img-gen",
+    "deploy:worker": "wrangler deploy --config worker/wrangler.toml",
+    "deploy": "npm run deploy:pages && npm run deploy:worker"
   },
   "dependencies": {
     "h3": "^1.15.11",

@@ -107,6 +107,19 @@ Pages 和 Worker 需要绑定同一个 `TASKS_KV`。Pages 还需要绑定：
 
 ## 部署
 
+自动发布：
+
+- GitHub Actions workflow: `.github/workflows/deploy.yml`
+- 触发条件：push 到 `main` 或手动 `workflow_dispatch`
+- 发布内容：先部署 Cloudflare Pages `ecom-img-gen`，再部署 Worker `ecom-img-gen-worker`
+- 必需 GitHub Secret：`CLOUDFLARE_API_TOKEN`
+
+本地备用发布：
+
+```bash
+npm run deploy
+```
+
 目标仓库：
 
 ```text
@@ -123,7 +136,7 @@ https://eig.easyauto.app
 
 - Worker: `https://ecom-img-gen-worker.ldmcsy2020.workers.dev`
 - Pages: `https://ecom-img-gen.pages.dev`
-- Latest deployment: `https://2a1a4651.ecom-img-gen.pages.dev`
+- Latest deployment: `https://efb41a5b.ecom-img-gen.pages.dev`
 - KV: `TASKS_KV` / `6a7ee075ab4b4cbe9cfd80ed9fb0b40a`
 - D1: `HISTORY_DB` / `ecom-img-gen-history` / `47b2ddfa-9418-4c60-b3ba-7f71112196c1`
 - R2: `HISTORY_BUCKET` / `ecom-img-gen-images`

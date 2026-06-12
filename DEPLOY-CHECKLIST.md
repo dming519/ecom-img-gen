@@ -40,6 +40,13 @@
 - [x] 已配置 `IMAGE_WORKER_TOKEN`
 - [x] Pages 和 Worker 的 `IMAGE_WORKER_TOKEN` 完全一致
 
+## GitHub Actions 自动部署
+
+- [x] 已添加 `.github/workflows/deploy.yml`
+- [x] GitHub Secret 已配置 `CLOUDFLARE_API_TOKEN`
+- [ ] push 到 `main` 后 Actions 自动部署 Pages
+- [ ] push 到 `main` 后 Actions 自动部署 Worker
+
 ## OAuth
 
 - [ ] GitHub OAuth callback 包含 `https://eig.easyauto.app/api/auth/callback/github`
