@@ -1684,7 +1684,6 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
                 <div class="prompt-plan-summary">
-                  <strong>{{ activePrompt.title || `第${activePromptIndex + 1}张商品图` }}</strong>
                   <span>{{ activePromptModeLabel }} · {{ activePromptAspectRatio }} · {{
                       activePromptIndex + 1
                     }} / {{ prompts.length }}</span>
@@ -1742,7 +1741,6 @@ onBeforeUnmount(() => {
               :prompts="prompts"
               :active-index="activePromptIndex"
               :busy="imageBusy"
-              @select="activePromptIdx = $event"
               @download="handleDownload"
               @load-demo="handleLoadDemoData"
               @zoom="index => {

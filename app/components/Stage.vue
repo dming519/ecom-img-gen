@@ -11,7 +11,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  select: [index: number]
   download: [index: number]
   zoom: [index: number]
   "load-demo": []
@@ -24,11 +23,6 @@ const activeSrc = computed(() => {
   return null
 })
 const activeModeClass = computed(() => (active.value?.imageMode === "main" ? "is-main" : "is-detail"))
-
-function getItemSrc(item: DetailPromptItem) {
-  if (item.imageId) return dbImageFileUrl(item.imageId)
-  return null
-}
 </script>
 
 <template>
@@ -82,18 +76,5 @@ function getItemSrc(item: DetailPromptItem) {
       </div>
     </div>
 
-    <div class="result-strip" aria-label="商品图生成结果">
-      <button
-        v-for="(item, index) in prompts"
-        :key="item.id"
-        type="button"
-        :class="['result-thumb', { 'is-active': index === activeIndex }]"
-        @click="emit('select', index)"
-      >
-        <span :class="['status-dot', `is-${item.status}`]" />
-        <img v-if="getItemSrc(item)" :src="getItemSrc(item)!" :alt="item.title">
-        <span v-else class="result-thumb-empty">{{ index + 1 }}</span>
-      </button>
-    </div>
   </div>
 </template>
