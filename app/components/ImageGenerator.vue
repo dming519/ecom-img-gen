@@ -58,6 +58,16 @@ const IMAGE_MODE_OPTIONS: Array<{ label: string; value: DetailImageMode }> = [
   {label: "主图", value: "main"},
   {label: "详情图", value: "detail"},
 ]
+const PLATFORM_SEPARATOR = "、"
+const PLATFORM_OPTIONS = [
+  {label: "淘宝/天猫", value: "淘宝/天猫", description: "标准货架"},
+  {label: "京东", value: "京东", description: "参数信任"},
+  {label: "抖音商城", value: "抖音商城", description: "场景转化"},
+  {label: "小红书", value: "小红书", description: "种草内容"},
+] as const
+type TargetPlatformValue = (typeof PLATFORM_OPTIONS)[number]["value"]
+const DEFAULT_TARGET_PLATFORMS: TargetPlatformValue[] = PLATFORM_OPTIONS.map((option) => option.value)
+const DEFAULT_TARGET_PLATFORM_LABEL = DEFAULT_TARGET_PLATFORMS.join(PLATFORM_SEPARATOR)
 const STATUS_LABEL: Record<DetailPromptItem["status"], string> = {
   draft: "待生成",
   queued: "排队中",
@@ -93,7 +103,7 @@ const studioMode = shallowRef<StudioMode>(props.initialMode)
 const productName = shallowRef("")
 const sellingPoints = shallowRef("")
 const imageModes = ref<DetailImageMode[]>(["main", "detail"])
-const targetPlatform = shallowRef("淘宝 / 天猫 / 京东 / 抖音商城 / 小红书")
+const targetPlatform = shallowRef(DEFAULT_TARGET_PLATFORM_LABEL)
 const audience = shallowRef("")
 const priceBand = shallowRef("")
 const proofMaterials = shallowRef("")
@@ -149,6 +159,21 @@ function normalizeImageModes(value: unknown): DetailImageMode[] {
   return ordered.length ? ordered : [...IMAGE_MODE_ORDER]
 }
 
+function normalizeTargetPlatforms(value: unknown): TargetPlatformValue[] {
+  const text = typeof value === "string" ? value : ""
+  const selected = PLATFORM_OPTIONS
+      .filter((option) => text.includes(option.value) || option.value.split("/").some((part) => text.includes(part)))
+      .map((option) => option.value)
+  return selected.length ? selected : [...DEFAULT_TARGET_PLATFORMS]
+}
+
+function writeTargetPlatforms(values: TargetPlatformValue[]) {
+  const ordered = PLATFORM_OPTIONS
+      .map((option) => option.value)
+      .filter((value) => values.includes(value))
+  targetPlatform.value = (ordered.length ? ordered : [...DEFAULT_TARGET_PLATFORMS]).join(PLATFORM_SEPARATOR)
+}
+
 function getImageModesCount(modes: DetailImageMode[]) {
   return modes.reduce((sum, mode) => sum + getImageModeCount(mode), 0)
 }
@@ -171,12 +196,14 @@ function getPromptSize(item: DetailPromptItem | null | undefined) {
 
 // computed 是派生状态：不直接存数据，而是根据上面的源状态实时计算。
 const imageCount = computed(() => getImageModesCount(imageModes.value))
+const selectedTargetPlatforms = computed(() => normalizeTargetPlatforms(targetPlatform.value))
+const targetPlatformLabel = computed(() => selectedTargetPlatforms.value.join(PLATFORM_SEPARATOR))
 const currentProduct = computed<ProductInput>(() => ({
   name: productName.value.trim(),
   sellingPoints: sellingPoints.value.trim(),
   imageModes: [...imageModes.value],
   imageCount: imageCount.value,
-  targetPlatform: targetPlatform.value.trim(),
+  targetPlatform: targetPlatformLabel.value,
   audience: audience.value.trim(),
   priceBand: priceBand.value.trim(),
   proofMaterials: proofMaterials.value.trim(),
@@ -341,7 +368,7 @@ function cloneProduct(input: ProductInput): ProductInput {
     sellingPoints: input.sellingPoints,
     imageModes: modes,
     imageCount: getImageModesCount(modes),
-    targetPlatform: input.targetPlatform ?? "",
+    targetPlatform: normalizeTargetPlatforms(input.targetPlatform).join(PLATFORM_SEPARATOR),
     audience: input.audience ?? "",
     priceBand: input.priceBand ?? "",
     proofMaterials: input.proofMaterials ?? "",
@@ -530,7 +557,7 @@ function handleResetProductInput() {
   productName.value = ""
   sellingPoints.value = ""
   imageModes.value = ["main", "detail"]
-  targetPlatform.value = "淘宝 / 天猫 / 京东 / 抖音商城 / 小红书"
+  targetPlatform.value = DEFAULT_TARGET_PLATFORM_LABEL
   audience.value = ""
   priceBand.value = ""
   proofMaterials.value = ""
@@ -569,7 +596,7 @@ async function handleLoadDemoData() {
   productName.value = "玻尿酸多效修护精华液"
   sellingPoints.value = "• 深层补水：玻尿酸微分子渗透技术\n• 修护屏障：神经酰胺+角鲨烷双重修护\n• 适合人群：敏感肌、干燥肌、熟龄肌\n• 规格：30ml 旅行装 / 50ml 标准装\n• 使用感：清爽不油腻，快速吸收"
   imageModes.value = ["main", "detail"]
-  targetPlatform.value = "天猫 / 抖音商城"
+  writeTargetPlatforms(["淘宝/天猫", "抖音商城"])
   audience.value = "敏感肌、干燥肌、换季修护人群，日常护肤和妆前补水场景"
   priceBand.value = "中高客单护肤品"
   proofMaterials.value = "玻尿酸、神经酰胺、角鲨烷成分信息；无真实检测报告编号"
@@ -606,7 +633,7 @@ async function handleGeneratePrompts() {
       name: productName.value.trim(),
       sellingPoints: sellingPoints.value.trim(),
       imageModes: imageModes.value,
-      targetPlatform: targetPlatform.value.trim(),
+      targetPlatform: targetPlatformLabel.value,
       audience: audience.value.trim(),
       priceBand: priceBand.value.trim(),
       proofMaterials: proofMaterials.value.trim(),
@@ -643,6 +670,20 @@ function handleImageModeToggle(mode: DetailImageMode) {
   imageModes.value = selected
       ? imageModes.value.filter((item) => item !== mode)
       : IMAGE_MODE_ORDER.filter((item) => item === mode || imageModes.value.includes(item))
+}
+
+function isTargetPlatformSelected(platform: TargetPlatformValue) {
+  return selectedTargetPlatforms.value.includes(platform)
+}
+
+function handleTargetPlatformToggle(platform: TargetPlatformValue) {
+  if (controlsDisabled.value) return
+  const selected = isTargetPlatformSelected(platform)
+  if (selected && selectedTargetPlatforms.value.length <= 1) return
+  const next = selected
+      ? selectedTargetPlatforms.value.filter((item) => item !== platform)
+      : [...selectedTargetPlatforms.value, platform]
+  writeTargetPlatforms(next)
 }
 
 // 长时间生成时尽量保持屏幕唤醒；浏览器不支持也不影响核心功能。
@@ -967,7 +1008,7 @@ function handleSelectHistory(idx: number) {
   sellingPoints.value = item.product.sellingPoints
   const restoredModes = normalizeImageModes(item.product.imageModes)
   imageModes.value = restoredModes
-  targetPlatform.value = item.product.targetPlatform || targetPlatform.value
+  targetPlatform.value = normalizeTargetPlatforms(item.product.targetPlatform || targetPlatform.value).join(PLATFORM_SEPARATOR)
   audience.value = item.product.audience || ""
   priceBand.value = item.product.priceBand || ""
   proofMaterials.value = item.product.proofMaterials || ""
@@ -1122,7 +1163,7 @@ watch(
           productName: productName.value,
           sellingPoints: sellingPoints.value,
           imageModes: [...imageModes.value],
-          targetPlatform: targetPlatform.value,
+          targetPlatform: targetPlatformLabel.value,
           audience: audience.value,
           priceBand: priceBand.value,
           proofMaterials: proofMaterials.value,
@@ -1154,7 +1195,7 @@ onMounted(() => {
         sellingPoints.value = draft.sellingPoints || ""
         const restoredModes = normalizeImageModes(draft.imageModes)
         imageModes.value = restoredModes
-        targetPlatform.value = draft.targetPlatform || targetPlatform.value
+        targetPlatform.value = normalizeTargetPlatforms(draft.targetPlatform || targetPlatform.value).join(PLATFORM_SEPARATOR)
         audience.value = draft.audience || ""
         priceBand.value = draft.priceBand || ""
         proofMaterials.value = draft.proofMaterials || ""
@@ -1458,14 +1499,24 @@ onBeforeUnmount(() => {
                 :disabled="controlsDisabled"
                 placeholder="请输入商品核心卖点、适用人群、规格信息和购买理由。&#10;&#10;示例：&#10;• 深层补水：玻尿酸微分子渗透技术&#10;• 修护屏障：神经酰胺+角鲨烷双重修护&#10;• 适合人群：敏感肌、干燥肌、熟龄肌&#10;• 规格：30ml 旅行装 / 50ml 标准装&#10;• 使用感：清爽不油腻，快速吸收"
             />
-            <label for="target-platform">目标平台</label>
-            <input
-                id="target-platform"
-                v-model="targetPlatform"
-                type="text"
-                :disabled="controlsDisabled"
-                placeholder="淘宝 / 天猫 / 京东 / 抖音商城 / 小红书"
-            >
+            <div class="field-row-head">
+              <label>目标平台</label>
+              <span class="field-hint">{{ selectedTargetPlatforms.length }} 个</span>
+            </div>
+            <div class="platform-toggle-group" role="group" aria-label="目标平台">
+              <button
+                  v-for="option in PLATFORM_OPTIONS"
+                  :key="option.value"
+                  type="button"
+                  :class="['platform-toggle', { 'is-active': isTargetPlatformSelected(option.value) }]"
+                  :aria-pressed="isTargetPlatformSelected(option.value)"
+                  :disabled="controlsDisabled || (isTargetPlatformSelected(option.value) && selectedTargetPlatforms.length <= 1)"
+                  @click="handleTargetPlatformToggle(option.value)"
+              >
+                <span>{{ option.label }}</span>
+                <small>{{ option.description }}</small>
+              </button>
+            </div>
             <label for="price-band">价格带</label>
             <input
                 id="price-band"
@@ -1719,6 +1770,7 @@ onBeforeUnmount(() => {
               :busy="imageBusy"
               @download="handleDownload"
               @load-demo="handleLoadDemoData"
+              @select="activePromptIdx = $event"
               @zoom="index => {
               const imageSrc = getPromptImageSrc(prompts[index])
               if (imageSrc) lightboxSrc = imageSrc
