@@ -301,6 +301,46 @@ async function readUsageRecord(db: HistoryD1Database, userKey: string) {
   return row ? fromUsageRow(row) : null;
 }
 
+async function readHydrationRecords(db: HistoryD1Database, userKey: string) {
+  if (!db.batch) {
+    return {
+      record: await readUserRecord(db, userKey),
+      superAdminKey: await readSuperAdminKey(db),
+      usage: await readUsageRecord(db, userKey),
+    };
+  }
+
+  const [userResult, adminResult, usageResult] = await db.batch([
+    db
+      .prepare(
+        `SELECT user_key, provider, provider_id, name, email, image, role,
+          created_at, updated_at, last_login_at
+         FROM managed_users
+         WHERE user_key = ?`,
+      )
+      .bind(userKey),
+    db.prepare(`SELECT value FROM admin_meta WHERE key = ?`).bind(META_ADMIN),
+    db
+      .prepare(
+        `SELECT user_key, remaining_credits, used_credits, granted_credits,
+          daily_usage_date, daily_used_credits, credit_model_version,
+          created_at, updated_at, last_generated_at
+         FROM user_usage
+         WHERE user_key = ?`,
+      )
+      .bind(userKey),
+  ]);
+
+  const userRow = userResult?.results?.[0] as UserRow | undefined;
+  const adminRow = adminResult?.results?.[0] as { value?: string } | undefined;
+  const usageRow = usageResult?.results?.[0] as UsageRow | undefined;
+  return {
+    record: userRow ? fromUserRow(userRow) : null,
+    superAdminKey: adminRow?.value ?? null,
+    usage: usageRow ? fromUsageRow(usageRow) : null,
+  };
+}
+
 async function writeUsageRecord(db: HistoryD1Database, usage: UsageRecord) {
   await db
     .prepare(
@@ -341,6 +381,15 @@ async function readUsage(
   now = Date.now(),
 ) {
   const existing = await readUsageRecord(db, userKey);
+  return ensureUsageRecord(db, userKey, existing, now);
+}
+
+async function ensureUsageRecord(
+  db: HistoryD1Database,
+  userKey: string,
+  existing: UsageRecord | null,
+  now = Date.now(),
+) {
   if (existing) {
     const normalized = normalizeDailyUsage(
       {
@@ -429,10 +478,9 @@ export async function hydrateManagedUser(env: UserEnv, authUser: AuthUser) {
   await ensureAdminSchema(db);
 
   const userKey = getUserKey(authUser);
-  const record = await readUserRecord(db, userKey);
+  const { record, superAdminKey, usage: existingUsage } = await readHydrationRecords(db, userKey);
   if (!record) return ensureManagedUser(env, authUser);
 
-  const superAdminKey = await readSuperAdminKey(db);
   const role: UserRole =
     superAdminKey === userKey ? "super_admin" : normalizeRole(record.role);
   const normalizedRecord =
@@ -441,7 +489,7 @@ export async function hydrateManagedUser(env: UserEnv, authUser: AuthUser) {
     await writeUserRecord(db, normalizedRecord);
   }
 
-  const usage = await readUsage(db, userKey);
+  const usage = await ensureUsageRecord(db, userKey, existingUsage);
   return {
     user: toSessionUser(normalizedRecord, usage),
     record: normalizedRecord,

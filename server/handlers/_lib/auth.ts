@@ -214,7 +214,7 @@ async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit) {
   return payload;
 }
 
-async function getSessionFromRequest(request: Request, env: AuthEnv) {
+async function getSignedSessionFromRequest(request: Request, env: AuthEnv) {
   const secret = env.AUTH_SECRET?.trim();
   if (!secret) return null;
 
@@ -227,11 +227,22 @@ async function getSessionFromRequest(request: Request, env: AuthEnv) {
     return null;
   }
 
+  return session;
+}
+
+async function getSessionFromRequest(request: Request, env: AuthEnv) {
+  const session = await getSignedSessionFromRequest(request, env);
+  if (!session) return null;
+
   const managed = await hydrateManagedUser(env, session.user);
   return {
     ...session,
     user: managed.user,
   };
+}
+
+export async function requireSignedSession(request: Request, env: AuthEnv) {
+  return getSignedSessionFromRequest(request, env);
 }
 
 export async function requireSession(request: Request, env: AuthEnv) {

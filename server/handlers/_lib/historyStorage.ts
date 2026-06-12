@@ -6,7 +6,7 @@ import type {
   LayerHistoryItem,
   MultiViewHistoryItem,
 } from "@/lib/types";
-import { requireSession } from "./auth";
+import { requireSignedSession } from "./auth";
 import { getUserKey, type UserKvNamespace } from "./users";
 
 interface HistoryD1Result {
@@ -21,6 +21,8 @@ interface HistoryD1AllResult<T> {
   results?: T[];
 }
 
+type HistoryD1BatchResult<T> = HistoryD1Result & HistoryD1AllResult<T>;
+
 interface HistoryD1PreparedStatement {
   bind: (...values: unknown[]) => HistoryD1PreparedStatement;
   first: <T = Record<string, unknown>>() => Promise<T | null>;
@@ -29,6 +31,9 @@ interface HistoryD1PreparedStatement {
 }
 
 export interface HistoryD1Database {
+  batch?: <T = Record<string, unknown>>(
+    statements: HistoryD1PreparedStatement[],
+  ) => Promise<Array<HistoryD1BatchResult<T>>>;
   exec: (query: string) => Promise<unknown>;
   prepare: (query: string) => HistoryD1PreparedStatement;
 }
@@ -111,7 +116,7 @@ export async function requireUserHistoryStorage(
   context: { request: Request; env: HistoryStorageFunctionEnv },
   unauthenticatedMessage: string,
 ) {
-  const session = await requireSession(context.request, context.env);
+  const session = await requireSignedSession(context.request, context.env);
   if (!session) {
     return { response: json({ error: unauthenticatedMessage }, { status: 401 }) };
   }
