@@ -2,7 +2,7 @@ import { requireSession } from "../../_lib/auth";
 import {
   json,
   storeDetailPrompt,
-  type HistoryD1Database,
+  type HistoryStorageEnv,
 } from "../../_lib/historyStorage";
 import type { TaskKvNamespace } from "../../_lib/tasks";
 import { getUserKey } from "../../_lib/users";
@@ -10,10 +10,9 @@ import type { DetailImageMode } from "../../../../src/lib/types";
 
 interface RequestContext {
   request: Request;
-  env: {
+  env: HistoryStorageEnv & {
     TASKS_KV?: TaskKvNamespace;
     AUTH_SECRET?: string;
-    HISTORY_DB?: HistoryD1Database;
   };
 }
 

@@ -1,5 +1,5 @@
 import { requireSession } from "../_lib/auth";
-import type { HistoryD1Database } from "../_lib/historyStorage";
+import type { PostgresEnv } from "../_lib/postgres";
 import { redeemCodeRecord } from "../_lib/redeemCodes";
 import {
   getUserKey,
@@ -9,9 +9,8 @@ import {
 
 interface RequestContext {
   request: Request;
-  env: {
+  env: PostgresEnv & {
     AUTH_SECRET?: string;
-    HISTORY_DB?: HistoryD1Database;
     TASKS_KV?: UserKvNamespace;
   };
 }

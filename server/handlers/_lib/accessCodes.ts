@@ -1,6 +1,6 @@
 import type { AccessCodeRow, AuthUser } from "@/lib/types";
 import { requireAdminDb } from "./users";
-import type { HistoryD1Database } from "./historyStorage";
+import type { AppSql, PostgresEnv } from "./postgres";
 
 interface AccessCodeRecord {
   id: string;
@@ -20,17 +20,16 @@ interface AccessCodeRowRecord {
   label: string;
   code_hash: string;
   code_text: string;
-  active: number;
-  created_at: number;
-  updated_at: number;
+  active: boolean | number;
+  created_at: number | string;
+  updated_at: number | string;
   created_by: string | null;
-  last_used_at?: number | null;
-  use_count: number;
+  last_used_at?: number | string | null;
+  use_count: number | string;
 }
 
-export interface AccessCodeEnv {
+export interface AccessCodeEnv extends PostgresEnv {
   ACCESS_LOGIN_CODE?: string;
-  HISTORY_DB?: HistoryD1Database;
 }
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -59,12 +58,12 @@ function fromRow(row: AccessCodeRowRecord): AccessCodeRecord {
     label: row.label,
     codeHash: row.code_hash,
     codeText: row.code_text,
-    active: !!row.active,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    active: row.active === true || row.active === 1,
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
     createdBy: row.created_by,
-    lastUsedAt: row.last_used_at ?? undefined,
-    useCount: row.use_count,
+    lastUsedAt: row.last_used_at == null ? undefined : Number(row.last_used_at),
+    useCount: Number(row.use_count),
   };
 }
 
@@ -82,66 +81,50 @@ function toRow(record: AccessCodeRecord): AccessCodeRow {
   };
 }
 
-async function writeAccessCode(db: HistoryD1Database, record: AccessCodeRecord) {
-  await db
-    .prepare(
-      `INSERT INTO access_codes
-        (id, label, code_hash, code_text, active, created_at, updated_at,
-         created_by, last_used_at, use_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id)
-       DO UPDATE SET
-         label = excluded.label,
-         code_hash = excluded.code_hash,
-         code_text = excluded.code_text,
-         active = excluded.active,
-         updated_at = excluded.updated_at,
-         created_by = excluded.created_by,
-         last_used_at = excluded.last_used_at,
-         use_count = excluded.use_count`,
-    )
-    .bind(
-      record.id,
-      record.label,
-      record.codeHash,
-      record.codeText,
-      record.active ? 1 : 0,
-      record.createdAt,
-      record.updatedAt,
-      record.createdBy,
-      record.lastUsedAt ?? null,
-      record.useCount,
-    )
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO access_code_hashes (code_hash, code_id)
-       VALUES (?, ?)
-       ON CONFLICT(code_hash)
-       DO UPDATE SET code_id = excluded.code_id`,
-    )
-    .bind(record.codeHash, record.id)
-    .run();
+async function writeAccessCode(db: AppSql, record: AccessCodeRecord) {
+  await db`
+    INSERT INTO access_codes
+      (id, label, code_hash, code_text, active, created_at, updated_at,
+       created_by, last_used_at, use_count)
+    VALUES
+      (${record.id}, ${record.label}, ${record.codeHash}, ${record.codeText},
+       ${record.active}, ${record.createdAt}, ${record.updatedAt}, ${record.createdBy},
+       ${record.lastUsedAt ?? null}, ${record.useCount})
+    ON CONFLICT(id)
+    DO UPDATE SET
+      label = excluded.label,
+      code_hash = excluded.code_hash,
+      code_text = excluded.code_text,
+      active = excluded.active,
+      updated_at = excluded.updated_at,
+      created_by = excluded.created_by,
+      last_used_at = excluded.last_used_at,
+      use_count = excluded.use_count
+  `;
+  await db`
+    INSERT INTO access_code_hashes (code_hash, code_id)
+    VALUES (${record.codeHash}, ${record.id})
+    ON CONFLICT(code_hash)
+    DO UPDATE SET code_id = excluded.code_id
+  `;
 }
 
-async function readAccessCode(db: HistoryD1Database, id: string) {
-  const row = await db
-    .prepare(
-      `SELECT id, label, code_hash, active, created_at, updated_at,
-        code_text, created_by, last_used_at, use_count
-       FROM access_codes
-       WHERE id = ?`,
-    )
-    .bind(id)
-    .first<AccessCodeRowRecord>();
+async function readAccessCode(db: AppSql, id: string) {
+  const rows = await db<AccessCodeRowRecord[]>`
+    SELECT id, label, code_hash, active, created_at, updated_at,
+      code_text, created_by, last_used_at, use_count
+    FROM access_codes
+    WHERE id = ${id}
+  `;
+  const row = rows[0];
   return row ? fromRow(row) : null;
 }
 
-async function readAccessCodeByHash(db: HistoryD1Database, hash: string) {
-  const hashRow = await db
-    .prepare(`SELECT code_id FROM access_code_hashes WHERE code_hash = ?`)
-    .bind(hash)
-    .first<{ code_id: string }>();
+async function readAccessCodeByHash(db: AppSql, hash: string) {
+  const hashRows = await db<Array<{ code_id: string }>>`
+    SELECT code_id FROM access_code_hashes WHERE code_hash = ${hash}
+  `;
+  const hashRow = hashRows[0];
   if (hashRow?.code_id) {
     return readAccessCode(db, hashRow.code_id);
   }
@@ -160,9 +143,14 @@ export async function resolveAccessCodeUser(env: AccessCodeEnv, code: string) {
       image: null,
     } satisfies AuthUser;
   }
-  if (!normalized || !env.HISTORY_DB) return null;
+  if (!normalized) return null;
 
-  const db = await requireAdminDb(env, "访问码表");
+  let db: AppSql;
+  try {
+    db = await requireAdminDb(env, "访问码表");
+  } catch {
+    return null;
+  }
   const hash = await hashCode(normalized);
   const record = await readAccessCodeByHash(db, hash);
   if (!record || !record.active || record.codeHash !== hash) return null;
@@ -186,15 +174,13 @@ export async function resolveAccessCodeUser(env: AccessCodeEnv, code: string) {
 
 export async function listAccessCodes(env: AccessCodeEnv) {
   const db = await requireAdminDb(env, "访问码表");
-  const result = await db
-    .prepare(
-      `SELECT id, label, code_hash, active, created_at, updated_at,
-        code_text, created_by, last_used_at, use_count
-       FROM access_codes
-       ORDER BY created_at DESC`,
-    )
-    .all<AccessCodeRowRecord>();
-  return (result.results ?? []).map(fromRow).map(toRow);
+  const rows = await db<AccessCodeRowRecord[]>`
+    SELECT id, label, code_hash, active, created_at, updated_at,
+      code_text, created_by, last_used_at, use_count
+    FROM access_codes
+    ORDER BY created_at DESC
+  `;
+  return rows.map(fromRow).map(toRow);
 }
 
 export async function createAccessCodeRecord(

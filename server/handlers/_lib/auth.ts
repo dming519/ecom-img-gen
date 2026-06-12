@@ -1,6 +1,6 @@
 import type { AuthUser } from "@/lib/types";
 import { resolveAccessCodeUser } from "./accessCodes";
-import type { HistoryD1Database } from "./historyStorage";
+import type { PostgresEnv } from "./postgres";
 import { ensureManagedUser, hydrateManagedUser, type UserKvNamespace } from "./users";
 
 const SESSION_COOKIE = "ecomimggen_session";
@@ -8,14 +8,13 @@ const STATE_COOKIE = "ecomimggen_oauth_state";
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const STATE_TTL_SECONDS = 10 * 60;
 
-interface AuthEnv {
+interface AuthEnv extends PostgresEnv {
   AUTH_SECRET?: string;
   AUTH_GITHUB_ID?: string;
   AUTH_GITHUB_SECRET?: string;
   AUTH_GOOGLE_ID?: string;
   AUTH_GOOGLE_SECRET?: string;
   ACCESS_LOGIN_CODE?: string;
-  HISTORY_DB?: HistoryD1Database;
   TASKS_KV?: UserKvNamespace;
 }
 

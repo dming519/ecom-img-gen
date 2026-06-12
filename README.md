@@ -11,7 +11,7 @@
 - Prompt 会展示在页面，用户可以逐条修改标题和 Prompt 内容。
 - 点击生成后按顺序逐张创建图片任务，每张先返回 `taskId`，前端轮询状态，完成一张展示一张。
 - 表单草稿、Prompt 草稿保存在 `localStorage`。
-- 生成历史保存在 Cloudflare D1，图片结果和参考图保存在 Cloudflare R2。
+- 生成历史保存在 Postgres，并通过 Cloudflare Hyperdrive 访问；图片结果和参考图保存在 Cloudflare R2。
 
 ## 技术栈
 
@@ -21,7 +21,8 @@
 - Cloudflare Pages
 - Nuxt Nitro server routes
 - Cloudflare KV
-- Cloudflare D1
+- Cloudflare Hyperdrive
+- Postgres
 - Cloudflare R2
 - Cloudflare Worker
 - Durable Object
@@ -62,7 +63,7 @@ Prompt 生成：
 4. Worker 通过 Durable Object 调用图片接口
 5. Worker 把任务状态和结果写回 KV
 6. 浏览器轮询 `GET /api/generate/status?taskId=...`
-7. 页面逐张展示生成结果，并通过 Nuxt/Nitro API 将历史写入 D1、图片写入 R2
+7. 页面逐张展示生成结果，并通过 Nuxt/Nitro API 将历史写入 Postgres、图片写入 R2
 
 ## 必要环境变量
 
@@ -102,7 +103,7 @@ Secrets：
 
 Pages 和 Worker 需要绑定同一个 `TASKS_KV`。Pages 还需要绑定：
 
-- `HISTORY_DB` D1 数据库
+- `HYPERDRIVE` Postgres 连接
 - `HISTORY_BUCKET` R2 存储桶
 
 ## 部署
@@ -138,7 +139,7 @@ https://eig.easyauto.app
 - Pages: `https://ecom-img-gen.pages.dev`
 - Latest deployment: `https://efb41a5b.ecom-img-gen.pages.dev`
 - KV: `TASKS_KV` / `6a7ee075ab4b4cbe9cfd80ed9fb0b40a`
-- D1: `HISTORY_DB` / `ecom-img-gen-history` / `47b2ddfa-9418-4c60-b3ba-7f71112196c1`
+- Hyperdrive: `HYPERDRIVE` / `ecom-img-gen` / `5331cfb2bd4a45038ac17671fed6d1d8`
 - R2: `HISTORY_BUCKET` / `ecom-img-gen-images`
 - Custom domain: `eig.easyauto.app` 已添加到 Pages，等待 DNS CNAME 验证
 

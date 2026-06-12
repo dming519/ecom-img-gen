@@ -4,15 +4,14 @@ import {
   updateAccessCodeRecord,
 } from "../../_lib/accessCodes";
 import { requireSession } from "../../_lib/auth";
-import type { HistoryD1Database } from "../../_lib/historyStorage";
+import type { PostgresEnv } from "../../_lib/postgres";
 import type { UserKvNamespace } from "../../_lib/users";
 
 interface RequestContext {
   request: Request;
-  env: {
+  env: PostgresEnv & {
     AUTH_SECRET?: string;
     ACCESS_LOGIN_CODE?: string;
-    HISTORY_DB?: HistoryD1Database;
     TASKS_KV?: UserKvNamespace;
   };
 }

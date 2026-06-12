@@ -8,7 +8,7 @@
 还需要：
 
 1. KV
-2. D1
+2. Hyperdrive + Postgres
 3. R2
 4. Durable Object
 5. OAuth 配置
@@ -47,6 +47,7 @@ Token 建议权限：
 ```text
 Account - Cloudflare Pages: Edit
 Account - Workers Scripts: Edit
+Account - Workers Hyperdrive: Edit
 Account - Workers Tail: Read
 Account - Account Settings: Read
 ```
@@ -70,28 +71,33 @@ npx wrangler kv namespace create TASKS_KV
 TASKS_KV = 6a7ee075ab4b4cbe9cfd80ed9fb0b40a
 ```
 
-## 2. 创建历史数据库和图片存储桶
+## 2. 创建历史数据库连接和图片存储桶
 
 ```bash
-npx wrangler d1 create ecom-img-gen-history
 npx wrangler r2 bucket create ecom-img-gen-images
+```
+
+业务数据存到 Postgres，Cloudflare Pages 通过 Hyperdrive 连接数据库。当前项目使用的 Hyperdrive：
+
+```text
+HYPERDRIVE = ecom-img-gen / 5331cfb2bd4a45038ac17671fed6d1d8
+Origin = aws-1-ap-southeast-2.pooler.supabase.com:5432 / postgres
 ```
 
 根目录 `wrangler.toml` 当前已绑定：
 
 ```text
-HISTORY_DB = ecom-img-gen-history / 47b2ddfa-9418-4c60-b3ba-7f71112196c1
+HYPERDRIVE = ecom-img-gen / 5331cfb2bd4a45038ac17671fed6d1d8
 HISTORY_BUCKET = ecom-img-gen-images
 ```
 
-应用 D1 表结构：
+应用 Postgres 表结构：
 
 ```bash
-npx wrangler d1 execute ecom-img-gen-history --remote --file migrations/0001_history_storage.sql
-npx wrangler d1 execute ecom-img-gen-history --remote --file migrations/0002_admin_data_d1.sql
+psql "$POSTGRES_URL" -f migrations/0001_postgres_schema.sql
 ```
 
-Nuxt/Nitro API 首次访问时也会兜底创建同一套表。历史记录元数据写入 D1，参考图、生成图、抠图结果写入 R2；后台用户、访问码、兑换码和用户额度也写入 D1。
+也可以在 Supabase SQL Editor 执行同一个 SQL 文件。Nuxt/Nitro API 首次访问时也会兜底创建同一套表。历史记录元数据写入 Postgres，参考图、生成图、抠图结果写入 R2；后台用户、访问码、兑换码和用户额度也写入 Postgres。
 
 ## 3. 部署 Worker
 
@@ -176,7 +182,7 @@ LLM_MODEL = "gpt-5.5"
 LLM_BASE_URL = "https://sub2api.easyauto.app"
 ```
 
-Pages 需要绑定同一个 `TASKS_KV`，并绑定 `HISTORY_DB` 和 `HISTORY_BUCKET`。同时配置 Secrets：
+Pages 需要绑定同一个 `TASKS_KV`，并绑定 `HYPERDRIVE` 和 `HISTORY_BUCKET`。同时配置 Secrets：
 
 ```text
 AUTH_SECRET

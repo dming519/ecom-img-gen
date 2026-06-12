@@ -3,12 +3,11 @@
 ## Cloudflare 资源
 
 - [x] 已创建/确认 EcomImgGen 使用的 `TASKS_KV`
-- [x] 已创建/确认 EcomImgGen 使用的 `HISTORY_DB` D1 数据库
+- [x] 已创建/确认 EcomImgGen 使用的 `HYPERDRIVE` Postgres 连接
 - [x] 已创建/确认 EcomImgGen 使用的 `HISTORY_BUCKET` R2 存储桶
 - [x] 根目录 `wrangler.toml` 已写入同一个 KV ID
-- [x] 根目录 `wrangler.toml` 已写入 D1/R2 绑定
-- [x] 已执行 `migrations/0001_history_storage.sql` 到远端 D1
-- [x] 已执行 `migrations/0002_admin_data_d1.sql` 到远端 D1
+- [x] 根目录 `wrangler.toml` 已写入 Hyperdrive/R2 绑定
+- [x] Postgres schema 已整理到 `migrations/0001_postgres_schema.sql`
 - [x] `worker/wrangler.toml` 已写入同一个 KV ID
 
 ## Worker
@@ -30,7 +29,7 @@
 - [ ] Build command 是 `npm run build`
 - [ ] Output directory 是 `dist`
 - [ ] 已绑定 `TASKS_KV`
-- [ ] 已绑定 `HISTORY_DB`
+- [ ] 已绑定 `HYPERDRIVE`
 - [ ] 已绑定 `HISTORY_BUCKET`
 - [ ] 已配置 OAuth Secrets
 - [x] 已配置 LLM 文案/识别接口明文变量
@@ -65,7 +64,7 @@
 - [ ] 可修改 Prompt
 - [ ] 点击生成后会逐张创建任务并轮询
 - [ ] 图片完成后逐张展示
-- [ ] 刷新后历史记录从 D1 恢复，图片从 R2 加载
+- [ ] 刷新后历史记录从 Postgres 恢复，图片从 R2 加载
 
 ## 当前待补
 
