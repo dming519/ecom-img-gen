@@ -57,7 +57,7 @@ const activeModeClass = computed(() => (active.value?.imageMode === "main" ? "is
             title="上一张"
             @click="emit('select', Math.max(0, activeIndex - 1))"
         >
-          ‹
+          <span class="stage-preview-nav-chevron is-prev" aria-hidden="true"></span>
         </button>
         <div class="stage-preview-nav-meta">
           <strong>{{ activeIndex + 1 }} / {{ prompts.length }}</strong>
@@ -71,7 +71,7 @@ const activeModeClass = computed(() => (active.value?.imageMode === "main" ? "is
             title="下一张"
             @click="emit('select', Math.min(prompts.length - 1, activeIndex + 1))"
         >
-          ›
+          <span class="stage-preview-nav-chevron is-next" aria-hidden="true"></span>
         </button>
       </div>
       <template v-if="activeSrc">

@@ -2243,20 +2243,35 @@ footer {
 .stage-preview-nav-btn {
   width: 28px;
   height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   background: #fff;
   color: var(--text-sub);
-  font-size: 1.08rem;
-  font-weight: 850;
-  line-height: 1;
+  font-size: 0;
+  line-height: 0;
   transition:
     border-color 0.16s var(--ease),
     background 0.16s var(--ease),
     color 0.16s var(--ease);
+}
+
+.stage-preview-nav-chevron {
+  width: 7px;
+  height: 7px;
+  display: block;
+  border: solid currentColor;
+  border-width: 0 1.7px 1.7px 0;
+}
+
+.stage-preview-nav-chevron.is-prev {
+  transform: rotate(135deg);
+}
+
+.stage-preview-nav-chevron.is-next {
+  transform: rotate(-45deg);
 }
 
 .stage-preview-nav-btn:hover:not(:disabled) {

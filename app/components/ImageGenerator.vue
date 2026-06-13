@@ -58,7 +58,6 @@ const IMAGE_MODE_OPTIONS: Array<{ label: string; value: DetailImageMode }> = [
   {label: "主图", value: "main"},
   {label: "详情图", value: "detail"},
 ]
-const PLATFORM_SEPARATOR = "、"
 const PLATFORM_OPTIONS = [
   {label: "淘宝/天猫", value: "淘宝/天猫", description: "标准货架"},
   {label: "京东", value: "京东", description: "参数信任"},
@@ -66,8 +65,7 @@ const PLATFORM_OPTIONS = [
   {label: "小红书", value: "小红书", description: "种草内容"},
 ] as const
 type TargetPlatformValue = (typeof PLATFORM_OPTIONS)[number]["value"]
-const DEFAULT_TARGET_PLATFORMS: TargetPlatformValue[] = PLATFORM_OPTIONS.map((option) => option.value)
-const DEFAULT_TARGET_PLATFORM_LABEL = DEFAULT_TARGET_PLATFORMS.join(PLATFORM_SEPARATOR)
+const DEFAULT_TARGET_PLATFORM: TargetPlatformValue = "淘宝/天猫"
 const STATUS_LABEL: Record<DetailPromptItem["status"], string> = {
   draft: "待生成",
   queued: "排队中",
@@ -103,7 +101,7 @@ const studioMode = shallowRef<StudioMode>(props.initialMode)
 const productName = shallowRef("")
 const sellingPoints = shallowRef("")
 const imageModes = ref<DetailImageMode[]>(["main", "detail"])
-const targetPlatform = shallowRef(DEFAULT_TARGET_PLATFORM_LABEL)
+const targetPlatform = shallowRef<TargetPlatformValue>(DEFAULT_TARGET_PLATFORM)
 const audience = shallowRef("")
 const priceBand = shallowRef("")
 const proofMaterials = shallowRef("")
@@ -159,19 +157,11 @@ function normalizeImageModes(value: unknown): DetailImageMode[] {
   return ordered.length ? ordered : [...IMAGE_MODE_ORDER]
 }
 
-function normalizeTargetPlatforms(value: unknown): TargetPlatformValue[] {
+function normalizeTargetPlatform(value: unknown): TargetPlatformValue {
   const text = typeof value === "string" ? value : ""
-  const selected = PLATFORM_OPTIONS
-      .filter((option) => text.includes(option.value) || option.value.split("/").some((part) => text.includes(part)))
-      .map((option) => option.value)
-  return selected.length ? selected : [...DEFAULT_TARGET_PLATFORMS]
-}
-
-function writeTargetPlatforms(values: TargetPlatformValue[]) {
-  const ordered = PLATFORM_OPTIONS
-      .map((option) => option.value)
-      .filter((value) => values.includes(value))
-  targetPlatform.value = (ordered.length ? ordered : [...DEFAULT_TARGET_PLATFORMS]).join(PLATFORM_SEPARATOR)
+  return PLATFORM_OPTIONS.find((option) => (
+    text.includes(option.value) || option.value.split("/").some((part) => text.includes(part))
+  ))?.value ?? DEFAULT_TARGET_PLATFORM
 }
 
 function getImageModesCount(modes: DetailImageMode[]) {
@@ -196,8 +186,7 @@ function getPromptSize(item: DetailPromptItem | null | undefined) {
 
 // computed 是派生状态：不直接存数据，而是根据上面的源状态实时计算。
 const imageCount = computed(() => getImageModesCount(imageModes.value))
-const selectedTargetPlatforms = computed(() => normalizeTargetPlatforms(targetPlatform.value))
-const targetPlatformLabel = computed(() => selectedTargetPlatforms.value.join(PLATFORM_SEPARATOR))
+const targetPlatformLabel = computed(() => normalizeTargetPlatform(targetPlatform.value))
 const currentProduct = computed<ProductInput>(() => ({
   name: productName.value.trim(),
   sellingPoints: sellingPoints.value.trim(),
@@ -368,7 +357,7 @@ function cloneProduct(input: ProductInput): ProductInput {
     sellingPoints: input.sellingPoints,
     imageModes: modes,
     imageCount: getImageModesCount(modes),
-    targetPlatform: normalizeTargetPlatforms(input.targetPlatform).join(PLATFORM_SEPARATOR),
+    targetPlatform: normalizeTargetPlatform(input.targetPlatform),
     audience: input.audience ?? "",
     priceBand: input.priceBand ?? "",
     proofMaterials: input.proofMaterials ?? "",
@@ -557,7 +546,7 @@ function handleResetProductInput() {
   productName.value = ""
   sellingPoints.value = ""
   imageModes.value = ["main", "detail"]
-  targetPlatform.value = DEFAULT_TARGET_PLATFORM_LABEL
+  targetPlatform.value = DEFAULT_TARGET_PLATFORM
   audience.value = ""
   priceBand.value = ""
   proofMaterials.value = ""
@@ -596,7 +585,7 @@ async function handleLoadDemoData() {
   productName.value = "玻尿酸多效修护精华液"
   sellingPoints.value = "• 深层补水：玻尿酸微分子渗透技术\n• 修护屏障：神经酰胺+角鲨烷双重修护\n• 适合人群：敏感肌、干燥肌、熟龄肌\n• 规格：30ml 旅行装 / 50ml 标准装\n• 使用感：清爽不油腻，快速吸收"
   imageModes.value = ["main", "detail"]
-  writeTargetPlatforms(["淘宝/天猫", "抖音商城"])
+  targetPlatform.value = "淘宝/天猫"
   audience.value = "敏感肌、干燥肌、换季修护人群，日常护肤和妆前补水场景"
   priceBand.value = "中高客单护肤品"
   proofMaterials.value = "玻尿酸、神经酰胺、角鲨烷成分信息；无真实检测报告编号"
@@ -673,17 +662,12 @@ function handleImageModeToggle(mode: DetailImageMode) {
 }
 
 function isTargetPlatformSelected(platform: TargetPlatformValue) {
-  return selectedTargetPlatforms.value.includes(platform)
+  return targetPlatformLabel.value === platform
 }
 
-function handleTargetPlatformToggle(platform: TargetPlatformValue) {
+function handleTargetPlatformSelect(platform: TargetPlatformValue) {
   if (controlsDisabled.value) return
-  const selected = isTargetPlatformSelected(platform)
-  if (selected && selectedTargetPlatforms.value.length <= 1) return
-  const next = selected
-      ? selectedTargetPlatforms.value.filter((item) => item !== platform)
-      : [...selectedTargetPlatforms.value, platform]
-  writeTargetPlatforms(next)
+  targetPlatform.value = platform
 }
 
 // 长时间生成时尽量保持屏幕唤醒；浏览器不支持也不影响核心功能。
@@ -1008,7 +992,7 @@ function handleSelectHistory(idx: number) {
   sellingPoints.value = item.product.sellingPoints
   const restoredModes = normalizeImageModes(item.product.imageModes)
   imageModes.value = restoredModes
-  targetPlatform.value = normalizeTargetPlatforms(item.product.targetPlatform || targetPlatform.value).join(PLATFORM_SEPARATOR)
+  targetPlatform.value = normalizeTargetPlatform(item.product.targetPlatform || targetPlatform.value)
   audience.value = item.product.audience || ""
   priceBand.value = item.product.priceBand || ""
   proofMaterials.value = item.product.proofMaterials || ""
@@ -1195,7 +1179,7 @@ onMounted(() => {
         sellingPoints.value = draft.sellingPoints || ""
         const restoredModes = normalizeImageModes(draft.imageModes)
         imageModes.value = restoredModes
-        targetPlatform.value = normalizeTargetPlatforms(draft.targetPlatform || targetPlatform.value).join(PLATFORM_SEPARATOR)
+        targetPlatform.value = normalizeTargetPlatform(draft.targetPlatform || targetPlatform.value)
         audience.value = draft.audience || ""
         priceBand.value = draft.priceBand || ""
         proofMaterials.value = draft.proofMaterials || ""
@@ -1501,17 +1485,18 @@ onBeforeUnmount(() => {
             />
             <div class="field-row-head">
               <label>目标平台</label>
-              <span class="field-hint">{{ selectedTargetPlatforms.length }} 个</span>
+              <span class="field-hint">单选</span>
             </div>
-            <div class="platform-toggle-group" role="group" aria-label="目标平台">
+            <div class="platform-toggle-group" role="radiogroup" aria-label="目标平台">
               <button
                   v-for="option in PLATFORM_OPTIONS"
                   :key="option.value"
                   type="button"
+                  role="radio"
                   :class="['platform-toggle', { 'is-active': isTargetPlatformSelected(option.value) }]"
-                  :aria-pressed="isTargetPlatformSelected(option.value)"
-                  :disabled="controlsDisabled || (isTargetPlatformSelected(option.value) && selectedTargetPlatforms.length <= 1)"
-                  @click="handleTargetPlatformToggle(option.value)"
+                  :aria-checked="isTargetPlatformSelected(option.value)"
+                  :disabled="controlsDisabled"
+                  @click="handleTargetPlatformSelect(option.value)"
               >
                 <span>{{ option.label }}</span>
                 <small>{{ option.description }}</small>
