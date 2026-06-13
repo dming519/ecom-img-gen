@@ -1162,7 +1162,7 @@ watch(
 
 .layer-progress-copy strong {
   color: var(--text);
-  font-size: 0.84rem;
+  font-size: 0.875rem;
   line-height: 1.2;
 }
 
@@ -1170,7 +1170,7 @@ watch(
   margin-top: 2px;
   overflow: hidden;
   color: var(--text-sub);
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1179,8 +1179,8 @@ watch(
 .layer-progress-copy em {
   color: var(--accent-ink);
   font-style: normal;
-  font-size: 0.78rem;
-  font-weight: 820;
+  font-size: 0.8125rem;
+  font-weight: 700;
 }
 
 .layer-progress-dot,
@@ -1284,7 +1284,7 @@ watch(
 .layer-row-copy strong {
   overflow: hidden;
   color: var(--text);
-  font-size: 0.88rem;
+  font-size: 0.875rem;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1293,7 +1293,7 @@ watch(
 .layer-row-copy small {
   color: var(--muted);
   margin-top: 5px;
-  font-size: 0.74rem;
+  font-size: 0.75rem;
 }
 
 .layer-list-empty {

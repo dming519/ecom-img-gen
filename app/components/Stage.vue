@@ -38,7 +38,7 @@ const activeModeClass = computed(() => (active.value?.imageMode === "main" ? "is
       <button
         type="button"
         class="btn-secondary"
-        style="min-height: 32px; padding: 6px 12px; font-size: 0.78rem; border-radius: var(--radius-control); cursor: pointer; font-weight: bold;"
+        style="min-height: 32px; padding: 6px 12px; font-size: 0.8125rem; border-radius: var(--radius-control); cursor: pointer; font-weight: bold;"
         @click="emit('load-demo')"
       >
         导入示例数据

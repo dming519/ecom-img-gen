@@ -822,19 +822,19 @@ watch(
                 <button
                   type="button"
                   class="btn-link-preset"
-                  style="font-size: 0.73rem; color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; font-weight: bold; text-decoration: none;"
+                  style="font-size: 0.75rem; color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; font-weight: bold; text-decoration: none;"
                   :disabled="angleControlsDisabled"
                   @click="handleSelectAllAngles"
                 >全选</button>
-                <span style="color: var(--border); font-size: 0.7rem; opacity: 0.5;">|</span>
+                <span style="color: var(--border); font-size: 0.75rem; opacity: 0.5;">|</span>
                 <button
                   type="button"
                   class="btn-link-preset"
-                  style="font-size: 0.73rem; color: var(--text-sub); background: none; border: none; padding: 0; cursor: pointer; font-weight: bold; text-decoration: none;"
+                  style="font-size: 0.75rem; color: var(--text-sub); background: none; border: none; padding: 0; cursor: pointer; font-weight: bold; text-decoration: none;"
                   :disabled="angleControlsDisabled"
                   @click="handleClearAllAngles"
                 >复位</button>
-                <span style="margin-left: 4px; font-weight: 780; color: var(--text-strong);">{{ imageCount }} 张</span>
+                <span style="margin-left: 4px; font-weight: 700; color: var(--text-strong);">{{ imageCount }} 张</span>
               </div>
             </div>
             <div class="param-controls" aria-label="视角">
@@ -911,7 +911,7 @@ watch(
             v-if="completedCount > 0"
             type="button"
             class="btn-ghost"
-            style="min-height: 28px; padding: 4px 10px; font-size: 0.74rem; font-weight: 780; border-radius: var(--radius-control);"
+            style="min-height: 28px; padding: 4px 10px; font-size: 0.75rem; font-weight: 700; border-radius: var(--radius-control);"
             :disabled="downloadAllBusy"
             @click="handleDownloadAll"
           >
@@ -1044,13 +1044,13 @@ watch(
 
 .multi-view-note strong {
   color: var(--teal);
-  font-size: 0.8rem;
+  font-size: 0.8125rem;
 }
 
 .multi-view-note p {
   margin: 0;
   color: var(--text-sub);
-  font-size: 0.78rem;
+  font-size: 0.8125rem;
   line-height: 1.55;
   text-wrap: pretty;
 }
@@ -1125,23 +1125,23 @@ watch(
   border: 1px solid var(--accent);
   border-radius: 7px;
   color: #fff;
-  font-size: 0.78rem;
-  font-weight: 820;
+  font-size: 0.8125rem;
+  font-weight: 700;
   background: var(--accent);
 }
 
 .multi-view-card-head strong {
   overflow: hidden;
   color: var(--text);
-  font-size: 0.8rem;
+  font-size: 0.8125rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .multi-view-card-head em {
   color: var(--text-sub);
-  font-size: 0.72rem;
-  font-weight: 720;
+  font-size: 0.75rem;
+  font-weight: 700;
   font-style: normal;
 }
 
@@ -1229,8 +1229,8 @@ watch(
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.6);
   color: var(--text-sub);
-  font-size: 0.74rem;
-  font-weight: 760;
+  font-size: 0.75rem;
+  font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
   transition:
@@ -1281,7 +1281,7 @@ watch(
 
 :deep(.multi-view-ratio-segments .segment-option) {
   min-height: 34px;
-  font-size: 0.74rem;
+  font-size: 0.75rem;
 }
 
 @media (max-width: 1080px) {

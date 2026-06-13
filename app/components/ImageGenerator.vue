@@ -1671,11 +1671,11 @@ onBeforeUnmount(() => {
             <div v-else-if="!activePrompt" class="empty"
                  style="display: flex; flex-direction: column; align-items: center; gap: 14px; justify-content: center; padding: 32px; text-align: center;">
               <Icon name="spark" style="width: 32px; height: 32px; color: var(--accent); opacity: 0.8;"/>
-              <div style="font-size: 0.84rem; color: var(--text-sub);">还没有图包生成方案。</div>
+              <div style="font-size: 0.875rem; color: var(--text-sub);">还没有图包生成方案。</div>
               <button
                   type="button"
                   class="btn-secondary"
-                  style="min-height: 32px; padding: 6px 12px; font-size: 0.78rem; border-radius: var(--radius-control); cursor: pointer; font-weight: bold;"
+                  style="min-height: 32px; padding: 6px 12px; font-size: 0.8125rem; border-radius: var(--radius-control); cursor: pointer; font-weight: bold;"
                   :disabled="controlsDisabled"
                   @click="handleLoadDemoData"
               >
