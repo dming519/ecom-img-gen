@@ -1666,7 +1666,7 @@ onBeforeUnmount(() => {
             <div v-if="promptBusy" class="busy-card">
               <span class="busy-orbit" aria-hidden="true"/>
               <strong>正在生成图包方案</strong>
-              <p>AI 正在分析商品资料和参考图，预计需要 10-20 秒...</p>
+              <p>AI 正在分析商品资料和参考图，预计需要 60 秒...</p>
             </div>
             <div v-else-if="!activePrompt" class="empty"
                  style="display: flex; flex-direction: column; align-items: center; gap: 14px; justify-content: center; padding: 32px; text-align: center;">
