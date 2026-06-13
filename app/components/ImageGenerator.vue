@@ -1462,173 +1462,190 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="input-rail-body">
-            <div class="form-grid">
-              <div>
-                <label for="product-name">商品名称</label>
-                <input
-                    id="product-name"
-                    v-model="productName"
-                    type="text"
-                    :disabled="controlsDisabled"
-                    placeholder="示例：玻尿酸修护精华液 | 真皮沙发双人座 | 儿童智能手表"
-                >
+            <div class="form-field">
+              <label for="product-name">商品名称</label>
+              <input
+                  id="product-name"
+                  v-model="productName"
+                  type="text"
+                  :disabled="controlsDisabled"
+                  placeholder="示例：玻尿酸修护精华液 | 真皮沙发双人座 | 儿童智能手表"
+              >
+            </div>
+
+            <div class="form-field">
+              <label for="selling-points">核心卖点/功效</label>
+              <textarea
+                  id="selling-points"
+                  v-model="sellingPoints"
+                  class="selling-points"
+                  :disabled="controlsDisabled"
+                  placeholder="请输入商品核心卖点、适用人群、规格信息和购买理由。&#10;&#10;示例：&#10;• 深层补水：玻尿酸微分子渗透技术&#10;• 修护屏障：神经酰胺+角鲨烷双重修护&#10;• 适合人群：敏感肌、干燥肌、熟龄肌&#10;• 规格：30ml 旅行装 / 50ml 标准装&#10;• 使用感：清爽不油腻，快速吸收"
+              />
+            </div>
+
+            <div class="form-field">
+              <div class="field-row-head">
+                <label>目标平台</label>
+                <span class="field-hint">单选</span>
               </div>
-            </div>
-
-            <label for="selling-points">核心卖点/功效</label>
-            <textarea
-                id="selling-points"
-                v-model="sellingPoints"
-                class="selling-points"
-                :disabled="controlsDisabled"
-                placeholder="请输入商品核心卖点、适用人群、规格信息和购买理由。&#10;&#10;示例：&#10;• 深层补水：玻尿酸微分子渗透技术&#10;• 修护屏障：神经酰胺+角鲨烷双重修护&#10;• 适合人群：敏感肌、干燥肌、熟龄肌&#10;• 规格：30ml 旅行装 / 50ml 标准装&#10;• 使用感：清爽不油腻，快速吸收"
-            />
-            <div class="field-row-head">
-              <label>目标平台</label>
-              <span class="field-hint">单选</span>
-            </div>
-            <div class="platform-toggle-group" role="radiogroup" aria-label="目标平台">
-              <button
-                  v-for="option in PLATFORM_OPTIONS"
-                  :key="option.value"
-                  type="button"
-                  role="radio"
-                  :class="['platform-toggle', { 'is-active': isTargetPlatformSelected(option.value) }]"
-                  :aria-checked="isTargetPlatformSelected(option.value)"
-                  :disabled="controlsDisabled"
-                  @click="handleTargetPlatformSelect(option.value)"
-              >
-                <span>{{ option.label }}</span>
-                <small>{{ option.description }}</small>
-              </button>
-            </div>
-            <label for="price-band">价格带</label>
-            <input
-                id="price-band"
-                v-model="priceBand"
-                type="text"
-                :disabled="controlsDisabled"
-                placeholder="示例：平价走量 | 中高客单 | 高端礼品"
-            >
-            <label for="audience">目标人群/购买场景</label>
-            <textarea
-                id="audience"
-                v-model="audience"
-                class="compact-textarea"
-                :disabled="controlsDisabled"
-                placeholder="示例：宝妈囤货、租房收纳、通勤办公、换季敏感肌、送礼场景"
-            />
-
-            <label for="proof-materials">证明素材/资质/评价</label>
-            <textarea
-                id="proof-materials"
-                v-model="proofMaterials"
-                class="compact-textarea"
-                :disabled="controlsDisabled"
-                placeholder="示例：检测报告、材质认证、用户好评关键词、真实参数。没有可留空，系统不会编造硬证据。"
-            />
-
-            <label for="offer">活动/售后/服务承诺</label>
-            <textarea
-                id="offer"
-                v-model="offer"
-                class="compact-textarea"
-                :disabled="controlsDisabled"
-                placeholder="示例：买一送一、7天无理由、赠品、包邮、质保、试用装"
-            />
-
-            <div class="field-row-head">
-              <label for="product-images">商品参考图 <span class="field-hint">(至少1张，最多8张)</span></label>
-              <button
-                  v-if="productImages.length > 0"
-                  type="button"
-                  class="inline-action"
-                  :disabled="controlsDisabled"
-                  @click="productImages = []; productImageIds = []"
-              >
-                清空
-              </button>
-            </div>
-            <div class="product-media">
-              <div
-                  v-for="(src, index) in productImages"
-                  :key="`${src.slice(0, 32)}-${index}`"
-                  class="prompt-thumb"
-              >
+              <div class="platform-toggle-group" role="radiogroup" aria-label="目标平台">
                 <button
+                    v-for="option in PLATFORM_OPTIONS"
+                    :key="option.value"
                     type="button"
-                    class="prompt-thumb-preview"
-                    :aria-label="`查看商品图 ${index + 1}`"
-                    @click="lightboxSrc = src"
-                >
-                  <img :src="src" :alt="`商品图 ${index + 1}`">
-                </button>
-                <button
-                    type="button"
-                    class="prompt-thumb-del"
+                    role="radio"
+                    :class="['platform-toggle', { 'is-active': isTargetPlatformSelected(option.value) }]"
+                    :aria-checked="isTargetPlatformSelected(option.value)"
                     :disabled="controlsDisabled"
-                    :aria-label="`移除商品图 ${index + 1}`"
-                    @click="productImages = productImages.filter((_, i) => i !== index); productImageIds = productImageIds.filter((_, i) => i !== index)"
+                    @click="handleTargetPlatformSelect(option.value)"
                 >
-                  <Icon name="close"/>
+                  <span>{{ option.label }}</span>
+                  <small>{{ option.description }}</small>
                 </button>
               </div>
-              <button
-                  type="button"
-                  class="prompt-upload-tile"
-                  :disabled="controlsDisabled"
-                  @click="fileInputRef?.click()"
-              >
-                <Icon name="upload"/>
-                <span>上传</span>
-              </button>
             </div>
-            <input
-                id="product-images"
-                ref="fileInputRef"
-                name="productImages"
-                type="file"
-                aria-label="上传商品参考图"
-                accept="image/*"
-                multiple
-                hidden
-                @change="event => handleSelectFiles((event.target as HTMLInputElement).files)"
-            >
 
-            <div class="settings-row">
-              <div class="setting-block">
-                <div class="setting-head">
-                  <label>图包类型</label>
-                  <span>{{ imageCount }} 张</span>
-                </div>
-                <div class="image-mode-toggle-group" role="group" aria-label="图包类型">
+            <div class="form-field">
+              <label for="price-band">价格带</label>
+              <input
+                  id="price-band"
+                  v-model="priceBand"
+                  type="text"
+                  :disabled="controlsDisabled"
+                  placeholder="示例：平价走量 | 中高客单 | 高端礼品"
+              >
+            </div>
+
+            <div class="form-field">
+              <label for="audience">目标人群/购买场景</label>
+              <textarea
+                  id="audience"
+                  v-model="audience"
+                  class="compact-textarea"
+                  :disabled="controlsDisabled"
+                  placeholder="示例：宝妈囤货、租房收纳、通勤办公、换季敏感肌、送礼场景"
+              />
+            </div>
+
+            <div class="form-field">
+              <label for="proof-materials">证明素材/资质/评价</label>
+              <textarea
+                  id="proof-materials"
+                  v-model="proofMaterials"
+                  class="compact-textarea"
+                  :disabled="controlsDisabled"
+                  placeholder="示例：检测报告、材质认证、用户好评关键词、真实参数。没有可留空，系统不会编造硬证据。"
+              />
+            </div>
+
+            <div class="form-field">
+              <label for="offer">活动/售后/服务承诺</label>
+              <textarea
+                  id="offer"
+                  v-model="offer"
+                  class="compact-textarea"
+                  :disabled="controlsDisabled"
+                  placeholder="示例：买一送一、7天无理由、赠品、包邮、质保、试用装"
+              />
+            </div>
+
+            <div class="form-field">
+              <div class="field-row-head">
+                <label for="product-images">商品参考图 <span class="field-hint">(至少1张，最多8张)</span></label>
+                <button
+                    v-if="productImages.length > 0"
+                    type="button"
+                    class="inline-action"
+                    :disabled="controlsDisabled"
+                    @click="productImages = []; productImageIds = []"
+                >
+                  清空
+                </button>
+              </div>
+              <div class="product-media">
+                <div
+                    v-for="(src, index) in productImages"
+                    :key="`${src.slice(0, 32)}-${index}`"
+                    class="prompt-thumb"
+                >
                   <button
-                      v-for="option in IMAGE_MODE_OPTIONS"
-                      :key="option.value"
                       type="button"
-                      :class="['image-mode-toggle', { 'is-active': isImageModeSelected(option.value) }]"
-                      :aria-pressed="isImageModeSelected(option.value)"
-                      :disabled="controlsDisabled || (isImageModeSelected(option.value) && imageModes.length <= 1)"
-                      @click="handleImageModeToggle(option.value)"
+                      class="prompt-thumb-preview"
+                      :aria-label="`查看商品图 ${index + 1}`"
+                      @click="lightboxSrc = src"
                   >
-                    <span>{{ option.label }}</span>
-                    <small>{{ getImageModeCount(option.value) }} 张 · {{
-                        getImageModeAspectRatio(option.value)
-                      }}</small>
+                    <img :src="src" :alt="`商品图 ${index + 1}`">
+                  </button>
+                  <button
+                      type="button"
+                      class="prompt-thumb-del"
+                      :disabled="controlsDisabled"
+                      :aria-label="`移除商品图 ${index + 1}`"
+                      @click="productImages = productImages.filter((_, i) => i !== index); productImageIds = productImageIds.filter((_, i) => i !== index)"
+                  >
+                    <Icon name="close"/>
                   </button>
                 </div>
+                <button
+                    type="button"
+                    class="prompt-upload-tile"
+                    :disabled="controlsDisabled"
+                    @click="fileInputRef?.click()"
+                >
+                  <Icon name="upload"/>
+                  <span>上传</span>
+                </button>
               </div>
-              <div class="setting-block">
-                <div class="setting-head">
-                  <label>比例/清晰度</label>
-                  <span>按图包自动 · {{ quality }}</span>
+              <input
+                  id="product-images"
+                  ref="fileInputRef"
+                  name="productImages"
+                  type="file"
+                  aria-label="上传商品参考图"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  @change="event => handleSelectFiles((event.target as HTMLInputElement).files)"
+              >
+            </div>
+
+            <div class="form-field">
+              <div class="settings-row">
+                <div class="setting-block">
+                  <div class="setting-head">
+                    <label>图包类型</label>
+                    <span>{{ imageCount }} 张</span>
+                  </div>
+                  <div class="image-mode-toggle-group" role="group" aria-label="图包类型">
+                    <button
+                        v-for="option in IMAGE_MODE_OPTIONS"
+                        :key="option.value"
+                        type="button"
+                        :class="['image-mode-toggle', { 'is-active': isImageModeSelected(option.value) }]"
+                        :aria-pressed="isImageModeSelected(option.value)"
+                        :disabled="controlsDisabled || (isImageModeSelected(option.value) && imageModes.length <= 1)"
+                        @click="handleImageModeToggle(option.value)"
+                    >
+                      <span>{{ option.label }}</span>
+                      <small>{{ getImageModeCount(option.value) }} 张 · {{
+                          getImageModeAspectRatio(option.value)
+                        }}</small>
+                    </button>
+                  </div>
                 </div>
-                <div class="param-controls" aria-label="清晰度">
-                  <QualitySelector
-                      :value="quality"
-                      :disabled="controlsDisabled"
-                      @change="quality = $event"
-                  />
+                <div class="setting-block">
+                  <div class="setting-head">
+                    <label>比例/清晰度</label>
+                    <span>按图包自动 · {{ quality }}</span>
+                  </div>
+                  <div class="param-controls" aria-label="清晰度">
+                    <QualitySelector
+                        :value="quality"
+                        :disabled="controlsDisabled"
+                        @change="quality = $event"
+                    />
+                  </div>
                 </div>
               </div>
             </div>

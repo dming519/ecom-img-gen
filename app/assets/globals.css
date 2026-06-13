@@ -2404,8 +2404,30 @@ footer {
 
 .input-rail-body {
   min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 12px;
   overflow: auto;
   padding: 12px 14px 10px;
+}
+
+.form-field {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+}
+
+.form-field > label,
+.form-field > .field-row-head {
+  margin: 0;
+}
+
+.form-field > label,
+.field-row-head {
+  min-height: 20px;
+  align-items: center;
 }
 
 .prompt-editor-list {
@@ -3623,15 +3645,70 @@ footer {
   padding: 14px 16px 12px;
 }
 
+.input-rail .form-field input:not([type="file"]) {
+  height: 40px;
+  min-height: 40px;
+  margin: 0;
+}
+
+.input-rail .form-field textarea {
+  margin: 0;
+  resize: none;
+}
+
 .selling-points {
-  height: 190px;
-  min-height: 190px;
-  max-height: 300px;
+  height: 168px;
+  min-height: 168px;
+  max-height: 240px;
 }
 
 .compact-textarea {
-  min-height: 64px;
-  height: 64px;
+  min-height: 66px;
+  height: 66px;
+  max-height: 110px;
+}
+
+.input-rail .platform-toggle-group,
+.input-rail .image-mode-toggle-group {
+  gap: 8px;
+}
+
+.input-rail .platform-toggle {
+  min-height: 46px;
+  padding: 8px 10px;
+}
+
+.input-rail .image-mode-toggle {
+  min-height: 48px;
+}
+
+.input-rail .product-media {
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+  min-height: 78px;
+  margin: 0;
+}
+
+.input-rail .prompt-thumb,
+.input-rail .prompt-upload-tile {
+  min-height: 58px;
+}
+
+.input-rail .settings-row {
+  gap: 10px;
+  margin: 0;
+}
+
+.input-rail .setting-block {
+  min-height: 92px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 10px;
+}
+
+.input-rail .setting-head {
+  min-height: 20px;
+  margin: 0;
 }
 
 .prompt-editor-list {
@@ -5218,5 +5295,42 @@ footer {
 
   .run-status {
     margin-top: 6px;
+  }
+}
+
+@media (max-width: 720px) and (hover: none) and (pointer: coarse) {
+  .input-rail-body {
+    gap: 14px;
+  }
+
+  .form-field {
+    gap: 8px;
+  }
+
+  .input-rail .form-field input:not([type="file"]) {
+    height: 48px;
+    min-height: 48px;
+  }
+
+  .input-rail .selling-points {
+    height: 220px;
+    min-height: 220px;
+    max-height: 320px;
+  }
+
+  .input-rail .compact-textarea {
+    height: 112px;
+    min-height: 112px;
+    max-height: 180px;
+  }
+
+  .input-rail .platform-toggle,
+  .input-rail .image-mode-toggle,
+  .input-rail .segment-option {
+    min-height: 48px;
+  }
+
+  .input-rail .setting-block {
+    min-height: 104px;
   }
 }
