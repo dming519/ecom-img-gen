@@ -17,6 +17,16 @@ import {
   dbPutProductImage,
 } from "@/lib/db"
 import {resolveImageSize} from "@/lib/imageOptions"
+import {
+  createProductMaterialsMarkdown,
+  convertProductMaterialFile,
+  getProductMaterialKind,
+  getProductMaterialKindLabel,
+  MAX_PRODUCT_MATERIAL_BYTES,
+  MAX_PRODUCT_MATERIAL_FILES,
+  MAX_PRODUCT_MATERIAL_TOTAL_CHARS,
+  PRODUCT_MATERIAL_ACCEPT,
+} from "@/lib/productMaterials"
 import type {
   AspectRatio,
   AuthSession,
@@ -24,6 +34,8 @@ import type {
   DetailPromptItem,
   HistoryItem,
   ImageQuality,
+  ProductMaterialFile,
+  ProductMaterialKind,
   ProductInput,
 } from "@/lib/types"
 import AdminPanel from "./AdminPanel.vue"
@@ -40,6 +52,13 @@ import Stage from "./Stage.vue"
 
 type StudioMode = "image" | "cutout" | "multi-view" | "edit" | "layer"
 type WakeLockSentinelLike = { release: () => Promise<void> }
+type ProductMaterialStatus = "pending" | "converting" | "converted" | "failed"
+type ProductMaterialUpload = Omit<ProductMaterialFile, "markdown"> & {
+  file?: File
+  markdown?: string
+  status: ProductMaterialStatus
+  error?: string
+}
 
 const props = withDefaults(defineProps<{
   initialMode?: StudioMode
@@ -52,6 +71,7 @@ const MAX_PRODUCT_IMAGE_EDGE = 1800
 const PRODUCT_IMAGE_QUALITY = 0.9
 const MAX_PROMPT_IMAGE_CHARS = 1_500_000
 const MAX_PROMPT_IMAGE_TOTAL_CHARS = 6_000_000
+const MAX_STYLE_REFERENCE_IMAGES = 4
 const DRAFT_KEY = "ecomimggen_draft_v5"
 const IMAGE_QUALITY_VALUES: ImageQuality[] = ["1K", "2K", "4K"]
 const IMAGE_MODE_ORDER: DetailImageMode[] = ["main", "detail"]
@@ -84,9 +104,12 @@ interface DraftState {
   priceBand?: string
   proofMaterials?: string
   offer?: string
+  extraRequirements?: string
   prompts: DetailPromptItem[]
   quality?: ImageQuality
   productImageIds?: string[]
+  styleReferenceImageIds?: string[]
+  productMaterials?: ProductMaterialFile[]
 }
 
 // 自定义错误类型：用来区分“用户主动取消”和“真正生成失败”。
@@ -107,8 +130,12 @@ const audience = shallowRef("")
 const priceBand = shallowRef("")
 const proofMaterials = shallowRef("")
 const offer = shallowRef("")
+const extraRequirements = shallowRef("")
 const productImages = ref<string[]>([])
 const productImageIds = ref<string[]>([])
+const styleReferenceImages = ref<string[]>([])
+const styleReferenceImageIds = ref<string[]>([])
+const productMaterials = ref<ProductMaterialUpload[]>([])
 const quality = shallowRef<ImageQuality>("1K")
 const prompts = ref<DetailPromptItem[]>([])
 const history = ref<HistoryItem[]>([])
@@ -121,6 +148,8 @@ const accessCode = shallowRef("")
 const accessBusy = shallowRef(false)
 const promptBusy = shallowRef(false)
 const imageBusy = shallowRef(false)
+const materialBusy = shallowRef(false)
+const secondaryProductDetailsOpen = shallowRef(false)
 const draftLoaded = shallowRef(false)
 const adminOpen = shallowRef(false)
 const error = shallowRef<string | null>(null)
@@ -129,6 +158,7 @@ const avatarFailed = shallowRef(false)
 
 // DOM/浏览器能力引用：这些值不是普通业务数据，只在特定操作时使用。
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const styleFileInputRef = ref<HTMLInputElement | null>(null)
 const authPopoverRef = ref<HTMLDivElement | null>(null)
 const wakeLockRef = shallowRef<WakeLockSentinelLike | null>(null)
 const imageAbortRef = shallowRef<AbortController | null>(null)
@@ -185,9 +215,33 @@ function getPromptSize(item: DetailPromptItem | null | undefined) {
   return resolveImageSize(getPromptAspectRatio(item))
 }
 
+function toConvertedProductMaterial(item: ProductMaterialUpload): ProductMaterialFile | null {
+  if (item.status !== "converted" || !item.markdown) return null
+  return {
+    id: item.id,
+    name: item.name,
+    mimeType: item.mimeType,
+    size: item.size,
+    kind: item.kind,
+    markdown: item.markdown,
+  }
+}
+
+function restoreProductMaterials(materials: ProductMaterialFile[] | undefined): ProductMaterialUpload[] {
+  return (materials ?? []).map((material) => ({
+    ...material,
+    status: "converted" as const,
+  }))
+}
+
 // computed 是派生状态：不直接存数据，而是根据上面的源状态实时计算。
 const imageCount = computed(() => getImageModesCount(imageModes.value))
 const targetPlatformLabel = computed(() => normalizeTargetPlatform(targetPlatform.value))
+const convertedProductMaterials = computed<ProductMaterialFile[]>(() =>
+    productMaterials.value
+        .map((item) => toConvertedProductMaterial(item))
+        .filter((item): item is ProductMaterialFile => !!item),
+)
 const currentProduct = computed<ProductInput>(() => ({
   name: productName.value.trim(),
   sellingPoints: sellingPoints.value.trim(),
@@ -198,9 +252,28 @@ const currentProduct = computed<ProductInput>(() => ({
   priceBand: priceBand.value.trim(),
   proofMaterials: proofMaterials.value.trim(),
   offer: offer.value.trim(),
+  extraRequirements: extraRequirements.value.trim(),
   productImages: productImages.value,
   productImageIds: productImageIds.value,
+  styleReferenceImages: styleReferenceImages.value,
+  styleReferenceImageIds: styleReferenceImageIds.value,
+  productMaterials: convertedProductMaterials.value,
 }))
+const productMaterialsMarkdown = computed(() => createProductMaterialsMarkdown(convertedProductMaterials.value))
+const hasProductUploads = computed(() => productImages.value.length > 0 || productMaterials.value.length > 0)
+const productUploadStatusLabel = computed(() => {
+  const imageText = productImages.value.length ? `${productImages.value.length} 张图片` : "未上传图片"
+  const materialText = productMaterials.value.length ? `${productMaterials.value.length} 份资料` : ""
+  const styleText = styleReferenceImages.value.length ? `${styleReferenceImages.value.length} 张风格参考` : ""
+  return [imageText, materialText, styleText].filter(Boolean).join(" · ")
+})
+const secondaryProductInfoCount = computed(() =>
+    [priceBand.value, audience.value, proofMaterials.value, offer.value]
+        .filter((value) => value.trim()).length,
+)
+const secondaryProductInfoLabel = computed(() =>
+    secondaryProductInfoCount.value ? `已填写 ${secondaryProductInfoCount.value} 项` : "可选",
+)
 const generationLabel = computed(() =>
     `${getImageModesLabel(imageModes.value)} · 共 ${imageCount.value} 张 · ${quality.value}`,
 )
@@ -214,6 +287,7 @@ const controlsDisabled = computed(
         accessBusy.value ||
         promptBusy.value ||
         imageBusy.value ||
+        materialBusy.value ||
         !authenticated.value,
 )
 const providerLabel = computed(() =>
@@ -363,8 +437,12 @@ function cloneProduct(input: ProductInput): ProductInput {
     priceBand: input.priceBand ?? "",
     proofMaterials: input.proofMaterials ?? "",
     offer: input.offer ?? "",
+    extraRequirements: input.extraRequirements ?? "",
     productImages: [...input.productImages],
     productImageIds: input.productImageIds ? [...input.productImageIds] : [],
+    styleReferenceImages: input.styleReferenceImages ? [...input.styleReferenceImages] : [],
+    styleReferenceImageIds: input.styleReferenceImageIds ? [...input.styleReferenceImageIds] : [],
+    productMaterials: input.productMaterials?.map((item) => ({...item})) ?? [],
   }
 }
 
@@ -415,6 +493,31 @@ async function ensureProductImageIds() {
   if (!ids.length) throw new Error("请至少上传一张商品参考图。")
   if (ids.length !== images.length) throw new Error("商品参考图保存失败，请重新上传后再试。")
   productImageIds.value = ids
+  return ids
+}
+
+async function ensureStyleReferenceImageIds() {
+  const images = styleReferenceImages.value.slice(0, MAX_STYLE_REFERENCE_IMAGES)
+  const nextIds = styleReferenceImageIds.value.slice(0, images.length)
+  const missing = images.map((image, index) => ({image, index})).filter((item) => !nextIds[item.index])
+  const dataUrls = await Promise.all(missing.map((item) => imageSrcToDataUrl(item.image)))
+  const validDataUrls = dataUrls
+      .filter((image) => image.startsWith("data:image/"))
+      .filter((image) => image.length <= MAX_PROMPT_IMAGE_CHARS)
+  const total = validDataUrls.reduce((sum, image) => sum + image.length, 0)
+  if (missing.length && validDataUrls.length !== missing.length) {
+    throw new Error("风格参考图过大或格式无效，请重新上传图片。")
+  }
+  if (total > MAX_PROMPT_IMAGE_TOTAL_CHARS) {
+    throw new Error("风格参考图总大小过大，请减少图片数量或重新上传后再生成。")
+  }
+  const uploadedIds = await Promise.all(validDataUrls.map((image) => dbPutProductImage(image)))
+  missing.forEach((item, index) => {
+    nextIds[item.index] = uploadedIds[index] ?? ""
+  })
+  const ids = nextIds.filter(Boolean).slice(0, images.length)
+  if (ids.length !== images.length) throw new Error("风格参考图保存失败，请重新上传后再试。")
+  styleReferenceImageIds.value = ids
   return ids
 }
 
@@ -483,6 +586,9 @@ async function persistHistory(item: HistoryItem) {
     if (item.product.productImageIds?.length) {
       productImageIds.value = item.product.productImageIds
     }
+    if (item.product.styleReferenceImageIds?.length) {
+      styleReferenceImageIds.value = item.product.styleReferenceImageIds
+    }
   } catch (event) {
     console.warn("历史记录写入失败:", event)
   }
@@ -516,28 +622,198 @@ function updateSessionCredits(result: {
   }
 }
 
-// 处理参考图上传：过滤非图片/超大文件，并把可用图片压缩进 productImages。
+function formatMaterialSize(size: number) {
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)}MB`
+  if (size >= 1024) return `${Math.ceil(size / 1024)}KB`
+  return `${size}B`
+}
+
+function createProductMaterialUploadId() {
+  return crypto.randomUUID?.() ?? `material-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function createPendingProductMaterial(file: File, kind: ProductMaterialKind): ProductMaterialUpload {
+  return {
+    id: createProductMaterialUploadId(),
+    name: file.name,
+    mimeType: file.type || "application/octet-stream",
+    size: file.size,
+    kind,
+    file,
+    status: "pending",
+  }
+}
+
+function getProductMaterialStatusLabel(status: ProductMaterialStatus) {
+  if (status === "converted") return "已转 MD"
+  if (status === "converting") return "转换中"
+  if (status === "failed") return "转换失败"
+  return "待转换"
+}
+
+function getProductMaterialTitle(material: ProductMaterialUpload) {
+  const status = getProductMaterialStatusLabel(material.status)
+  const errorText = material.error ? ` · ${material.error}` : ""
+  return `${material.name} · ${formatMaterialSize(material.size)} · ${status}${errorText}`
+}
+
+function updateProductMaterial(id: string, patch: Partial<ProductMaterialUpload>) {
+  productMaterials.value = productMaterials.value.map((item) =>
+      item.id === id ? {...item, ...patch} : item,
+  )
+}
+
+function handleClearProductUploads() {
+  productImages.value = []
+  productImageIds.value = []
+  productMaterials.value = []
+}
+
+function handleClearStyleReferences() {
+  styleReferenceImages.value = []
+  styleReferenceImageIds.value = []
+}
+
+function handleRemoveProductImage(index: number) {
+  productImages.value = productImages.value.filter((_, imageIndex) => imageIndex !== index)
+  productImageIds.value = productImageIds.value.filter((_, imageIndex) => imageIndex !== index)
+}
+
+function handleRemoveProductMaterial(id: string) {
+  productMaterials.value = productMaterials.value.filter((item) => item.id !== id)
+}
+
+function handleRemoveStyleReferenceImage(index: number) {
+  styleReferenceImages.value = styleReferenceImages.value.filter((_, imageIndex) => imageIndex !== index)
+  styleReferenceImageIds.value = styleReferenceImageIds.value.filter((_, imageIndex) => imageIndex !== index)
+}
+
+// 处理商品资料上传：图片进入参考图链路，文档类文件先暂存，点击生成方案时再转 Markdown。
 async function handleSelectFiles(files: FileList | null) {
   if (!files?.length) return
   error.value = null
   const accepted: string[] = []
-  for (const file of Array.from(files)) {
-    if (!file.type.startsWith("image/")) {
-      error.value = `已忽略非图片文件：${file.name}`
-      continue
+  const acceptedMaterials: ProductMaterialUpload[] = []
+  const messages: string[] = []
+  materialBusy.value = true
+  try {
+    for (const file of Array.from(files)) {
+      if (file.type.startsWith("image/")) {
+        if (file.size > MAX_IMAGE_BYTES) {
+          messages.push(`图片过大（>8MB）已忽略：${file.name}`)
+          continue
+        }
+        try {
+          accepted.push(await fileToCompressedDataURL(file))
+        } catch (event) {
+          console.warn("读取图片失败:", event)
+          messages.push(`图片读取失败：${file.name}`)
+        }
+        continue
+      }
+
+      const kind = getProductMaterialKind(file)
+      if (!kind) {
+        messages.push(`已忽略不支持的商品资料：${file.name}`)
+        continue
+      }
+      if (file.size > MAX_PRODUCT_MATERIAL_BYTES) {
+        messages.push(`商品资料文件过大（>25MB）已忽略：${file.name}`)
+        continue
+      }
+      if (productMaterials.value.length + acceptedMaterials.length >= MAX_PRODUCT_MATERIAL_FILES) {
+        messages.push(`商品资料最多上传 ${MAX_PRODUCT_MATERIAL_FILES} 个文件，已忽略：${file.name}`)
+        continue
+      }
+      acceptedMaterials.push(createPendingProductMaterial(file, kind))
     }
-    if (file.size > MAX_IMAGE_BYTES) {
-      error.value = `图片过大（>8MB）已忽略：${file.name}`
-      continue
-    }
-    try {
-      accepted.push(await fileToCompressedDataURL(file))
-    } catch (event) {
-      console.warn("读取图片失败:", event)
-    }
+  } finally {
+    materialBusy.value = false
   }
   if (accepted.length) productImages.value = [...productImages.value, ...accepted].slice(0, 8)
+  if (acceptedMaterials.length) productMaterials.value = [...productMaterials.value, ...acceptedMaterials]
+  if (messages.length) error.value = messages[messages.length - 1] ?? null
   if (fileInputRef.value) fileInputRef.value.value = ""
+}
+
+async function handleSelectStyleReferenceFiles(files: FileList | null) {
+  if (!files?.length) return
+  error.value = null
+  const accepted: string[] = []
+  const messages: string[] = []
+  materialBusy.value = true
+  try {
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) {
+        messages.push(`已忽略非图片风格参考：${file.name}`)
+        continue
+      }
+      if (styleReferenceImages.value.length + accepted.length >= MAX_STYLE_REFERENCE_IMAGES) {
+        messages.push(`风格参考最多上传 ${MAX_STYLE_REFERENCE_IMAGES} 张，已忽略：${file.name}`)
+        continue
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        messages.push(`风格参考图过大（>8MB）已忽略：${file.name}`)
+        continue
+      }
+      try {
+        accepted.push(await fileToCompressedDataURL(file))
+      } catch (event) {
+        console.warn("读取风格参考图失败:", event)
+        messages.push(`风格参考图读取失败：${file.name}`)
+      }
+    }
+  } finally {
+    materialBusy.value = false
+  }
+  if (accepted.length) {
+    styleReferenceImages.value = [...styleReferenceImages.value, ...accepted].slice(0, MAX_STYLE_REFERENCE_IMAGES)
+  }
+  if (messages.length) error.value = messages[messages.length - 1] ?? null
+  if (styleFileInputRef.value) styleFileInputRef.value.value = ""
+}
+
+async function ensureProductMaterialsConverted() {
+  const pendingMaterials = productMaterials.value.filter((item) => item.status !== "converted")
+  if (!pendingMaterials.length) return productMaterialsMarkdown.value
+
+  materialBusy.value = true
+  try {
+    let totalMarkdownLength = convertedProductMaterials.value.reduce(
+        (sum, item) => sum + item.markdown.length,
+        0,
+    )
+    for (const material of pendingMaterials) {
+      if (!material.file) {
+        const message = `商品资料 ${material.name} 需要重新上传后才能转换。`
+        updateProductMaterial(material.id, {status: "failed", error: message})
+        throw new Error(message)
+      }
+
+      updateProductMaterial(material.id, {status: "converting", error: undefined})
+      try {
+        const converted = await convertProductMaterialFile(material.file)
+        if (totalMarkdownLength + converted.markdown.length > MAX_PRODUCT_MATERIAL_TOTAL_CHARS) {
+          throw new Error(`商品资料文本过长，请移除或缩短：${material.name}`)
+        }
+        totalMarkdownLength += converted.markdown.length
+        updateProductMaterial(material.id, {
+          file: undefined,
+          markdown: converted.markdown,
+          status: "converted",
+          error: undefined,
+        })
+      } catch (event) {
+        const message = event instanceof Error ? event.message : String(event)
+        updateProductMaterial(material.id, {status: "failed", error: message})
+        throw new Error(message)
+      }
+    }
+  } finally {
+    materialBusy.value = false
+  }
+
+  return productMaterialsMarkdown.value
 }
 
 // 重置当前编辑中的商品资料和文案，不清空云端历史。
@@ -552,13 +828,18 @@ function handleResetProductInput() {
   priceBand.value = ""
   proofMaterials.value = ""
   offer.value = ""
+  extraRequirements.value = ""
   productImages.value = []
   productImageIds.value = []
+  styleReferenceImages.value = []
+  styleReferenceImageIds.value = []
+  productMaterials.value = []
   quality.value = "1K"
   prompts.value = []
   activePromptIdx.value = 0
   activeHistoryIdx.value = -1
   if (fileInputRef.value) fileInputRef.value.value = ""
+  if (styleFileInputRef.value) styleFileInputRef.value.value = ""
 }
 
 // 前端先做基础校验，能把明显问题拦在接口请求之前。
@@ -576,7 +857,7 @@ function validateProduct() {
     return false
   }
   if (!productImages.value.length) {
-    error.value = "请至少上传一张商品参考图。系统已禁止纯文案生成，以保证商品外观一致。"
+    error.value = "请至少上传一张商品图片作为参考图。系统已禁止纯文案生成，以保证商品外观一致。"
     return false
   }
   return true
@@ -591,7 +872,11 @@ async function handleLoadDemoData() {
   priceBand.value = "中高客单护肤品"
   proofMaterials.value = "玻尿酸、神经酰胺、角鲨烷成分信息；无真实检测报告编号"
   offer.value = "旅行装可选，强调安心试用和售后咨询"
+  extraRequirements.value = ""
   quality.value = "1K"
+  productMaterials.value = []
+  styleReferenceImages.value = []
+  styleReferenceImageIds.value = []
   const canvas = document.createElement("canvas")
   canvas.width = 900
   canvas.height = 1200
@@ -619,6 +904,8 @@ async function handleGeneratePrompts() {
   if (!validateProduct()) return
   promptBusy.value = true
   try {
+    const materialsMarkdown = await ensureProductMaterialsConverted()
+    const styleReferenceIds = await ensureStyleReferenceImageIds()
     const result = await generateDetailPrompts({
       name: productName.value.trim(),
       sellingPoints: sellingPoints.value.trim(),
@@ -628,7 +915,10 @@ async function handleGeneratePrompts() {
       priceBand: priceBand.value.trim(),
       proofMaterials: proofMaterials.value.trim(),
       offer: offer.value.trim(),
+      extraRequirements: extraRequirements.value.trim(),
       productImageIds: await ensureProductImageIds(),
+      styleReferenceImageIds: styleReferenceIds,
+      productMaterialsMarkdown: materialsMarkdown,
     })
     prompts.value = result.prompts.map((item, index) =>
         createPromptItem(index, item.title, item.promptId, item.prompt, item.imageMode),
@@ -998,14 +1288,25 @@ function handleSelectHistory(idx: number) {
   priceBand.value = item.product.priceBand || ""
   proofMaterials.value = item.product.proofMaterials || ""
   offer.value = item.product.offer || ""
+  extraRequirements.value = item.product.extraRequirements || ""
   productImageIds.value = item.product.productImageIds ?? []
   productImages.value = item.product.productImages
+  productMaterials.value = restoreProductMaterials(item.product.productMaterials)
   if (item.product.productImageIds?.length) {
     dbGetProductImages(item.product.productImageIds)
         .then((images) => {
           productImages.value = images.slice(0, 8)
         })
         .catch((event) => console.warn("商品参考图恢复失败:", event))
+  }
+  styleReferenceImageIds.value = item.product.styleReferenceImageIds ?? []
+  styleReferenceImages.value = item.product.styleReferenceImages ?? []
+  if (item.product.styleReferenceImageIds?.length) {
+    dbGetProductImages(item.product.styleReferenceImageIds)
+        .then((images) => {
+          styleReferenceImages.value = images.slice(0, MAX_STYLE_REFERENCE_IMAGES)
+        })
+        .catch((event) => console.warn("风格参考图恢复失败:", event))
   }
   prompts.value = item.prompts.map((prompt) => resetInterruptedPrompt(prompt))
   if (item.generation?.quality && IMAGE_QUALITY_VALUES.includes(item.generation.quality)) {
@@ -1137,9 +1438,12 @@ watch(
       priceBand,
       proofMaterials,
       offer,
+      extraRequirements,
       prompts,
       quality,
       productImageIds,
+      styleReferenceImageIds,
+      productMaterials,
     ],
     () => {
       if (!draftLoaded.value || studioMode.value !== "image" || !import.meta.client) return
@@ -1153,9 +1457,12 @@ watch(
           priceBand: priceBand.value,
           proofMaterials: proofMaterials.value,
           offer: offer.value,
+          extraRequirements: extraRequirements.value,
           prompts: prompts.value,
           quality: quality.value,
           productImageIds: productImageIds.value,
+          styleReferenceImageIds: styleReferenceImageIds.value,
+          productMaterials: convertedProductMaterials.value,
         }
         localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
       } catch {
@@ -1185,6 +1492,10 @@ onMounted(() => {
         priceBand.value = draft.priceBand || ""
         proofMaterials.value = draft.proofMaterials || ""
         offer.value = draft.offer || ""
+        extraRequirements.value = draft.extraRequirements || ""
+        productMaterials.value = restoreProductMaterials(
+            Array.isArray(draft.productMaterials) ? draft.productMaterials : undefined,
+        )
         prompts.value = Array.isArray(draft.prompts)
             ? draft.prompts.map((prompt) => resetInterruptedPrompt(prompt))
             : []
@@ -1198,6 +1509,14 @@ onMounted(() => {
                 productImages.value = images.slice(0, 8)
               })
               .catch((event) => console.warn("商品参考图恢复失败:", event))
+        }
+        if (Array.isArray(draft.styleReferenceImageIds) && draft.styleReferenceImageIds.length) {
+          styleReferenceImageIds.value = draft.styleReferenceImageIds
+          dbGetProductImages(draft.styleReferenceImageIds)
+              .then((images) => {
+                styleReferenceImages.value = images.slice(0, MAX_STYLE_REFERENCE_IMAGES)
+              })
+              .catch((event) => console.warn("风格参考图恢复失败:", event))
         }
       }
     } catch {
@@ -1438,7 +1757,7 @@ onBeforeUnmount(() => {
     <template v-if="studioMode === 'image'">
       <div class="run-status" aria-label="当前任务状态">
         <span>{{ prompts.length ? `${prompts.length} 个方案` : "方案未生成" }}</span>
-        <span>{{ productImages.length ? `${productImages.length} 张参考图` : "未上传参考图" }}</span>
+        <span>{{ productUploadStatusLabel }}</span>
         <span>{{ creditLabel }}</span>
         <span>{{ generationLabel }}</span>
         <span v-if="imageBusy" class="status-generating">
@@ -1486,80 +1805,25 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="form-field">
-              <div class="field-row-head">
-                <label>目标平台</label>
-                <span class="field-hint">单选</span>
-              </div>
-              <div class="platform-toggle-group" role="radiogroup" aria-label="目标平台">
-                <button
-                    v-for="option in PLATFORM_OPTIONS"
-                    :key="option.value"
-                    type="button"
-                    role="radio"
-                    :class="['platform-toggle', { 'is-active': isTargetPlatformSelected(option.value) }]"
-                    :aria-checked="isTargetPlatformSelected(option.value)"
-                    :disabled="controlsDisabled"
-                    @click="handleTargetPlatformSelect(option.value)"
-                >
-                  <span>{{ option.label }}</span>
-                  <small>{{ option.description }}</small>
-                </button>
-              </div>
-            </div>
-
-            <div class="form-field">
-              <label for="price-band">价格带</label>
-              <input
-                  id="price-band"
-                  v-model="priceBand"
-                  type="text"
-                  :disabled="controlsDisabled"
-                  placeholder="示例：平价走量 | 中高客单 | 高端礼品"
-              >
-            </div>
-
-            <div class="form-field">
-              <label for="audience">目标人群/购买场景</label>
+              <label for="extra-requirements">补充要求</label>
               <textarea
-                  id="audience"
-                  v-model="audience"
+                  id="extra-requirements"
+                  v-model="extraRequirements"
                   class="compact-textarea"
                   :disabled="controlsDisabled"
-                  placeholder="示例：宝妈囤货、租房收纳、通勤办公、换季敏感肌、送礼场景"
-              />
-            </div>
-
-            <div class="form-field">
-              <label for="proof-materials">证明素材/资质/评价</label>
-              <textarea
-                  id="proof-materials"
-                  v-model="proofMaterials"
-                  class="compact-textarea"
-                  :disabled="controlsDisabled"
-                  placeholder="示例：检测报告、材质认证、用户好评关键词、真实参数。没有可留空，系统不会编造硬证据。"
-              />
-            </div>
-
-            <div class="form-field">
-              <label for="offer">活动/售后/服务承诺</label>
-              <textarea
-                  id="offer"
-                  v-model="offer"
-                  class="compact-textarea"
-                  :disabled="controlsDisabled"
-                  placeholder="示例：买一送一、7天无理由、赠品、包邮、质保、试用装"
+                  placeholder="示例：整体更高级、少文字、突出礼盒感、避免真人出镜、主色更接近品牌蓝"
               />
             </div>
 
             <div class="form-field">
               <div class="field-row-head">
-                <label for="product-images">商品参考图 <span class="field-hint">(至少1张，最多8张)</span></label>
+                <label for="product-images">商品素材 <span class="field-hint">(至少1张图片，资料文件可选)</span></label>
                 <button
-                    v-if="productImages.length > 0"
+                    v-if="hasProductUploads"
                     type="button"
                     class="inline-action"
                     :disabled="controlsDisabled"
-                    @click="productImages = []; productImageIds = []"
+                    @click="handleClearProductUploads"
                 >
                   清空
                 </button>
@@ -1583,7 +1847,7 @@ onBeforeUnmount(() => {
                       class="prompt-thumb-del"
                       :disabled="controlsDisabled"
                       :aria-label="`移除商品图 ${index + 1}`"
-                      @click="productImages = productImages.filter((_, i) => i !== index); productImageIds = productImageIds.filter((_, i) => i !== index)"
+                      @click="handleRemoveProductImage(index)"
                   >
                     <Icon name="close"/>
                   </button>
@@ -1595,21 +1859,195 @@ onBeforeUnmount(() => {
                     @click="fileInputRef?.click()"
                 >
                   <Icon name="upload"/>
-                  <span>上传</span>
+                  <span>{{ materialBusy ? "转换中" : "上传" }}</span>
                 </button>
               </div>
+              <details class="material-file-fold">
+                <summary class="material-file-summary">
+                  <span>资料文件</span>
+                  <span>{{ productMaterials.length ? `${productMaterials.length} 份` : "可选" }}</span>
+                </summary>
+                <div v-if="productMaterials.length" class="material-file-list">
+                  <div
+                      v-for="material in productMaterials"
+                      :key="material.id"
+                      :class="['product-material-chip', `is-${material.status}`]"
+                      :title="getProductMaterialTitle(material)"
+                  >
+                    <span class="product-material-type">{{ getProductMaterialKindLabel(material.kind) }}</span>
+                    <strong>{{ material.name }}</strong>
+                    <button
+                        type="button"
+                        class="product-material-del"
+                        :disabled="controlsDisabled"
+                        :aria-label="`移除商品资料 ${material.name}`"
+                        @click="handleRemoveProductMaterial(material.id)"
+                    >
+                      <Icon name="close"/>
+                    </button>
+                  </div>
+                </div>
+                <p v-else class="material-file-empty">上传 PDF、Word、Excel 等资料后会显示在这里。</p>
+              </details>
+              <p class="field-help">支持图片、PDF、PPTX、DOCX、Excel、HTML、CSV、JSON、XML；非图片资料会先转换为 Markdown 后参与方案生成。</p>
               <input
                   id="product-images"
                   ref="fileInputRef"
                   name="productImages"
                   type="file"
-                  aria-label="上传商品参考图"
-                  accept="image/*"
+                  aria-label="上传商品素材"
+                  :accept="PRODUCT_MATERIAL_ACCEPT"
                   multiple
                   hidden
                   @change="event => handleSelectFiles((event.target as HTMLInputElement).files)"
               >
             </div>
+
+            <div class="form-field">
+              <div class="field-row-head">
+                <label for="style-reference-images">风格参考 <span class="field-hint">(可选，最多4张)</span></label>
+                <button
+                    v-if="styleReferenceImages.length > 0"
+                    type="button"
+                    class="inline-action"
+                    :disabled="controlsDisabled"
+                    @click="handleClearStyleReferences"
+                >
+                  清空
+                </button>
+              </div>
+              <div class="product-media style-reference-media">
+                <div
+                    v-for="(src, index) in styleReferenceImages"
+                    :key="`${src.slice(0, 32)}-${index}`"
+                    class="prompt-thumb"
+                >
+                  <button
+                      type="button"
+                      class="prompt-thumb-preview"
+                      :aria-label="`查看风格参考 ${index + 1}`"
+                      @click="lightboxSrc = src"
+                  >
+                    <img :src="src" :alt="`风格参考 ${index + 1}`">
+                  </button>
+                  <button
+                      type="button"
+                      class="prompt-thumb-del"
+                      :disabled="controlsDisabled"
+                      :aria-label="`移除风格参考 ${index + 1}`"
+                      @click="handleRemoveStyleReferenceImage(index)"
+                  >
+                    <Icon name="close"/>
+                  </button>
+                </div>
+                <button
+                    type="button"
+                    class="prompt-upload-tile"
+                    :disabled="controlsDisabled || styleReferenceImages.length >= MAX_STYLE_REFERENCE_IMAGES"
+                    @click="styleFileInputRef?.click()"
+                >
+                  <Icon name="upload"/>
+                  <span>上传</span>
+                </button>
+              </div>
+              <p class="field-help">风格参考只用于学习构图、光影、配色和排版气质，不作为商品外观事实来源。</p>
+              <input
+                  id="style-reference-images"
+                  ref="styleFileInputRef"
+                  name="styleReferenceImages"
+                  type="file"
+                  aria-label="上传风格参考图"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  @change="event => handleSelectStyleReferenceFiles((event.target as HTMLInputElement).files)"
+              >
+            </div>
+
+            <div class="form-field">
+              <div class="field-row-head">
+                <label>高级选项</label>
+                <button
+                    type="button"
+                    class="inline-action"
+                    :aria-expanded="secondaryProductDetailsOpen"
+                    @click="secondaryProductDetailsOpen = !secondaryProductDetailsOpen"
+                >
+                  {{ secondaryProductDetailsOpen ? "收起" : "展开" }}
+                  <span class="field-hint">{{ secondaryProductInfoLabel }}</span>
+                </button>
+              </div>
+            </div>
+
+            <Transition name="collapse">
+              <div v-show="secondaryProductDetailsOpen" class="secondary-product-details">
+                <div class="form-field">
+                  <div class="field-row-head">
+                    <label>目标平台</label>
+                    <span class="field-hint">单选</span>
+                  </div>
+                  <div class="platform-toggle-group" role="radiogroup" aria-label="目标平台">
+                    <button
+                        v-for="option in PLATFORM_OPTIONS"
+                        :key="option.value"
+                        type="button"
+                        role="radio"
+                        :class="['platform-toggle', { 'is-active': isTargetPlatformSelected(option.value) }]"
+                        :aria-checked="isTargetPlatformSelected(option.value)"
+                        :disabled="controlsDisabled"
+                        @click="handleTargetPlatformSelect(option.value)"
+                    >
+                      <span>{{ option.label }}</span>
+                      <small>{{ option.description }}</small>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="form-field">
+                  <label for="price-band">价格带</label>
+                  <input
+                      id="price-band"
+                      v-model="priceBand"
+                      type="text"
+                      :disabled="controlsDisabled"
+                      placeholder="示例：平价走量 | 中高客单 | 高端礼品"
+                  >
+                </div>
+
+                <div class="form-field">
+                  <label for="audience">目标人群/购买场景</label>
+                  <textarea
+                      id="audience"
+                      v-model="audience"
+                      class="compact-textarea"
+                      :disabled="controlsDisabled"
+                      placeholder="示例：宝妈囤货、租房收纳、通勤办公、换季敏感肌、送礼场景"
+                  />
+                </div>
+
+                <div class="form-field">
+                  <label for="proof-materials">证明素材/资质/评价</label>
+                  <textarea
+                      id="proof-materials"
+                      v-model="proofMaterials"
+                      class="compact-textarea"
+                      :disabled="controlsDisabled"
+                      placeholder="示例：检测报告、材质认证、用户好评关键词、真实参数。没有可留空，系统不会编造硬证据。"
+                  />
+                </div>
+
+                <div class="form-field">
+                  <label for="offer">活动/售后/服务承诺</label>
+                  <textarea
+                      id="offer"
+                      v-model="offer"
+                      class="compact-textarea"
+                      :disabled="controlsDisabled"
+                      placeholder="示例：买一送一、7天无理由、赠品、包邮、质保、试用装"
+                  />
+                </div>
+              </div>
+            </Transition>
 
             <div class="form-field">
               <div class="settings-row">

@@ -351,6 +351,8 @@ async function serializeDetailItem(
       ...item.product,
       productImages: [],
       productImageIds: item.product.productImageIds ?? [],
+      styleReferenceImages: [],
+      styleReferenceImageIds: item.product.styleReferenceImageIds ?? [],
     },
   };
   return {

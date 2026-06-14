@@ -80,6 +80,8 @@ function mergeSavedDetail(target: HistoryItem, saved: HistoryItem) {
     ...target.product,
     productImages: target.product.productImages,
     productImageIds: saved.product.productImageIds ?? target.product.productImageIds,
+    styleReferenceImages: target.product.styleReferenceImages ?? [],
+    styleReferenceImageIds: saved.product.styleReferenceImageIds ?? target.product.styleReferenceImageIds,
   };
   target.prompts = target.prompts.map((prompt) => {
     const savedPrompt = savedPromptById.get(prompt.id);
@@ -104,6 +106,8 @@ function toDetailRequestItem(item: HistoryItem): HistoryItem {
       ...item.product,
       productImages: [],
       productImageIds: item.product.productImageIds ?? [],
+      styleReferenceImages: [],
+      styleReferenceImageIds: item.product.styleReferenceImageIds ?? [],
     },
     prompts: item.prompts,
   };

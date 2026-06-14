@@ -5,6 +5,15 @@ export type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 export type LayerAspectRatio = "1:1" | "4:3" | "3:4";
 export type ImageQuality = "1K" | "2K" | "4K";
 export type DetailImageMode = "main" | "detail";
+export type ProductMaterialKind =
+  | "pdf"
+  | "word"
+  | "powerpoint"
+  | "excel"
+  | "html"
+  | "csv"
+  | "json"
+  | "xml";
 export type MultiViewAngleId =
   | "front"
   | "left-side"
@@ -104,8 +113,22 @@ export interface ProductInput {
   priceBand?: string;
   proofMaterials?: string;
   offer?: string;
+  extraRequirements?: string;
   productImages: string[];
   productImageIds?: string[];
+  styleReferenceImages?: string[];
+  styleReferenceImageIds?: string[];
+  productMaterials?: ProductMaterialFile[];
+}
+
+// 非图片商品资料在浏览器端转换为 Markdown 后进入辅助生图上下文。
+export interface ProductMaterialFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  kind: ProductMaterialKind;
+  markdown: string;
 }
 
 // 单张商品图在前端生命周期里的状态。
@@ -156,7 +179,10 @@ export interface GeneratePromptOptions {
   priceBand?: string;
   proofMaterials?: string;
   offer?: string;
+  extraRequirements?: string;
   productImageIds: string[];
+  styleReferenceImageIds?: string[];
+  productMaterialsMarkdown?: string;
 }
 
 // `/api/prompt/status` 成功后返回的文案列表。

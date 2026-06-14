@@ -16,7 +16,10 @@ interface PromptRequestBody {
   priceBand?: string;
   proofMaterials?: string;
   offer?: string;
+  extraRequirements?: string;
   productImageIds?: string[];
+  styleReferenceImageIds?: string[];
+  productMaterialsMarkdown?: string;
 }
 
 // Nuxt/Nitro 会把运行时环境变量、KV、D1 等都放进 context.env。
@@ -37,6 +40,7 @@ interface RequestContext {
 // 文案接口会携带参考图，限制单张和总大小，避免 Worker 请求体过大。
 const MAX_PROMPT_IMAGE_CHARS = 1_500_000;
 const MAX_PROMPT_IMAGE_TOTAL_CHARS = 6_000_000;
+const MAX_PRODUCT_MATERIAL_MARKDOWN_CHARS = 160_000;
 
 // 小项目里直接用这个 helper 返回 JSON，避免每个分支重复写 headers。
 function json(data: unknown, init?: ResponseInit) {
@@ -83,12 +87,21 @@ function normalizeOptionalText(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, 1200) : "";
 }
 
+function normalizeLongText(value: unknown, limit: number) {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\u0000/g, "")
+    .trim()
+    .slice(0, limit);
+}
+
 // 只接受 data URL 或 http(s) 图片，并过滤超大图片。
-function normalizeProductImages(images: string[] | undefined) {
+function normalizeProductImages(images: string[] | undefined, limit = 8) {
   const normalized = (images ?? [])
     .filter((image) => image.startsWith("data:image/") || /^https?:\/\//i.test(image))
     .filter((image) => image.length <= MAX_PROMPT_IMAGE_CHARS)
-    .slice(0, 8);
+    .slice(0, limit);
   const total = normalized.reduce((sum, image) => sum + image.length, 0);
   if (total > MAX_PROMPT_IMAGE_TOTAL_CHARS) return [];
   return normalized;
@@ -135,6 +148,11 @@ export async function handlePost(context: RequestContext) {
   const priceBand = normalizeOptionalText(body.priceBand);
   const proofMaterials = normalizeOptionalText(body.proofMaterials);
   const offer = normalizeOptionalText(body.offer);
+  const extraRequirements = normalizeOptionalText(body.extraRequirements);
+  const productMaterialsMarkdown = normalizeLongText(
+    body.productMaterialsMarkdown,
+    MAX_PRODUCT_MATERIAL_MARKDOWN_CHARS,
+  );
   const userKey = getUserKey(session.user);
   const productImageIds = normalizeImageIds(body.productImageIds);
   let storedImages: Array<string | null> = [];
@@ -154,6 +172,35 @@ export async function handlePost(context: RequestContext) {
   const productImages = normalizeProductImages(
     storedImages.filter((image): image is string => !!image),
   );
+
+  const styleReferenceImageIds = normalizeImageIds(body.styleReferenceImageIds).slice(0, 4);
+  let storedStyleReferenceImages: Array<string | null> = [];
+  if (styleReferenceImageIds.length) {
+    try {
+      storedStyleReferenceImages = await readProductImageDataUrls(
+        context.env,
+        userKey,
+        styleReferenceImageIds,
+      );
+    } catch (error) {
+      return json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 500 },
+      );
+    }
+  }
+  if (storedStyleReferenceImages.some((image) => !image)) {
+    return json({ error: "风格参考图不存在或无权访问" }, { status: 400 });
+  }
+  const styleReferenceImages = normalizeProductImages(
+    storedStyleReferenceImages.filter((image): image is string => !!image),
+    4,
+  );
+  const allPromptImages = [...productImages, ...styleReferenceImages];
+  const allPromptImagesSize = allPromptImages.reduce((sum, image) => sum + image.length, 0);
+  if (allPromptImagesSize > MAX_PROMPT_IMAGE_TOTAL_CHARS) {
+    return json({ error: "商品图片和风格参考图总大小过大，请减少图片数量或重新上传后再生成。" }, { status: 400 });
+  }
 
   // 这些校验直接返回 400，属于用户输入问题，不需要派发到 Worker。
   if (!name) {
@@ -208,6 +255,21 @@ export async function handlePost(context: RequestContext) {
     `价格带 / 客单价：${priceBand || "未填写，请按中性价位表达，不要编造具体价格。"}`,
     `证明素材 / 资质 / 用户评价：${proofMaterials || "未填写，不要编造具体认证、检测编号、真实评价截图或平台徽章；可使用温和的占位式表达。"}`,
     `活动 / 售后 / 服务承诺：${offer || "未填写，可使用通用低风险购买表达，不要编造具体优惠力度。"}`,
+    `补充要求：${extraRequirements || "未填写。"}`,
+    styleReferenceImages.length
+      ? [
+          `风格参考图：已上传 ${styleReferenceImages.length} 张。`,
+          `上传图片顺序说明：前 ${productImages.length} 张是商品参考图，是商品外观事实来源；后 ${styleReferenceImages.length} 张是风格参考图，只用于学习构图节奏、光影、配色、背景气质、排版密度和画面风格。`,
+          "风格参考图不得作为商品外观、包装、Logo、标签、结构、材质或颜色的事实来源；当风格参考图与商品参考图冲突时，必须以商品参考图为准。",
+        ].join("\n")
+      : "风格参考图：未上传。",
+    productMaterialsMarkdown
+      ? [
+          "上传商品资料 Markdown：",
+          "以下内容来自用户上传的 PDF、Office、表格、HTML、CSV、JSON 或 XML 文件，已转换为 Markdown。它只能作为商品规格、参数、卖点、证据素材、评价关键词和图内文案的辅助来源；如与商品参考图外观冲突，以参考图外观为准；如与用户手填字段冲突，以手填字段为准。",
+          productMaterialsMarkdown,
+        ].join("\n")
+      : "上传商品资料 Markdown：未上传非图片资料。",
     "商品核心卖点和功效：",
     sellingPoints,
     "",
@@ -244,7 +306,7 @@ export async function handlePost(context: RequestContext) {
         userKey,
         imageModes,
         imageCount,
-        productImages,
+        productImages: allPromptImages,
         userText,
         systemTemplate: DETAIL_PROMPT_TEMPLATE,
         apiKey,

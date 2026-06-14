@@ -99,10 +99,13 @@ export async function generateDetailPrompts(
     priceBand: options.priceBand,
     proofMaterials: options.proofMaterials,
     offer: options.offer,
+    extraRequirements: options.extraRequirements,
     productImageIds: options.productImageIds,
+    styleReferenceImageIds: options.styleReferenceImageIds,
+    productMaterialsMarkdown: options.productMaterialsMarkdown,
   });
   if (body.length > MAX_PROMPT_PAYLOAD_CHARS) {
-    throw new Error("商品参考图数据过大，请减少图片数量或重新上传后再生成。");
+    throw new Error("商品资料数据过大，请减少图片或资料文件后再生成。");
   }
 
   const response = await fetchWithRetry(DEFAULT_PROMPT_PATH, {
