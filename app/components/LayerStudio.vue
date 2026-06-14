@@ -19,6 +19,7 @@ import {
 import { blobToZipBytes, createZip, encodeZipText } from "@/lib/zip"
 import type { AuthSession, LayerAspectRatio, LayerHistoryItem, LayerResultItem, LayerTaskStatus } from "@/lib/types"
 import Icon from "./Icon.vue"
+import HistoryDrawer from "./HistoryDrawer.vue"
 
 const props = defineProps<{
   authenticated: boolean
@@ -974,7 +975,8 @@ watch(
     </aside>
   </div>
 
-  <section class="studio-panel history-dock cutout-history-dock layer-history-dock">
+  <HistoryDrawer title="拆图历史" :count="history.length">
+  <section class="history-dock cutout-history-dock layer-history-dock">
     <div class="history-bar">
       <h2>拆图历史</h2>
       <button type="button" class="inline-action" :disabled="!history.length" @click="handleClearHistory">
@@ -1015,6 +1017,7 @@ watch(
     </div>
     <div v-else class="empty">暂无拆图历史。</div>
   </section>
+  </HistoryDrawer>
 </template>
 
 <style scoped>
@@ -1024,10 +1027,6 @@ watch(
 
 .layer-source-body {
   display: block;
-}
-
-.layer-history-dock {
-  margin-top: 12px;
 }
 
 .layer-history-image img {

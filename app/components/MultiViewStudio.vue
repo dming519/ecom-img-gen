@@ -25,6 +25,7 @@ import type {
   MultiViewHistoryItem,
   MultiViewHistoryStatus,
 } from "@/lib/types"
+import HistoryDrawer from "./HistoryDrawer.vue"
 import Icon from "./Icon.vue"
 import QualitySelector from "./QualitySelector.vue"
 import SegmentedControl from "./SegmentedControl.vue"
@@ -970,7 +971,8 @@ watch(
     </section>
   </div>
 
-  <section class="studio-panel history-dock cutout-history-dock multi-view-history-dock">
+  <HistoryDrawer title="多视角历史" :count="history.length">
+  <section class="history-dock cutout-history-dock multi-view-history-dock">
     <div class="history-bar">
       <h2>多视角历史</h2>
       <button type="button" class="inline-action" :disabled="!history.length" @click="handleClearHistory">
@@ -1011,6 +1013,7 @@ watch(
     </div>
     <div v-else class="empty">暂无多视角历史。</div>
   </section>
+  </HistoryDrawer>
 </template>
 
 <style scoped>
@@ -1176,10 +1179,6 @@ watch(
 .multi-view-preview svg {
   width: 34px;
   height: 34px;
-}
-
-.multi-view-history-dock {
-  margin-top: 12px;
 }
 
 .multi-view-history-image img {

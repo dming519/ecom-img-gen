@@ -16,6 +16,7 @@ import {
   dbPutProductImage,
 } from "@/lib/db"
 import type { AuthSession, EditHistoryItem } from "@/lib/types"
+import HistoryDrawer from "./HistoryDrawer.vue"
 import Icon from "./Icon.vue"
 
 type PaintMode = "brush" | "eraser"
@@ -818,7 +819,8 @@ watch(
     </section>
   </div>
 
-  <section class="studio-panel history-dock cutout-history-dock">
+  <HistoryDrawer title="改图历史" :count="history.length">
+  <section class="history-dock cutout-history-dock">
     <div class="history-bar">
       <h2>改图历史</h2>
       <button type="button" class="inline-action" :disabled="!history.length" @click="handleClearHistory">
@@ -859,4 +861,5 @@ watch(
     </div>
     <div v-else class="empty">暂无改图历史。</div>
   </section>
+  </HistoryDrawer>
 </template>

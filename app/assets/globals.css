@@ -2759,6 +2759,254 @@ footer {
   background: var(--danger-soft);
 }
 
+.history-drawer {
+  position: fixed;
+  top: calc(var(--topbar-h) + 30px);
+  right: 0;
+  z-index: 130;
+  width: min(380px, calc(100vw - 18px));
+  height: var(--workbench-h);
+  max-height: var(--workbench-h);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  transform: translateX(calc(100% - 18px));
+  transition: transform 0.22s var(--ease);
+  pointer-events: none;
+}
+
+.history-drawer.is-open {
+  transform: translateX(0);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.history-drawer-toggle,
+.history-drawer-panel {
+  pointer-events: auto;
+}
+
+.history-drawer-toggle {
+  align-self: start;
+  position: relative;
+  width: 18px;
+  min-width: 18px;
+  height: 32px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 16px;
+  padding: 0;
+  border: 1px solid rgba(170, 183, 200, 0.72);
+  border-right: 0;
+  border-radius: 7px 0 0 7px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--accent-ink);
+  box-shadow: -2px 4px 9px rgba(15, 23, 42, 0.07);
+  backdrop-filter: blur(8px);
+}
+
+.history-drawer.is-open .history-drawer-toggle {
+  display: none;
+}
+
+.history-drawer-toggle svg {
+  width: 10px;
+  height: 10px;
+}
+
+.history-drawer-toggle span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.history-drawer-toggle em {
+  display: none;
+}
+
+.history-drawer-panel {
+  grid-column: 2;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid rgba(170, 183, 200, 0.78);
+  border-right: 0;
+  border-radius: 16px 0 0 16px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: -16px 18px 52px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(18px);
+}
+
+.history-drawer.is-open .history-drawer-panel {
+  grid-column: 1;
+}
+
+.history-drawer-head {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-drawer-head strong,
+.history-drawer-head span {
+  display: block;
+}
+
+.history-drawer-head strong {
+  color: var(--text);
+  font-size: 0.9375rem;
+  line-height: 1.2;
+}
+
+.history-drawer-head span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.history-drawer-close {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-soft);
+  color: var(--text-sub);
+}
+
+.history-drawer-close:hover {
+  border-color: rgba(23, 105, 255, 0.32);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.history-drawer-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.history-drawer-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.history-drawer .history-dock {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.history-drawer .history-bar {
+  margin-bottom: 10px;
+}
+
+.history-drawer .history-bar h2 {
+  font-size: 0.875rem;
+}
+
+.history-drawer .history-grid,
+.history-drawer .cutout-history-grid {
+  grid-template-columns: 1fr;
+}
+
+.history-drawer .history-card {
+  grid-template-columns: 88px minmax(0, 1fr);
+  min-height: 128px;
+}
+
+.history-drawer .history-cover,
+.history-drawer .history-cover img,
+.history-drawer .history-cover .tile-empty {
+  min-height: 128px;
+}
+
+.history-drawer .cutout-history-card {
+  min-height: 0;
+}
+
+.history-drawer .empty {
+  min-height: 120px;
+}
+
+html,
+body,
+.app-shell,
+.input-rail,
+.prompt-rail,
+.input-rail-body,
+.prompt-editor-list,
+.canvas-panel,
+.detail-stage,
+.cutout-panel,
+.cutout-source-body,
+.cutout-canvas-stage,
+.cutout-result-panel,
+.history-drawer-body,
+.multi-view-input,
+.multi-view-results,
+.layer-list,
+input,
+textarea {
+  -ms-overflow-style: none;
+  scrollbar-color: transparent transparent;
+  scrollbar-width: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+.app-shell::-webkit-scrollbar,
+.input-rail::-webkit-scrollbar,
+.prompt-rail::-webkit-scrollbar,
+.input-rail-body::-webkit-scrollbar,
+.prompt-editor-list::-webkit-scrollbar,
+.canvas-panel::-webkit-scrollbar,
+.detail-stage::-webkit-scrollbar,
+.cutout-panel::-webkit-scrollbar,
+.cutout-source-body::-webkit-scrollbar,
+.cutout-canvas-stage::-webkit-scrollbar,
+.cutout-result-panel::-webkit-scrollbar,
+.history-drawer-body::-webkit-scrollbar,
+.multi-view-input::-webkit-scrollbar,
+.multi-view-results::-webkit-scrollbar,
+.layer-list::-webkit-scrollbar,
+input::-webkit-scrollbar,
+textarea::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+  background: transparent !important;
+}
+
+input::-webkit-scrollbar-thumb,
+textarea::-webkit-scrollbar-thumb,
+input::-webkit-scrollbar-track,
+textarea::-webkit-scrollbar-track,
+input::-webkit-scrollbar-corner,
+textarea::-webkit-scrollbar-corner {
+  background: transparent !important;
+  border: 0 !important;
+}
+
+input::-webkit-resizer,
+textarea::-webkit-resizer {
+  display: none !important;
+}
+
 .cutout-grid {
   display: grid;
   grid-template-columns: minmax(292px, 348px) minmax(460px, 1fr) minmax(340px, 460px);
@@ -4137,6 +4385,33 @@ footer {
 
 @media (max-width: 720px) and (hover: none) and (pointer: coarse) {
   .app-shell {
+    padding: 10px;
+  }
+
+  .history-drawer {
+    top: 10px;
+    right: 0;
+    width: min(360px, calc(100vw - 10px));
+    height: calc(100dvh - 104px);
+    max-height: calc(100dvh - 104px);
+    grid-template-columns: 16px minmax(0, 1fr);
+    transform: translateX(calc(100% - 16px));
+  }
+
+  .history-drawer-toggle {
+    width: 16px;
+    min-width: 16px;
+    height: 30px;
+    min-height: 30px;
+    margin-top: 12px;
+    border-radius: 7px 0 0 7px;
+  }
+
+  .history-drawer-panel {
+    border-radius: 14px 0 0 14px;
+  }
+
+  .history-drawer-body {
     padding: 10px;
   }
 

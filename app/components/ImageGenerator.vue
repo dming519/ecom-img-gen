@@ -29,6 +29,7 @@ import type {
 import AdminPanel from "./AdminPanel.vue"
 import CutoutStudio from "./CutoutStudio.vue"
 import EditStudio from "./EditStudio.vue"
+import HistoryDrawer from "./HistoryDrawer.vue"
 import HistoryGrid from "./HistoryGrid.vue"
 import Icon from "./Icon.vue"
 import LayerStudio from "./LayerStudio.vue"
@@ -1781,7 +1782,8 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
-      <section class="studio-panel history-dock">
+      <HistoryDrawer title="生成历史" :count="history.length">
+      <section class="history-dock">
         <HistoryGrid
             :history="history"
             :active-idx="activeHistoryIdx"
@@ -1790,6 +1792,7 @@ onBeforeUnmount(() => {
             @clear-all="handleClearHistory"
         />
       </section>
+      </HistoryDrawer>
     </template>
 
     <CutoutStudio
@@ -1827,20 +1830,6 @@ onBeforeUnmount(() => {
         @update:session="session = $event"
         @zoom="lightboxSrc = $event"
     />
-
-    <footer>
-      EcomImgGen · 历史记录云端同步 · GitHub
-      <a
-          class="github-link"
-          href="https://github.com/dming519/ecom-img-gen"
-          target="_blank"
-          rel="noreferrer"
-          aria-label="查看 GitHub 仓库"
-          title="查看 GitHub 仓库"
-      >
-        GH
-      </a>
-    </footer>
 
     <Lightbox :src="lightboxSrc" @close="lightboxSrc = null"/>
     <AdminPanel :open="adminOpen" @close="adminOpen = false"/>
