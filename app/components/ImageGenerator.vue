@@ -74,10 +74,11 @@ const MAX_PROMPT_IMAGE_TOTAL_CHARS = 6_000_000
 const MAX_STYLE_REFERENCE_IMAGES = 4
 const DRAFT_KEY = "ecomimggen_draft_v5"
 const IMAGE_QUALITY_VALUES: ImageQuality[] = ["1K", "2K", "4K"]
-const IMAGE_MODE_ORDER: DetailImageMode[] = ["main", "detail"]
+const IMAGE_MODE_ORDER: DetailImageMode[] = ["main", "detail", "sku"]
 const IMAGE_MODE_OPTIONS: Array<{ label: string; value: DetailImageMode }> = [
   {label: "主图", value: "main"},
   {label: "详情图", value: "detail"},
+  {label: "SKU图", value: "sku"},
 ]
 const PLATFORM_OPTIONS = [
   {label: "淘宝/天猫", value: "淘宝/天猫", description: "标准货架"},
@@ -98,6 +99,7 @@ const STATUS_LABEL: Record<DetailPromptItem["status"], string> = {
 interface DraftState {
   productName: string
   sellingPoints: string
+  skuInfo?: string
   imageModes: DetailImageMode[]
   targetPlatform?: string
   audience?: string
@@ -110,6 +112,7 @@ interface DraftState {
   productImageIds?: string[]
   styleReferenceImageIds?: string[]
   productMaterials?: ProductMaterialFile[]
+  skuMaterials?: ProductMaterialFile[]
 }
 
 // 自定义错误类型：用来区分“用户主动取消”和“真正生成失败”。
@@ -124,6 +127,7 @@ class ImageGenerationCancelledError extends Error {
 const studioMode = shallowRef<StudioMode>(props.initialMode)
 const productName = shallowRef("")
 const sellingPoints = shallowRef("")
+const skuInfo = shallowRef("")
 const imageModes = ref<DetailImageMode[]>(["main", "detail"])
 const targetPlatform = shallowRef<TargetPlatformValue>(DEFAULT_TARGET_PLATFORM)
 const audience = shallowRef("")
@@ -136,6 +140,7 @@ const productImageIds = ref<string[]>([])
 const styleReferenceImages = ref<string[]>([])
 const styleReferenceImageIds = ref<string[]>([])
 const productMaterials = ref<ProductMaterialUpload[]>([])
+const skuMaterials = ref<ProductMaterialUpload[]>([])
 const quality = shallowRef<ImageQuality>("1K")
 const prompts = ref<DetailPromptItem[]>([])
 const history = ref<HistoryItem[]>([])
@@ -158,6 +163,7 @@ const avatarFailed = shallowRef(false)
 
 // DOM/浏览器能力引用：这些值不是普通业务数据，只在特定操作时使用。
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const skuFileInputRef = ref<HTMLInputElement | null>(null)
 const styleFileInputRef = ref<HTMLInputElement | null>(null)
 const authPopoverRef = ref<HTMLDivElement | null>(null)
 const wakeLockRef = shallowRef<WakeLockSentinelLike | null>(null)
@@ -167,25 +173,32 @@ const currentImageTaskIdRef = shallowRef<string | null>(null)
 const suppressImageModeReset = shallowRef(false)
 
 function getImageModeCount(mode: DetailImageMode) {
+  if (mode === "sku") return 0
   return mode === "main" ? 5 : 8
 }
 
 function getImageModeAspectRatio(mode: DetailImageMode): AspectRatio {
-  return mode === "main" ? "1:1" : "3:4"
+  return mode === "detail" ? "3:4" : "1:1"
 }
 
 function getImageModeLabel(mode: DetailImageMode) {
-  return mode === "main" ? "主图" : "详情图"
+  if (mode === "main") return "主图"
+  if (mode === "detail") return "详情图"
+  return "SKU图"
+}
+
+function getImageModeCountLabel(mode: DetailImageMode) {
+  return mode === "sku" ? "动态识别" : `${getImageModeCount(mode)} 张`
 }
 
 function normalizeImageModes(value: unknown): DetailImageMode[] {
   const source = Array.isArray(value) ? value : []
   const seen = new Set<DetailImageMode>()
   for (const mode of source) {
-    if (mode === "main" || mode === "detail") seen.add(mode)
+    if (mode === "main" || mode === "detail" || mode === "sku") seen.add(mode)
   }
   const ordered = IMAGE_MODE_ORDER.filter((mode) => seen.has(mode))
-  return ordered.length ? ordered : [...IMAGE_MODE_ORDER]
+  return ordered.length ? ordered : ["main", "detail"]
 }
 
 function normalizeTargetPlatform(value: unknown): TargetPlatformValue {
@@ -200,7 +213,7 @@ function getImageModesCount(modes: DetailImageMode[]) {
 }
 
 function getImageModesLabel(modes: DetailImageMode[]) {
-  return modes.map((mode) => `${getImageModeLabel(mode)} ${getImageModeCount(mode)} 张`).join(" + ")
+  return modes.map((mode) => `${getImageModeLabel(mode)} ${getImageModeCountLabel(mode)}`).join(" + ")
 }
 
 function getPromptImageMode(item: DetailPromptItem | null | undefined): DetailImageMode {
@@ -236,17 +249,30 @@ function restoreProductMaterials(materials: ProductMaterialFile[] | undefined): 
 
 // computed 是派生状态：不直接存数据，而是根据上面的源状态实时计算。
 const imageCount = computed(() => getImageModesCount(imageModes.value))
+const skuPromptCount = computed(() => prompts.value.filter((item) => item.imageMode === "sku").length)
+const imageCountLabel = computed(() => {
+  if (!imageModes.value.includes("sku")) return `${imageCount.value} 张`
+  const total = imageCount.value + skuPromptCount.value
+  if (skuPromptCount.value) return `${total} 张`
+  return imageCount.value ? `${imageCount.value} 张 + SKU动态` : "SKU动态"
+})
 const targetPlatformLabel = computed(() => normalizeTargetPlatform(targetPlatform.value))
 const convertedProductMaterials = computed<ProductMaterialFile[]>(() =>
     productMaterials.value
         .map((item) => toConvertedProductMaterial(item))
         .filter((item): item is ProductMaterialFile => !!item),
 )
+const convertedSkuMaterials = computed<ProductMaterialFile[]>(() =>
+    skuMaterials.value
+        .map((item) => toConvertedProductMaterial(item))
+        .filter((item): item is ProductMaterialFile => !!item),
+)
 const currentProduct = computed<ProductInput>(() => ({
   name: productName.value.trim(),
   sellingPoints: sellingPoints.value.trim(),
+  skuInfo: skuInfo.value.trim(),
   imageModes: [...imageModes.value],
-  imageCount: imageCount.value,
+  imageCount: imageCount.value + skuPromptCount.value,
   targetPlatform: targetPlatformLabel.value,
   audience: audience.value.trim(),
   priceBand: priceBand.value.trim(),
@@ -258,8 +284,10 @@ const currentProduct = computed<ProductInput>(() => ({
   styleReferenceImages: styleReferenceImages.value,
   styleReferenceImageIds: styleReferenceImageIds.value,
   productMaterials: convertedProductMaterials.value,
+  skuMaterials: convertedSkuMaterials.value,
 }))
 const productMaterialsMarkdown = computed(() => createProductMaterialsMarkdown(convertedProductMaterials.value))
+const skuMaterialsMarkdown = computed(() => createProductMaterialsMarkdown(convertedSkuMaterials.value))
 const hasProductUploads = computed(() => productImages.value.length > 0 || productMaterials.value.length > 0)
 const productUploadStatusLabel = computed(() => {
   const imageText = productImages.value.length ? `${productImages.value.length} 张图片` : "未上传图片"
@@ -275,7 +303,7 @@ const secondaryProductInfoLabel = computed(() =>
     secondaryProductInfoCount.value ? `已填写 ${secondaryProductInfoCount.value} 项` : "可选",
 )
 const generationLabel = computed(() =>
-    `${getImageModesLabel(imageModes.value)} · 共 ${imageCount.value} 张 · ${quality.value}`,
+    `${getImageModesLabel(imageModes.value)} · 共 ${imageCountLabel.value} · ${quality.value}`,
 )
 const authenticated = computed(() => !!session.value?.authenticated)
 const authLabel = computed(() =>
@@ -430,8 +458,9 @@ function cloneProduct(input: ProductInput): ProductInput {
   return {
     name: input.name,
     sellingPoints: input.sellingPoints,
+    skuInfo: input.skuInfo ?? "",
     imageModes: modes,
-    imageCount: getImageModesCount(modes),
+    imageCount: input.imageCount || getImageModesCount(modes),
     targetPlatform: normalizeTargetPlatform(input.targetPlatform),
     audience: input.audience ?? "",
     priceBand: input.priceBand ?? "",
@@ -443,6 +472,7 @@ function cloneProduct(input: ProductInput): ProductInput {
     styleReferenceImages: input.styleReferenceImages ? [...input.styleReferenceImages] : [],
     styleReferenceImageIds: input.styleReferenceImageIds ? [...input.styleReferenceImageIds] : [],
     productMaterials: input.productMaterials?.map((item) => ({...item})) ?? [],
+    skuMaterials: input.skuMaterials?.map((item) => ({...item})) ?? [],
   }
 }
 
@@ -663,10 +693,20 @@ function updateProductMaterial(id: string, patch: Partial<ProductMaterialUpload>
   )
 }
 
+function updateSkuMaterial(id: string, patch: Partial<ProductMaterialUpload>) {
+  skuMaterials.value = skuMaterials.value.map((item) =>
+      item.id === id ? {...item, ...patch} : item,
+  )
+}
+
 function handleClearProductUploads() {
   productImages.value = []
   productImageIds.value = []
   productMaterials.value = []
+}
+
+function handleClearSkuMaterials() {
+  skuMaterials.value = []
 }
 
 function handleClearStyleReferences() {
@@ -681,6 +721,10 @@ function handleRemoveProductImage(index: number) {
 
 function handleRemoveProductMaterial(id: string) {
   productMaterials.value = productMaterials.value.filter((item) => item.id !== id)
+}
+
+function handleRemoveSkuMaterial(id: string) {
+  skuMaterials.value = skuMaterials.value.filter((item) => item.id !== id)
 }
 
 function handleRemoveStyleReferenceImage(index: number) {
@@ -734,6 +778,43 @@ async function handleSelectFiles(files: FileList | null) {
   if (acceptedMaterials.length) productMaterials.value = [...productMaterials.value, ...acceptedMaterials]
   if (messages.length) error.value = messages[messages.length - 1] ?? null
   if (fileInputRef.value) fileInputRef.value.value = ""
+}
+
+// SKU资料只接收可转 Markdown 的文件，不接收图片；图片事实来源仍放在商品素材里。
+async function handleSelectSkuFiles(files: FileList | null) {
+  if (!files?.length) return
+  error.value = null
+  const acceptedMaterials: ProductMaterialUpload[] = []
+  const messages: string[] = []
+  materialBusy.value = true
+  try {
+    for (const file of Array.from(files)) {
+      if (file.type.startsWith("image/")) {
+        messages.push(`SKU资料不接收图片，已忽略：${file.name}`)
+        continue
+      }
+
+      const kind = getProductMaterialKind(file)
+      if (!kind) {
+        messages.push(`已忽略不支持的 SKU资料：${file.name}`)
+        continue
+      }
+      if (file.size > MAX_PRODUCT_MATERIAL_BYTES) {
+        messages.push(`SKU资料文件过大（>25MB）已忽略：${file.name}`)
+        continue
+      }
+      if (skuMaterials.value.length + acceptedMaterials.length >= MAX_PRODUCT_MATERIAL_FILES) {
+        messages.push(`SKU资料最多上传 ${MAX_PRODUCT_MATERIAL_FILES} 个文件，已忽略：${file.name}`)
+        continue
+      }
+      acceptedMaterials.push(createPendingProductMaterial(file, kind))
+    }
+  } finally {
+    materialBusy.value = false
+  }
+  if (acceptedMaterials.length) skuMaterials.value = [...skuMaterials.value, ...acceptedMaterials]
+  if (messages.length) error.value = messages[messages.length - 1] ?? null
+  if (skuFileInputRef.value) skuFileInputRef.value.value = ""
 }
 
 async function handleSelectStyleReferenceFiles(files: FileList | null) {
@@ -816,12 +897,56 @@ async function ensureProductMaterialsConverted() {
   return productMaterialsMarkdown.value
 }
 
+async function ensureSkuMaterialsConverted() {
+  const pendingMaterials = skuMaterials.value.filter((item) => item.status !== "converted")
+  if (!pendingMaterials.length) return skuMaterialsMarkdown.value
+
+  materialBusy.value = true
+  try {
+    let totalMarkdownLength = convertedSkuMaterials.value.reduce(
+        (sum, item) => sum + item.markdown.length,
+        0,
+    )
+    for (const material of pendingMaterials) {
+      if (!material.file) {
+        const message = `SKU资料 ${material.name} 需要重新上传后才能转换。`
+        updateSkuMaterial(material.id, {status: "failed", error: message})
+        throw new Error(message)
+      }
+
+      updateSkuMaterial(material.id, {status: "converting", error: undefined})
+      try {
+        const converted = await convertProductMaterialFile(material.file)
+        if (totalMarkdownLength + converted.markdown.length > MAX_PRODUCT_MATERIAL_TOTAL_CHARS) {
+          throw new Error(`SKU资料文本过长，请移除或缩短：${material.name}`)
+        }
+        totalMarkdownLength += converted.markdown.length
+        updateSkuMaterial(material.id, {
+          file: undefined,
+          markdown: converted.markdown,
+          status: "converted",
+          error: undefined,
+        })
+      } catch (event) {
+        const message = event instanceof Error ? event.message : String(event)
+        updateSkuMaterial(material.id, {status: "failed", error: message})
+        throw new Error(message)
+      }
+    }
+  } finally {
+    materialBusy.value = false
+  }
+
+  return skuMaterialsMarkdown.value
+}
+
 // 重置当前编辑中的商品资料和文案，不清空云端历史。
 function handleResetProductInput() {
   if (promptBusy.value || imageBusy.value) return
   error.value = null
   productName.value = ""
   sellingPoints.value = ""
+  skuInfo.value = ""
   imageModes.value = ["main", "detail"]
   targetPlatform.value = DEFAULT_TARGET_PLATFORM
   audience.value = ""
@@ -834,11 +959,13 @@ function handleResetProductInput() {
   styleReferenceImages.value = []
   styleReferenceImageIds.value = []
   productMaterials.value = []
+  skuMaterials.value = []
   quality.value = "1K"
   prompts.value = []
   activePromptIdx.value = 0
   activeHistoryIdx.value = -1
   if (fileInputRef.value) fileInputRef.value.value = ""
+  if (skuFileInputRef.value) skuFileInputRef.value.value = ""
   if (styleFileInputRef.value) styleFileInputRef.value.value = ""
 }
 
@@ -856,6 +983,10 @@ function validateProduct() {
     error.value = "请输入商品核心卖点和功效。"
     return false
   }
+  if (imageModes.value.includes("sku") && !skuInfo.value.trim() && !skuMaterials.value.length) {
+    error.value = "选中 SKU图 时，请填写 SKU信息，或上传包含 SKU 资料的文件。"
+    return false
+  }
   if (!productImages.value.length) {
     error.value = "请至少上传一张商品图片作为参考图。系统已禁止纯文案生成，以保证商品外观一致。"
     return false
@@ -866,6 +997,7 @@ function validateProduct() {
 async function handleLoadDemoData() {
   productName.value = "玻尿酸多效修护精华液"
   sellingPoints.value = "• 深层补水：玻尿酸微分子渗透技术\n• 修护屏障：神经酰胺+角鲨烷双重修护\n• 适合人群：敏感肌、干燥肌、熟龄肌\n• 规格：30ml 旅行装 / 50ml 标准装\n• 使用感：清爽不油腻，快速吸收"
+  skuInfo.value = "30ml 旅行装：适合试用和出差；50ml 标准装：适合日常护肤；套装：50ml 正装 + 30ml 旅行装。"
   imageModes.value = ["main", "detail"]
   targetPlatform.value = "淘宝/天猫"
   audience.value = "敏感肌、干燥肌、换季修护人群，日常护肤和妆前补水场景"
@@ -875,6 +1007,7 @@ async function handleLoadDemoData() {
   extraRequirements.value = ""
   quality.value = "1K"
   productMaterials.value = []
+  skuMaterials.value = []
   styleReferenceImages.value = []
   styleReferenceImageIds.value = []
   const canvas = document.createElement("canvas")
@@ -905,10 +1038,12 @@ async function handleGeneratePrompts() {
   promptBusy.value = true
   try {
     const materialsMarkdown = await ensureProductMaterialsConverted()
+    const skuMarkdown = await ensureSkuMaterialsConverted()
     const styleReferenceIds = await ensureStyleReferenceImageIds()
     const result = await generateDetailPrompts({
       name: productName.value.trim(),
       sellingPoints: sellingPoints.value.trim(),
+      skuInfo: skuInfo.value.trim(),
       imageModes: imageModes.value,
       targetPlatform: targetPlatformLabel.value,
       audience: audience.value.trim(),
@@ -919,6 +1054,7 @@ async function handleGeneratePrompts() {
       productImageIds: await ensureProductImageIds(),
       styleReferenceImageIds: styleReferenceIds,
       productMaterialsMarkdown: materialsMarkdown,
+      skuMaterialsMarkdown: skuMarkdown,
     })
     prompts.value = result.prompts.map((item, index) =>
         createPromptItem(index, item.title, item.promptId, item.prompt, item.imageMode),
@@ -1281,6 +1417,7 @@ function handleSelectHistory(idx: number) {
   suppressImageModeReset.value = true
   productName.value = item.product.name
   sellingPoints.value = item.product.sellingPoints
+  skuInfo.value = item.product.skuInfo || ""
   const restoredModes = normalizeImageModes(item.product.imageModes)
   imageModes.value = restoredModes
   targetPlatform.value = normalizeTargetPlatform(item.product.targetPlatform || targetPlatform.value)
@@ -1292,6 +1429,7 @@ function handleSelectHistory(idx: number) {
   productImageIds.value = item.product.productImageIds ?? []
   productImages.value = item.product.productImages
   productMaterials.value = restoreProductMaterials(item.product.productMaterials)
+  skuMaterials.value = restoreProductMaterials(item.product.skuMaterials)
   if (item.product.productImageIds?.length) {
     dbGetProductImages(item.product.productImageIds)
         .then((images) => {
@@ -1380,7 +1518,7 @@ function handleDownload(index: number) {
   if (!imageSrc) return
   const anchor = document.createElement("a")
   anchor.href = imageSrc
-  const packType = getPromptImageMode(prompts.value[index]) === "main" ? "main" : "detail"
+  const packType = getPromptImageMode(prompts.value[index])
   anchor.download = `ecom-${packType}-${productName.value || "product"}-${index + 1}.png`
   anchor.click()
 }
@@ -1432,6 +1570,7 @@ watch(
       draftLoaded,
       productName,
       sellingPoints,
+      skuInfo,
       imageModes,
       targetPlatform,
       audience,
@@ -1444,6 +1583,7 @@ watch(
       productImageIds,
       styleReferenceImageIds,
       productMaterials,
+      skuMaterials,
     ],
     () => {
       if (!draftLoaded.value || studioMode.value !== "image" || !import.meta.client) return
@@ -1451,6 +1591,7 @@ watch(
         const draft: DraftState = {
           productName: productName.value,
           sellingPoints: sellingPoints.value,
+          skuInfo: skuInfo.value,
           imageModes: [...imageModes.value],
           targetPlatform: targetPlatformLabel.value,
           audience: audience.value,
@@ -1463,6 +1604,7 @@ watch(
           productImageIds: productImageIds.value,
           styleReferenceImageIds: styleReferenceImageIds.value,
           productMaterials: convertedProductMaterials.value,
+          skuMaterials: convertedSkuMaterials.value,
         }
         localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
       } catch {
@@ -1485,6 +1627,7 @@ onMounted(() => {
         const draft = JSON.parse(raw) as DraftState
         productName.value = draft.productName || ""
         sellingPoints.value = draft.sellingPoints || ""
+        skuInfo.value = draft.skuInfo || ""
         const restoredModes = normalizeImageModes(draft.imageModes)
         imageModes.value = restoredModes
         targetPlatform.value = normalizeTargetPlatform(draft.targetPlatform || targetPlatform.value)
@@ -1495,6 +1638,9 @@ onMounted(() => {
         extraRequirements.value = draft.extraRequirements || ""
         productMaterials.value = restoreProductMaterials(
             Array.isArray(draft.productMaterials) ? draft.productMaterials : undefined,
+        )
+        skuMaterials.value = restoreProductMaterials(
+            Array.isArray(draft.skuMaterials) ? draft.skuMaterials : undefined,
         )
         prompts.value = Array.isArray(draft.prompts)
             ? draft.prompts.map((prompt) => resetInterruptedPrompt(prompt))
@@ -2054,7 +2200,7 @@ onBeforeUnmount(() => {
                 <div class="setting-block">
                   <div class="setting-head">
                     <label>图包类型</label>
-                    <span>{{ imageCount }} 张</span>
+                    <span>{{ imageCountLabel }}</span>
                   </div>
                   <div class="image-mode-toggle-group" role="group" aria-label="图包类型">
                     <button
@@ -2067,11 +2213,81 @@ onBeforeUnmount(() => {
                         @click="handleImageModeToggle(option.value)"
                     >
                       <span>{{ option.label }}</span>
-                      <small>{{ getImageModeCount(option.value) }} 张 · {{
+                      <small>{{ getImageModeCountLabel(option.value) }} · {{
                           getImageModeAspectRatio(option.value)
                         }}</small>
                     </button>
                   </div>
+                  <Transition name="collapse">
+                    <div v-if="isImageModeSelected('sku')" class="sku-inline-panel">
+                      <div class="form-field">
+                        <label for="sku-info">SKU信息 <span class="field-hint">(二选一)</span></label>
+                        <textarea
+                            id="sku-info"
+                            v-model="skuInfo"
+                            class="compact-textarea"
+                            :disabled="controlsDisabled"
+                            placeholder="示例：白色/S/M/L；黑色/S/M/L；单瓶装/三瓶装；A款基础版、B款升级版。"
+                        />
+                      </div>
+
+                      <div class="form-field">
+                        <div class="field-row-head">
+                          <label for="sku-materials">SKU资料 <span class="field-hint">(二选一)</span></label>
+                          <button
+                              v-if="skuMaterials.length"
+                              type="button"
+                              class="inline-action"
+                              :disabled="controlsDisabled"
+                              @click="handleClearSkuMaterials"
+                          >
+                            清空
+                          </button>
+                        </div>
+                        <div class="product-media sku-material-media">
+                          <div
+                              v-for="material in skuMaterials"
+                              :key="material.id"
+                              :class="['product-material-chip', `is-${material.status}`]"
+                              :title="getProductMaterialTitle(material)"
+                          >
+                            <span class="product-material-type">{{ getProductMaterialKindLabel(material.kind) }}</span>
+                            <strong>{{ material.name }}</strong>
+                            <button
+                                type="button"
+                                class="product-material-del"
+                                :disabled="controlsDisabled"
+                                :aria-label="`移除 SKU资料 ${material.name}`"
+                                @click="handleRemoveSkuMaterial(material.id)"
+                            >
+                              <Icon name="close"/>
+                            </button>
+                          </div>
+                          <button
+                              type="button"
+                              class="prompt-upload-tile"
+                              :disabled="controlsDisabled"
+                              @click="skuFileInputRef?.click()"
+                          >
+                            <Icon name="upload"/>
+                            <span>{{ materialBusy ? "转换中" : "上传" }}</span>
+                          </button>
+                        </div>
+                        <p class="field-help">支持 PDF、PPTX、DOCX、Excel、HTML、CSV、JSON、XML；上传后会转 Markdown，用于动态识别 SKU 图数量。</p>
+                        <input
+                            id="sku-materials"
+                            ref="skuFileInputRef"
+                            name="skuMaterials"
+                            type="file"
+                            aria-label="上传 SKU 资料"
+                            :accept="PRODUCT_MATERIAL_ACCEPT"
+                            multiple
+                            hidden
+                            @change="event => handleSelectSkuFiles((event.target as HTMLInputElement).files)"
+                        >
+                      </div>
+                    </div>
+                  </Transition>
                 </div>
                 <div class="setting-block">
                   <div class="setting-head">

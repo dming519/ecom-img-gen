@@ -26,7 +26,7 @@ const activeSrc = computed(() => {
   if (active.value.imageId) return dbImageFileUrl(active.value.imageId)
   return null
 })
-const activeModeClass = computed(() => (active.value?.imageMode === "main" ? "is-main" : "is-detail"))
+const activeModeClass = computed(() => (active.value?.imageMode === "detail" ? "is-detail" : "is-main"))
 </script>
 
 <template>

@@ -4,7 +4,7 @@ export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 export type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 export type LayerAspectRatio = "1:1" | "4:3" | "3:4";
 export type ImageQuality = "1K" | "2K" | "4K";
-export type DetailImageMode = "main" | "detail";
+export type DetailImageMode = "main" | "detail" | "sku";
 export type ProductMaterialKind =
   | "pdf"
   | "word"
@@ -106,6 +106,7 @@ export interface RedeemCodeRow {
 export interface ProductInput {
   name: string;
   sellingPoints: string;
+  skuInfo?: string;
   imageModes: DetailImageMode[];
   imageCount: number;
   targetPlatform?: string;
@@ -119,6 +120,7 @@ export interface ProductInput {
   styleReferenceImages?: string[];
   styleReferenceImageIds?: string[];
   productMaterials?: ProductMaterialFile[];
+  skuMaterials?: ProductMaterialFile[];
 }
 
 // 非图片商品资料在浏览器端转换为 Markdown 后进入辅助生图上下文。
@@ -173,6 +175,7 @@ export interface HistoryItem {
 export interface GeneratePromptOptions {
   name: string;
   sellingPoints: string;
+  skuInfo?: string;
   imageModes: DetailImageMode[];
   targetPlatform?: string;
   audience?: string;
@@ -183,6 +186,7 @@ export interface GeneratePromptOptions {
   productImageIds: string[];
   styleReferenceImageIds?: string[];
   productMaterialsMarkdown?: string;
+  skuMaterialsMarkdown?: string;
 }
 
 // `/api/prompt/status` 成功后返回的文案列表。

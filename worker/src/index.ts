@@ -17,7 +17,7 @@ type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 type AspectRatio = "auto" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 type ImageQuality = "1K" | "2K" | "4K";
 type LayerAspectRatio = "1:1" | "3:4" | "4:3";
-type DetailImageMode = "main" | "detail";
+type DetailImageMode = "main" | "detail" | "sku";
 
 interface GenerateRequestBody {
   prompt?: string;
@@ -105,6 +105,7 @@ interface PromptRequestBody {
 }
 
 function resolveDetailImageCount(mode: DetailImageMode) {
+  if (mode === "sku") return 0;
   return mode === "main" ? 5 : 8;
 }
 
@@ -112,11 +113,12 @@ function normalizeDetailImageModes(value: unknown): DetailImageMode[] {
   const source = Array.isArray(value) ? value : [];
   const seen = new Set<DetailImageMode>();
   for (const mode of source) {
-    if (mode === "main" || mode === "detail") seen.add(mode);
+    if (mode === "main" || mode === "detail" || mode === "sku") seen.add(mode);
   }
   const ordered: DetailImageMode[] = [];
   if (seen.has("main")) ordered.push("main");
   if (seen.has("detail")) ordered.push("detail");
+  if (seen.has("sku")) ordered.push("sku");
   return ordered;
 }
 
@@ -125,7 +127,9 @@ function resolveDetailImageModesCount(modes: DetailImageMode[]) {
 }
 
 function detailImageModeLabel(mode: DetailImageMode) {
-  return mode === "main" ? "主图" : "详情图";
+  if (mode === "main") return "主图";
+  if (mode === "detail") return "详情图";
+  return "SKU图";
 }
 
 function resolvePromptItemMode(
@@ -133,7 +137,7 @@ function resolvePromptItemMode(
   modes: DetailImageMode[],
   index: number,
 ): DetailImageMode {
-  if ((value === "main" || value === "detail") && modes.includes(value)) return value;
+  if ((value === "main" || value === "detail" || value === "sku") && modes.includes(value)) return value;
   throw new Error(`第${index + 1}条图包方案缺少合法 imageMode`);
 }
 
@@ -558,36 +562,51 @@ function parsePromptJson(text: string) {
 function createPromptBatchUserText(
   userText: string,
   mode: DetailImageMode,
-  imageCount = resolveDetailImageCount(mode),
+  imageCount?: number,
   offset = 0,
-  total = resolveDetailImageCount(mode),
+  total?: number,
 ) {
   const modeLabel = detailImageModeLabel(mode);
+  const isDynamicSku = mode === "sku" && !Number.isFinite(imageCount);
+  const resolvedCount = imageCount ?? resolveDetailImageCount(mode);
+  const resolvedTotal = total ?? resolveDetailImageCount(mode);
   const composition =
     mode === "main"
       ? "主图按 1:1 方图构图，输出商城主图轮播，不要输出详情页模块。"
-      : "详情图按 3:4 竖版构图，输出详情页模块，不要输出主图轮播。";
+      : mode === "detail"
+        ? "详情图按 3:4 竖版构图，输出详情页模块，不要输出主图轮播。"
+        : "SKU图按 1:1 方图构图，输出帮助用户选择规格、颜色、尺码、容量、套餐或版本的 SKU 说明图，不要输出主图轮播或详情页长模块。";
   const rangeText =
-    imageCount === total
-      ? `本次只规划${modeLabel} ${imageCount} 张。`
-      : `本次只规划整套${modeLabel}中的第 ${offset + 1} 到第 ${offset + imageCount} 张，共 ${imageCount} 条；整套${modeLabel}总计 ${total} 张。`;
+    isDynamicSku
+      ? "本次根据 SKU信息 和 上传商品资料 Markdown 动态规划 SKU图，返回实际必要的 1-12 条。不要编造资料中不存在的 SKU。"
+      : resolvedCount === resolvedTotal
+        ? `本次只规划${modeLabel} ${resolvedCount} 张。`
+        : `本次只规划整套${modeLabel}中的第 ${offset + 1} 到第 ${offset + resolvedCount} 张，共 ${resolvedCount} 条；整套${modeLabel}总计 ${resolvedTotal} 张。`;
+  const quantityRule = isDynamicSku
+    ? "prompts 数组长度必须等于实际识别出的 SKU 图数量，范围 1-12。每个数组项必须包含 imageMode，且 imageMode 必须写 \"sku\"。每个 prompt 必须是完整单张图片生成提示词，并包含图包类型、统一 Campaign Style Lock、单张 Frame Objective、短中文图内文案、SKU 选择逻辑、构图、参考图一致性或参考图特征提取要求。SKU图按 1:1 方图构图。不要输出“负面提示词”或“Negative Prompt”段落。"
+    : `prompts 数组长度必须等于 ${resolvedCount}。每个数组项必须包含 imageMode，且 imageMode 必须写 "${mode}"。每个 prompt 必须是完整单张图片生成提示词，并包含图包类型、统一 Campaign Style Lock、单张 Frame Objective、短中文图内文案、构图、参考图一致性或参考图特征提取要求。${composition}不要输出“负面提示词”或“Negative Prompt”段落。`;
 
   return [
     userText
       .replace(/^图包类型：.*$/m, `图包类型：${modeLabel}`)
-      .replace(/^图片数量：.*$/m, `图片数量：${modeLabel} ${imageCount} 张，总计 ${imageCount} 张`)
+      .replace(
+        /^图片数量：.*$/m,
+        isDynamicSku
+          ? "图片数量：SKU图动态识别，返回实际必要的 1-12 张"
+          : `图片数量：${modeLabel} ${resolvedCount} 张，总计 ${resolvedCount} 张`,
+      )
       .replace(
         /^按图包类型规划每张图主题：.*$/m,
         `按图包类型规划每张图主题：${rangeText}title 要体现该张图的成交任务，而不是机械套用固定模板。`,
       )
       .replace(
         /^prompts 数组长度必须等于 .*$/m,
-        `prompts 数组长度必须等于 ${imageCount}。每个数组项必须包含 imageMode，且 imageMode 必须写 "${mode}"。每个 prompt 必须是完整单张图片生成提示词，并包含图包类型、统一 Campaign Style Lock、单张 Frame Objective、短中文图内文案、构图、参考图一致性或参考图特征提取要求。${composition}不要输出“负面提示词”或“Negative Prompt”段落。`,
+        quantityRule,
       ),
     "",
     "【本次分批生成硬性约束】",
     rangeText,
-    `本次返回数量必须严格等于 ${imageCount} 条。`,
+    isDynamicSku ? "本次返回数量必须是 1-12 条，且每条都对应明确的 SKU 选择任务。" : `本次返回数量必须严格等于 ${resolvedCount} 条。`,
     `所有 prompts[].imageMode 必须写 "${mode}"。`,
     "只返回 JSON，不要解释，不要 Markdown。",
   ].join("\n");
@@ -760,9 +779,10 @@ async function requestPromptBatch(options: {
   total?: number;
   shouldStop: () => Promise<boolean>;
 }) {
-  const imageCount = options.count ?? resolveDetailImageCount(options.mode);
+  const dynamicSku = options.mode === "sku" && !Number.isFinite(options.count);
+  const imageCount = dynamicSku ? undefined : options.count ?? resolveDetailImageCount(options.mode);
   const offset = options.offset ?? 0;
-  const total = options.total ?? resolveDetailImageCount(options.mode);
+  const total = dynamicSku ? undefined : options.total ?? resolveDetailImageCount(options.mode);
   const upstream = await createPromptRequestWithRetry(
     options.baseUrl,
     options.apiKey,
@@ -807,7 +827,13 @@ async function requestPromptBatch(options: {
     })
     .filter((item) => item.prompt);
 
-  if (prompts.length !== imageCount) {
+  if (dynamicSku) {
+    if (prompts.length < 1 || prompts.length > 12) {
+      throw new Error(
+        `${detailImageModeLabel(options.mode)}方案数量不匹配：期望 1-12 条，实际 ${prompts.length} 条`,
+      );
+    }
+  } else if (prompts.length !== imageCount) {
     throw new Error(
       `${detailImageModeLabel(options.mode)}方案数量不匹配：期望 ${imageCount} 条，实际 ${prompts.length} 条`,
     );
@@ -1927,13 +1953,21 @@ export class PromptTasksDO {
         throw new Error("服务端未配置图包方案生成接口");
       }
       const promptBatches = imageModes.flatMap((mode) => {
+        if (mode === "sku") {
+          return [{
+            mode,
+            count: undefined,
+            offset: 0,
+            total: undefined,
+          }];
+        }
         const total = resolveDetailImageCount(mode);
         const chunkSize = mode === "detail" ? 4 : total;
         const batches: Array<{
           mode: DetailImageMode;
-          count: number;
+          count?: number;
           offset: number;
-          total: number;
+          total?: number;
         }> = [];
         for (let offset = 0; offset < total; offset += chunkSize) {
           batches.push({
@@ -1965,13 +1999,20 @@ export class PromptTasksDO {
         )
       ).flat();
 
-      if (prompts.length !== imageCount) {
+      const fixedPromptsCount = prompts.filter((item) => item.imageMode !== "sku").length;
+      if (fixedPromptsCount !== imageCount) {
         throw new Error(
-          `图包方案数量不匹配：期望 ${imageCount} 条，实际 ${prompts.length} 条`,
+          `固定图包方案数量不匹配：期望 ${imageCount} 条，实际 ${fixedPromptsCount} 条`,
         );
       }
       for (const mode of imageModes) {
         const actual = prompts.filter((item) => item.imageMode === mode).length;
+        if (mode === "sku") {
+          if (actual < 1 || actual > 12) {
+            throw new Error(`${detailImageModeLabel(mode)}方案数量不匹配：期望 1-12 条，实际 ${actual} 条`);
+          }
+          continue;
+        }
         const expected = resolveDetailImageCount(mode);
         if (actual !== expected) {
           throw new Error(
@@ -1988,6 +2029,7 @@ export class PromptTasksDO {
           userKey,
           prompts,
           model,
+          imageCount: prompts.length,
           createdAt,
           updatedAt: Date.now(),
         }),

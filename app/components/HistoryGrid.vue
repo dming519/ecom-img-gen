@@ -32,7 +32,9 @@ function getReversed(history: HistoryItem[]) {
 }
 
 function getHistoryModeLabel(item: HistoryItem) {
-  return item.product.imageModes.map((mode) => (mode === "main" ? "主图" : "详情图")).join("+")
+  return item.product.imageModes
+      .map((mode) => (mode === "main" ? "主图" : mode === "detail" ? "详情图" : "SKU图"))
+      .join("+")
 }
 </script>
 

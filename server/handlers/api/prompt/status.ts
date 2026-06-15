@@ -58,7 +58,7 @@ function normalizeTitle(value: unknown, index: number) {
 }
 
 function normalizeImageMode(value: unknown, index: number): DetailImageMode {
-  if (value === "main" || value === "detail") return value;
+  if (value === "main" || value === "detail" || value === "sku") return value;
   throw new Error(`第${index + 1}条图包方案缺少合法 imageMode`);
 }
 

@@ -1758,8 +1758,8 @@ button:disabled {
 
 .image-mode-toggle-group {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .image-mode-toggle {
@@ -4440,7 +4440,34 @@ textarea::-webkit-resizer {
 }
 
 .input-rail .image-mode-toggle {
-  min-height: 48px;
+  min-height: 46px;
+  padding: 6px 4px;
+  font-size: 0.75rem;
+}
+
+.input-rail .image-mode-toggle small {
+  font-size: 0.6875rem;
+}
+
+.sku-inline-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(211, 219, 231, 0.8);
+}
+
+.sku-inline-panel .form-field {
+  margin: 0;
+}
+
+.sku-inline-panel .compact-textarea {
+  min-height: 72px;
+  height: 72px;
+}
+
+.sku-material-media {
+  min-height: 64px;
 }
 
 .input-rail .product-media {

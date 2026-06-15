@@ -93,6 +93,7 @@ export async function generateDetailPrompts(
   const body = JSON.stringify({
     name: options.name,
     sellingPoints: options.sellingPoints,
+    skuInfo: options.skuInfo,
     imageModes: options.imageModes,
     targetPlatform: options.targetPlatform,
     audience: options.audience,
@@ -103,6 +104,7 @@ export async function generateDetailPrompts(
     productImageIds: options.productImageIds,
     styleReferenceImageIds: options.styleReferenceImageIds,
     productMaterialsMarkdown: options.productMaterialsMarkdown,
+    skuMaterialsMarkdown: options.skuMaterialsMarkdown,
   });
   if (body.length > MAX_PROMPT_PAYLOAD_CHARS) {
     throw new Error("商品资料数据过大，请减少图片或资料文件后再生成。");

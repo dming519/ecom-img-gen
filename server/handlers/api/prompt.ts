@@ -10,6 +10,7 @@ import type { DetailImageMode } from "../../../src/lib/types";
 interface PromptRequestBody {
   name?: string;
   sellingPoints?: string;
+  skuInfo?: string;
   imageModes?: unknown;
   targetPlatform?: string;
   audience?: string;
@@ -20,6 +21,7 @@ interface PromptRequestBody {
   productImageIds?: string[];
   styleReferenceImageIds?: string[];
   productMaterialsMarkdown?: string;
+  skuMaterialsMarkdown?: string;
 }
 
 // Nuxt/Nitro 会把运行时环境变量、KV、D1 等都放进 context.env。
@@ -41,6 +43,7 @@ interface RequestContext {
 const MAX_PROMPT_IMAGE_CHARS = 1_500_000;
 const MAX_PROMPT_IMAGE_TOTAL_CHARS = 6_000_000;
 const MAX_PRODUCT_MATERIAL_MARKDOWN_CHARS = 160_000;
+const MAX_SKU_INFO_CHARS = 20_000;
 
 // 小项目里直接用这个 helper 返回 JSON，避免每个分支重复写 headers。
 function json(data: unknown, init?: ResponseInit) {
@@ -54,6 +57,7 @@ function json(data: unknown, init?: ResponseInit) {
 }
 
 function resolveImageModeCount(mode: DetailImageMode) {
+  if (mode === "sku") return 0;
   return mode === "main" ? 5 : 8;
 }
 
@@ -61,11 +65,12 @@ function normalizeImageModes(value: unknown): DetailImageMode[] {
   const source = Array.isArray(value) ? value : [];
   const seen = new Set<DetailImageMode>();
   for (const mode of source) {
-    if (mode === "main" || mode === "detail") seen.add(mode);
+    if (mode === "main" || mode === "detail" || mode === "sku") seen.add(mode);
   }
   const ordered: DetailImageMode[] = [];
   if (seen.has("main")) ordered.push("main");
   if (seen.has("detail")) ordered.push("detail");
+  if (seen.has("sku")) ordered.push("sku");
   return ordered;
 }
 
@@ -74,12 +79,17 @@ function resolveImageModesCount(modes: DetailImageMode[]) {
 }
 
 function describeImageModes(modes: DetailImageMode[]) {
-  return modes.map((mode) => (mode === "main" ? "主图" : "详情图")).join(" + ");
+  return modes
+    .map((mode) => (mode === "main" ? "主图" : mode === "detail" ? "详情图" : "SKU图"))
+    .join(" + ");
 }
 
 function describeImageModeCounts(modes: DetailImageMode[]) {
   return modes
-    .map((mode) => `${mode === "main" ? "主图" : "详情图"} ${resolveImageModeCount(mode)} 张`)
+    .map((mode) => {
+      const label = mode === "main" ? "主图" : mode === "detail" ? "详情图" : "SKU图";
+      return mode === "sku" ? `${label} 动态识别张数` : `${label} ${resolveImageModeCount(mode)} 张`;
+    })
     .join("，");
 }
 
@@ -141,8 +151,14 @@ export async function handlePost(context: RequestContext) {
 
   const name = body.name?.trim() ?? "";
   const sellingPoints = body.sellingPoints?.trim() ?? "";
+  const skuInfo = normalizeLongText(body.skuInfo, MAX_SKU_INFO_CHARS);
   const imageModes = normalizeImageModes(body.imageModes);
   const imageCount = resolveImageModesCount(imageModes);
+  const imageCountLabel = imageModes.includes("sku")
+    ? imageCount
+      ? `${imageCount} 张固定图 + SKU图动态识别`
+      : "SKU图动态识别"
+    : `${imageCount} 张`;
   const targetPlatform = normalizeOptionalText(body.targetPlatform) || "淘宝 / 天猫 / 京东 / 抖音商城 / 小红书";
   const audience = normalizeOptionalText(body.audience);
   const priceBand = normalizeOptionalText(body.priceBand);
@@ -151,6 +167,10 @@ export async function handlePost(context: RequestContext) {
   const extraRequirements = normalizeOptionalText(body.extraRequirements);
   const productMaterialsMarkdown = normalizeLongText(
     body.productMaterialsMarkdown,
+    MAX_PRODUCT_MATERIAL_MARKDOWN_CHARS,
+  );
+  const skuMaterialsMarkdown = normalizeLongText(
+    body.skuMaterialsMarkdown,
     MAX_PRODUCT_MATERIAL_MARKDOWN_CHARS,
   );
   const userKey = getUserKey(session.user);
@@ -210,7 +230,10 @@ export async function handlePost(context: RequestContext) {
     return json({ error: "请输入商品核心卖点和功效" }, { status: 400 });
   }
   if (!imageModes.length) {
-    return json({ error: "请选择图包类型：主图或详情图" }, { status: 400 });
+    return json({ error: "请选择图包类型：主图、详情图或 SKU图" }, { status: 400 });
+  }
+  if (imageModes.includes("sku") && !skuInfo && !skuMaterialsMarkdown) {
+    return json({ error: "选中 SKU图 时，请填写 SKU信息，或上传包含 SKU 资料的文件" }, { status: 400 });
   }
   if (!productImages.length) {
     return json({ error: "请至少上传一张商品图片" }, { status: 400 });
@@ -249,7 +272,21 @@ export async function handlePost(context: RequestContext) {
     "",
     `商品名称：${name}`,
     `图包类型：${describeImageModes(imageModes)}`,
-    `图片数量：${describeImageModeCounts(imageModes)}，总计 ${imageCount} 张`,
+    `图片数量：${describeImageModeCounts(imageModes)}，总计 ${imageCountLabel}`,
+    imageModes.includes("sku")
+      ? [
+          "SKU信息：",
+          skuInfo || "未填写，请从上传 SKU资料 Markdown 中识别 SKU；如果资料中没有 SKU 信息，不要编造 SKU。",
+          "",
+          "上传 SKU资料 Markdown：",
+          skuMaterialsMarkdown || "未上传 SKU资料文件。",
+          "",
+          "SKU图动态规则：",
+          "选中 SKU图 时，必须根据 SKU信息 和 上传 SKU资料 Markdown 动态识别需要生成多少张 SKU 图。",
+          "把颜色、尺码、容量、口味、规格、套餐、版本、适配型号等会影响购买选择的 SKU 维度转成图片方案；相近或信息过少的 SKU 可以合并成一张矩阵/对照图。",
+          "SKU图数量必须是实际必要数量，范围 1-12 张；每条 SKU 图 prompt 的 imageMode 必须写 \"sku\"；title 要体现具体 SKU 选择任务。",
+        ].join("\n")
+      : "SKU信息：未选择 SKU图。",
     `目标平台：${targetPlatform}`,
     `目标人群 / 购买场景：${audience || "未填写，请基于商品品类和卖点保守推断，并在 prompt 中使用通用国内电商场景。"}`,
     `价格带 / 客单价：${priceBand || "未填写，请按中性价位表达，不要编造具体价格。"}`,
@@ -277,9 +314,11 @@ export async function handlePost(context: RequestContext) {
     `JSON 结构：{"prompts":[{"imageMode":"main","title":"第1张：首图核心卖点主视觉","prompt":"完整可直接用于 GPT-Image-2 的单张图片生成提示词"}]}`,
     "prompt 字段如需分段，必须使用 \\n 表示换行，保留清晰的段落结构。",
     "生成前必须先在内部完成国内电商转化诊断、买家购买理由卡、图内文案门和统一风格锁；不要把诊断过程输出到 JSON 外。",
-    "按图包类型规划每张图主题：选中主图时必须输出 5 张商城主图轮播；选中详情图时必须输出 8 张竖版详情页模块；如果同时选中，必须先输出 5 张主图，再输出 8 张详情图。title 要体现该张图的成交任务，而不是机械套用固定五段式。",
+    "按图包类型规划每张图主题：选中主图时必须输出 5 张商城主图轮播；选中详情图时必须输出 8 张竖版详情页模块；选中 SKU图时必须根据 SKU 信息或上传资料动态识别 SKU 图数量并输出 1-12 张 SKU 图；如果同时选中多个类型，必须按主图、详情图、SKU图的顺序输出。title 要体现该张图的成交任务，而不是机械套用固定模板。",
     "参考图是商品事实来源，但不是每张图都必须完整展示参考图商品；可以根据该张图主题提取参考图里的材质、纹理、色彩、局部结构、包装标签、工艺细节、图案元素或使用状态。",
-    `prompts 数组长度必须等于 ${imageCount}。每个数组项必须包含 imageMode，主图写 "main"，详情图写 "detail"。每个 prompt 必须是完整单张图片生成提示词，并包含图包类型、统一 Campaign Style Lock、单张 Frame Objective、短中文图内文案、构图、参考图一致性或参考图特征提取要求。主图按 1:1 方图构图；详情图按 3:4 竖版构图。不要输出“负面提示词”或“Negative Prompt”段落。`,
+    imageModes.includes("sku")
+      ? `prompts 数组长度必须等于固定图数量 ${imageCount} 加上实际识别出的 SKU 图数量。每个数组项必须包含 imageMode，主图写 "main"，详情图写 "detail"，SKU图写 "sku"。每个 prompt 必须是完整单张图片生成提示词，并包含图包类型、统一 Campaign Style Lock、单张 Frame Objective、短中文图内文案、构图、参考图一致性或参考图特征提取要求。主图和 SKU图按 1:1 方图构图；详情图按 3:4 竖版构图。不要输出“负面提示词”或“Negative Prompt”段落。`
+      : `prompts 数组长度必须等于 ${imageCount}。每个数组项必须包含 imageMode，主图写 "main"，详情图写 "detail"。每个 prompt 必须是完整单张图片生成提示词，并包含图包类型、统一 Campaign Style Lock、单张 Frame Objective、短中文图内文案、构图、参考图一致性或参考图特征提取要求。主图按 1:1 方图构图；详情图按 3:4 竖版构图。不要输出“负面提示词”或“Negative Prompt”段落。`,
   ].join("\n");
 
   const taskId = crypto.randomUUID();
