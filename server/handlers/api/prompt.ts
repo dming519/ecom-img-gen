@@ -106,6 +106,19 @@ function normalizeLongText(value: unknown, limit: number) {
     .slice(0, limit);
 }
 
+function estimateExplicitSkuCount(text: string) {
+  const normalized = text
+    .replace(/\r\n/g, "\n")
+    .replace(/[；;|]/g, "\n")
+    .split(/\n+/)
+    .flatMap((line) => line.split(/[、，,]+/))
+    .map((item) => item.trim().replace(/^[-*•\d.、\s]+/, "").trim())
+    .filter(Boolean)
+    .filter((item) => item.length <= 80);
+  const uniqueItems = Array.from(new Set(normalized));
+  return uniqueItems.length >= 2 && uniqueItems.length <= 12 ? uniqueItems.length : 0;
+}
+
 // 只接受 data URL 或 http(s) 图片，并过滤超大图片。
 function normalizeProductImages(images: string[] | undefined, limit = 8) {
   const normalized = (images ?? [])
@@ -238,6 +251,12 @@ export async function handlePost(context: RequestContext) {
   if (!productImages.length) {
     return json({ error: "请至少上传一张商品图片" }, { status: 400 });
   }
+  const estimatedSkuCount = imageModes.includes("sku")
+    ? Math.max(
+        estimateExplicitSkuCount(skuInfo),
+        estimateExplicitSkuCount(skuMaterialsMarkdown),
+      )
+    : 0;
 
   const kv = context.env.TASKS_KV;
   const workerUrl = context.env.IMAGE_WORKER_URL?.trim();
@@ -283,8 +302,12 @@ export async function handlePost(context: RequestContext) {
           "",
           "SKU图动态规则：",
           "选中 SKU图 时，必须根据 SKU信息 和 上传 SKU资料 Markdown 动态识别需要生成多少张 SKU 图。",
-          "把颜色、尺码、容量、口味、规格、套餐、版本、适配型号等会影响购买选择的 SKU 维度转成图片方案；相近或信息过少的 SKU 可以合并成一张矩阵/对照图。",
-          "SKU图数量必须是实际必要数量，范围 1-12 张；每条 SKU 图 prompt 的 imageMode 必须写 \"sku\"；title 要体现具体 SKU 选择任务。",
+          estimatedSkuCount
+            ? `系统从用户输入中预估识别到 ${estimatedSkuCount} 个明确 SKU 项；除非资料中存在重复项，否则 SKU图 prompt 数量必须按这个数量输出。`
+            : "系统未从用户输入中预估到多个明确 SKU 项，请继续根据文本语义识别实际 SKU 数量。",
+          "如果 SKU信息中用顿号、逗号、分号、斜杠、换行、表格行或列表项明确列出了具体 SKU 项，必须逐项识别为独立 SKU 图；例如“单瓶装、双瓶装、三瓶装”必须输出 3 张 SKU 图，分别对应单瓶装、双瓶装、三瓶装。",
+          "把颜色、尺码、容量、口味、规格、套餐、版本、适配型号等会影响购买选择的 SKU 维度转成图片方案；只有当用户没有明确列出 SKU 项、且资料只描述一个宽泛维度时，才可以生成 1 张总览/对照图。",
+          "SKU图数量必须等于实际识别出的明确 SKU 项数量，范围 1-12 张；每条 SKU 图 prompt 的 imageMode 必须写 \"sku\"；title 要体现具体 SKU 选择任务和 SKU 名称。",
         ].join("\n")
       : "SKU信息：未选择 SKU图。",
     `目标平台：${targetPlatform}`,
@@ -314,7 +337,7 @@ export async function handlePost(context: RequestContext) {
     `JSON 结构：{"prompts":[{"imageMode":"main","title":"第1张：首图核心卖点主视觉","prompt":"完整可直接用于 GPT-Image-2 的单张图片生成提示词"}]}`,
     "prompt 字段如需分段，必须使用 \\n 表示换行，保留清晰的段落结构。",
     "生成前必须先在内部完成国内电商转化诊断、买家购买理由卡、图内文案门和统一风格锁；不要把诊断过程输出到 JSON 外。",
-    "按图包类型规划每张图主题：选中主图时必须输出 5 张商城主图轮播；选中详情图时必须输出 8 张竖版详情页模块；选中 SKU图时必须根据 SKU 信息或上传资料动态识别 SKU 图数量并输出 1-12 张 SKU 图；如果同时选中多个类型，必须按主图、详情图、SKU图的顺序输出。title 要体现该张图的成交任务，而不是机械套用固定模板。",
+    "按图包类型规划每张图主题：选中主图时必须输出 5 张商城主图轮播；选中详情图时必须输出 8 张竖版详情页模块；选中 SKU图时必须根据 SKU 信息或上传资料动态识别 SKU 图数量并输出 1-12 张 SKU 图；明确列出的 SKU 项不得合并成一张图，例如“单瓶装、双瓶装、三瓶装”必须输出 3 条 imageMode 为 \"sku\" 的 prompt；如果同时选中多个类型，必须按主图、详情图、SKU图的顺序输出。title 要体现该张图的成交任务，而不是机械套用固定模板。",
     "参考图是商品事实来源，但不是每张图都必须完整展示参考图商品；可以根据该张图主题提取参考图里的材质、纹理、色彩、局部结构、包装标签、工艺细节、图案元素或使用状态。",
     imageModes.includes("sku")
       ? `prompts 数组长度必须等于固定图数量 ${imageCount} 加上实际识别出的 SKU 图数量。每个数组项必须包含 imageMode，主图写 "main"，详情图写 "detail"，SKU图写 "sku"。每个 prompt 必须是完整单张图片生成提示词，并包含图包类型、统一 Campaign Style Lock、单张 Frame Objective、短中文图内文案、构图、参考图一致性或参考图特征提取要求。主图和 SKU图按 1:1 方图构图；详情图按 3:4 竖版构图。不要输出“负面提示词”或“Negative Prompt”段落。`

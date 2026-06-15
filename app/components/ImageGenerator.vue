@@ -48,11 +48,20 @@ import LayerStudio from "./LayerStudio.vue"
 import Lightbox from "./Lightbox.vue"
 import MultiViewStudio from "./MultiViewStudio.vue"
 import QualitySelector from "./QualitySelector.vue"
-import Stage from "./Stage.vue"
 
 type StudioMode = "image" | "cutout" | "multi-view" | "edit" | "layer"
 type WakeLockSentinelLike = { release: () => Promise<void> }
 type ProductMaterialStatus = "pending" | "converting" | "converted" | "failed"
+type PackColumnEntry = { item: DetailPromptItem; index: number }
+type PackColumn = {
+  mode: DetailImageMode
+  label: string
+  countLabel: string
+  aspectRatio: AspectRatio
+  items: PackColumnEntry[]
+  activeEntry: PackColumnEntry | null
+  activePosition: number
+}
 type ProductMaterialUpload = Omit<ProductMaterialFile, "markdown"> & {
   file?: File
   markdown?: string
@@ -146,6 +155,7 @@ const prompts = ref<DetailPromptItem[]>([])
 const history = ref<HistoryItem[]>([])
 const activeHistoryIdx = shallowRef(-1)
 const activePromptIdx = shallowRef(0)
+const columnPromptCursors = ref<Partial<Record<DetailImageMode, number>>>({})
 const session = shallowRef<AuthSession | null>(null)
 const sessionLoading = shallowRef(true)
 const authPopoverOpen = shallowRef(false)
@@ -364,8 +374,29 @@ const activePromptIndex = computed(() =>
         : 0,
 )
 const activePrompt = computed(() => prompts.value[activePromptIndex.value] ?? null)
-const activePromptMode = computed(() => getPromptImageMode(activePrompt.value))
-const activePromptModeLabel = computed(() => getImageModeLabel(activePromptMode.value))
+const packColumns = computed<PackColumn[]>(() =>
+  IMAGE_MODE_ORDER
+    .filter((mode) => imageModes.value.includes(mode))
+    .map((mode) => {
+      const items = prompts.value
+        .map((item, index) => ({item, index}))
+        .filter(({item}) => item.imageMode === mode)
+      const cursor = columnPromptCursors.value[mode] ?? activePromptIndex.value
+      const activePosition = Math.min(
+          Math.max(0, items.findIndex(({index}) => index === cursor)),
+          Math.max(0, items.length - 1),
+      )
+      return {
+        mode,
+        label: getImageModeLabel(mode),
+        countLabel: getImageModeCountLabel(mode),
+        aspectRatio: getImageModeAspectRatio(mode),
+        items,
+        activeEntry: items[activePosition] ?? null,
+        activePosition,
+      }
+    }),
+)
 
 // 上传的原图可能很大；先压缩再转成 data URL，减少接口请求体大小。
 function fileToCompressedDataURL(file: File): Promise<string> {
@@ -555,6 +586,51 @@ function getPromptImageSrc(item: DetailPromptItem | undefined) {
   if (!item) return null
   if (item.imageId) return dbImageFileUrl(item.imageId)
   return null
+}
+
+function getColumnStatusText(column: PackColumn) {
+  if (promptBusy.value) return "生成方案中"
+  if (!column.items.length) return "方案未生成"
+  return `${column.items.filter(({item}) => item.imageId).length}/${column.items.length} 已出图`
+}
+
+function resetColumnPromptCursors(items = prompts.value) {
+  const nextCursors: Partial<Record<DetailImageMode, number>> = {}
+  for (const mode of IMAGE_MODE_ORDER) {
+    const entryIndex = items.findIndex((item) => item.imageMode === mode)
+    if (entryIndex >= 0) nextCursors[mode] = entryIndex
+  }
+  columnPromptCursors.value = nextCursors
+}
+
+function setActivePromptIndex(index: number) {
+  const nextIndex = Math.min(Math.max(index, 0), Math.max(0, prompts.value.length - 1))
+  activePromptIdx.value = nextIndex
+  const prompt = prompts.value[nextIndex]
+  if (prompt) {
+    columnPromptCursors.value = {
+      ...columnPromptCursors.value,
+      [prompt.imageMode]: nextIndex,
+    }
+  }
+}
+
+function handleSelectColumnPrompt(column: PackColumn, position: number) {
+  const entry = column.items[Math.min(Math.max(position, 0), Math.max(0, column.items.length - 1))]
+  if (entry) setActivePromptIndex(entry.index)
+}
+
+function handleStepColumnPrompt(column: PackColumn, step: number) {
+  if (!column.items.length) return
+  const nextPosition = (column.activePosition + step + column.items.length) % column.items.length
+  handleSelectColumnPrompt(column, nextPosition)
+}
+
+function handlePreviewPrompt(index: number) {
+  const nextIndex = Math.min(Math.max(index, 0), Math.max(0, prompts.value.length - 1))
+  setActivePromptIndex(nextIndex)
+  const imageSrc = getPromptImageSrc(prompts.value[nextIndex])
+  if (imageSrc) lightboxSrc.value = imageSrc
 }
 
 // 根据正式路由路径判断当前模块。
@@ -962,7 +1038,8 @@ function handleResetProductInput() {
   skuMaterials.value = []
   quality.value = "1K"
   prompts.value = []
-  activePromptIdx.value = 0
+  setActivePromptIndex(0)
+  resetColumnPromptCursors([])
   activeHistoryIdx.value = -1
   if (fileInputRef.value) fileInputRef.value.value = ""
   if (skuFileInputRef.value) skuFileInputRef.value.value = ""
@@ -1059,7 +1136,8 @@ async function handleGeneratePrompts() {
     prompts.value = result.prompts.map((item, index) =>
         createPromptItem(index, item.title, item.promptId, item.prompt, item.imageMode),
     )
-    activePromptIdx.value = 0
+    setActivePromptIndex(0)
+    resetColumnPromptCursors()
   } catch (event) {
     error.value = event instanceof Error ? event.message : String(event)
   } finally {
@@ -1163,7 +1241,7 @@ async function handleGenerateImages() {
     let working = historyItem.prompts
     for (let index = 0; index < working.length; index += 1) {
       if (imageCancelRequestedRef.value) throw new ImageGenerationCancelledError()
-      activePromptIdx.value = index
+      setActivePromptIndex(index)
       working = working.map((item, itemIndex) =>
           itemIndex === index
               ? {...item, status: "queued", error: undefined, updatedAt: Date.now()}
@@ -1400,6 +1478,11 @@ async function handleRegenerateActiveImage() {
   }
 }
 
+async function handleRegeneratePromptAt(index: number) {
+  setActivePromptIndex(index)
+  await handleRegenerateActiveImage()
+}
+
 // 中断当前正在轮询的图片任务，并通知服务端把任务标记为取消。
 function handleCancelImageGeneration() {
   if (!imageBusy.value) return
@@ -1450,7 +1533,8 @@ function handleSelectHistory(idx: number) {
   if (item.generation?.quality && IMAGE_QUALITY_VALUES.includes(item.generation.quality)) {
     quality.value = item.generation.quality
   }
-  activePromptIdx.value = 0
+  setActivePromptIndex(0)
+  resetColumnPromptCursors()
   window.setTimeout(() => {
     suppressImageModeReset.value = false
   }, 0)
@@ -1560,7 +1644,8 @@ watch(() => imageModes.value.join(","), () => {
   if (suppressImageModeReset.value) return
   if (promptBusy.value || imageBusy.value) return
   prompts.value = []
-  activePromptIdx.value = 0
+  setActivePromptIndex(0)
+  resetColumnPromptCursors([])
   activeHistoryIdx.value = -1
 })
 
@@ -1621,10 +1706,13 @@ onMounted(() => {
   window.addEventListener("hashchange", handleLocationChange)
 
   if (studioMode.value === "image") {
+    let shouldReleaseImageModeReset = false
     try {
       const raw = localStorage.getItem(DRAFT_KEY)
       if (raw) {
         const draft = JSON.parse(raw) as DraftState
+        suppressImageModeReset.value = true
+        shouldReleaseImageModeReset = true
         productName.value = draft.productName || ""
         sellingPoints.value = draft.sellingPoints || ""
         skuInfo.value = draft.skuInfo || ""
@@ -1645,6 +1733,8 @@ onMounted(() => {
         prompts.value = Array.isArray(draft.prompts)
             ? draft.prompts.map((prompt) => resetInterruptedPrompt(prompt))
             : []
+        setActivePromptIndex(0)
+        resetColumnPromptCursors()
         if (draft.quality && IMAGE_QUALITY_VALUES.includes(draft.quality)) {
           quality.value = draft.quality
         }
@@ -1669,6 +1759,11 @@ onMounted(() => {
       // Ignore invalid local draft.
     } finally {
       draftLoaded.value = true
+      if (shouldReleaseImageModeReset) {
+        window.setTimeout(() => {
+          suppressImageModeReset.value = false
+        }, 0)
+      }
     }
   } else {
     draftLoaded.value = true
@@ -1905,7 +2000,6 @@ onBeforeUnmount(() => {
         <span>{{ prompts.length ? `${prompts.length} 个方案` : "方案未生成" }}</span>
         <span>{{ productUploadStatusLabel }}</span>
         <span>{{ creditLabel }}</span>
-        <span>{{ generationLabel }}</span>
         <span v-if="imageBusy" class="status-generating">
           <span class="status-pulse" aria-hidden="true"></span>
           生成中 {{ activePromptIndex + 1 }}/{{ prompts.length }}
@@ -2215,80 +2309,82 @@ onBeforeUnmount(() => {
                       <span>{{ option.label }}</span>
                       <small>{{ getImageModeCountLabel(option.value) }} · {{
                           getImageModeAspectRatio(option.value)
-                        }}</small>
+                      }}</small>
                     </button>
                   </div>
-                  <Transition name="collapse">
-                    <div v-if="isImageModeSelected('sku')" class="sku-inline-panel">
-                      <div class="form-field">
-                        <label for="sku-info">SKU信息 <span class="field-hint">(二选一)</span></label>
-                        <textarea
-                            id="sku-info"
-                            v-model="skuInfo"
-                            class="compact-textarea"
-                            :disabled="controlsDisabled"
-                            placeholder="示例：白色/S/M/L；黑色/S/M/L；单瓶装/三瓶装；A款基础版、B款升级版。"
-                        />
-                      </div>
-
-                      <div class="form-field">
-                        <div class="field-row-head">
-                          <label for="sku-materials">SKU资料 <span class="field-hint">(二选一)</span></label>
-                          <button
-                              v-if="skuMaterials.length"
-                              type="button"
-                              class="inline-action"
-                              :disabled="controlsDisabled"
-                              @click="handleClearSkuMaterials"
-                          >
-                            清空
-                          </button>
-                        </div>
-                        <div class="product-media sku-material-media">
-                          <div
-                              v-for="material in skuMaterials"
-                              :key="material.id"
-                              :class="['product-material-chip', `is-${material.status}`]"
-                              :title="getProductMaterialTitle(material)"
-                          >
-                            <span class="product-material-type">{{ getProductMaterialKindLabel(material.kind) }}</span>
-                            <strong>{{ material.name }}</strong>
-                            <button
-                                type="button"
-                                class="product-material-del"
-                                :disabled="controlsDisabled"
-                                :aria-label="`移除 SKU资料 ${material.name}`"
-                                @click="handleRemoveSkuMaterial(material.id)"
-                            >
-                              <Icon name="close"/>
-                            </button>
-                          </div>
-                          <button
-                              type="button"
-                              class="prompt-upload-tile"
-                              :disabled="controlsDisabled"
-                              @click="skuFileInputRef?.click()"
-                          >
-                            <Icon name="upload"/>
-                            <span>{{ materialBusy ? "转换中" : "上传" }}</span>
-                          </button>
-                        </div>
-                        <p class="field-help">支持 PDF、PPTX、DOCX、Excel、HTML、CSV、JSON、XML；上传后会转 Markdown，用于动态识别 SKU 图数量。</p>
-                        <input
-                            id="sku-materials"
-                            ref="skuFileInputRef"
-                            name="skuMaterials"
-                            type="file"
-                            aria-label="上传 SKU 资料"
-                            :accept="PRODUCT_MATERIAL_ACCEPT"
-                            multiple
-                            hidden
-                            @change="event => handleSelectSkuFiles((event.target as HTMLInputElement).files)"
-                        >
-                      </div>
-                    </div>
-                  </Transition>
                 </div>
+
+                <Transition name="collapse">
+                  <div v-if="isImageModeSelected('sku')" class="sku-inline-panel">
+                    <div class="form-field">
+                      <label for="sku-info">SKU信息 <span class="field-hint">(二选一)</span></label>
+                      <textarea
+                          id="sku-info"
+                          v-model="skuInfo"
+                          class="compact-textarea"
+                          :disabled="controlsDisabled"
+                          placeholder="示例：白色/S/M/L；黑色/S/M/L；单瓶装/三瓶装；A款基础版、B款升级版。"
+                      />
+                    </div>
+
+                    <div class="form-field">
+                      <div class="field-row-head">
+                        <label for="sku-materials">SKU资料 <span class="field-hint">(二选一)</span></label>
+                        <button
+                            v-if="skuMaterials.length"
+                            type="button"
+                            class="inline-action"
+                            :disabled="controlsDisabled"
+                            @click="handleClearSkuMaterials"
+                        >
+                          清空
+                        </button>
+                      </div>
+                      <div class="product-media sku-material-media">
+                        <div
+                            v-for="material in skuMaterials"
+                            :key="material.id"
+                            :class="['product-material-chip', `is-${material.status}`]"
+                            :title="getProductMaterialTitle(material)"
+                        >
+                          <span class="product-material-type">{{ getProductMaterialKindLabel(material.kind) }}</span>
+                          <strong>{{ material.name }}</strong>
+                          <button
+                              type="button"
+                              class="product-material-del"
+                              :disabled="controlsDisabled"
+                              :aria-label="`移除 SKU资料 ${material.name}`"
+                              @click="handleRemoveSkuMaterial(material.id)"
+                          >
+                            <Icon name="close"/>
+                          </button>
+                        </div>
+                        <button
+                            type="button"
+                            class="prompt-upload-tile"
+                            :disabled="controlsDisabled"
+                            @click="skuFileInputRef?.click()"
+                        >
+                          <Icon name="upload"/>
+                          <span>{{ materialBusy ? "转换中" : "上传" }}</span>
+                        </button>
+                      </div>
+                      <p class="field-help">SKU资料会转 Markdown，用于动态识别 SKU 图数量。</p>
+                      <input
+                          id="sku-materials"
+                          ref="skuFileInputRef"
+                          name="skuMaterials"
+                          type="file"
+                          aria-label="上传 SKU 资料"
+                          :accept="PRODUCT_MATERIAL_ACCEPT"
+                          multiple
+                          hidden
+                          @change="event => handleSelectSkuFiles((event.target as HTMLInputElement).files)"
+                      >
+                    </div>
+                  </div>
+                </Transition>
+
                 <div class="setting-block">
                   <div class="setting-head">
                     <label>比例/清晰度</label>
@@ -2315,77 +2411,13 @@ onBeforeUnmount(() => {
           </div>
         </aside>
 
-        <aside class="studio-panel prompt-rail">
-          <h2 class="sr-only">图包方案</h2>
-          <div class="prompt-editor-list">
-            <div v-if="promptBusy" class="busy-card">
-              <span class="busy-orbit" aria-hidden="true"/>
-              <strong>正在生成图包方案</strong>
-              <p>AI 正在分析商品资料和参考图，预计需要 60 秒...</p>
+        <section class="studio-panel pack-workspace">
+          <div class="pack-workspace-head">
+            <div>
+              <h2>图包工作区</h2>
+              <span>{{ generationLabel }}</span>
             </div>
-            <div v-else-if="!activePrompt" class="empty"
-                 style="display: flex; flex-direction: column; align-items: center; gap: 14px; justify-content: center; padding: 32px; text-align: center;">
-              <Icon name="spark" style="width: 32px; height: 32px; color: var(--accent); opacity: 0.8;"/>
-              <div style="font-size: 0.875rem; color: var(--text-sub);">还没有图包生成方案。</div>
-              <button
-                  type="button"
-                  class="btn-secondary"
-                  style="min-height: 32px; padding: 6px 12px; font-size: 0.8125rem; border-radius: var(--radius-control); cursor: pointer; font-weight: bold;"
-                  :disabled="controlsDisabled"
-                  @click="handleLoadDemoData"
-              >
-                导入示例数据
-              </button>
-            </div>
-            <template v-else>
-              <div :key="activePrompt.id" class="prompt-editor prompt-editor-single is-active">
-                <div class="prompt-editor-head">
-                  <button
-                      type="button"
-                      class="prompt-title-nav"
-                      :disabled="activePromptIndex === 0"
-                      aria-label="上一张图包方案"
-                      title="上一张"
-                      @click="activePromptIdx = Math.max(0, activePromptIndex - 1)"
-                  >
-                    ‹
-                  </button>
-                  <span class="prompt-index">{{ activePromptIndex + 1 }}</span>
-                  <input
-                      aria-label="图包方案标题"
-                      type="text"
-                      :value="activePrompt.title"
-                      :disabled="imageBusy"
-                      @input="event => handleTitleChange(activePrompt!.id, (event.target as HTMLInputElement).value)"
-                  >
-                  <span :class="['status-pill', `is-${activePrompt.status}`]">
-                    {{ activePromptModeLabel }} · {{ STATUS_LABEL[activePrompt.status] }}
-                  </span>
-                  <button
-                      type="button"
-                      class="prompt-title-nav"
-                      :disabled="activePromptIndex >= prompts.length - 1"
-                      aria-label="下一张图包方案"
-                      title="下一张"
-                      @click="activePromptIdx = Math.min(prompts.length - 1, activePromptIndex + 1)"
-                  >
-                    ›
-                  </button>
-                </div>
-                <label class="sr-only" :for="`prompt-text-${activePrompt.id}`">生图 Prompt</label>
-                <textarea
-                    :id="`prompt-text-${activePrompt.id}`"
-                    class="prompt-textarea"
-                    :value="activePrompt.prompt || ''"
-                    :disabled="imageBusy"
-                    placeholder="当前方案没有返回 Prompt，请重新生成图包方案。"
-                    @input="event => handlePromptChange(activePrompt!.id, (event.target as HTMLTextAreaElement).value)"
-                />
-              </div>
-            </template>
-          </div>
-          <div class="prompt-action-bar">
-            <div class="generation-action-row">
+            <div class="pack-workspace-actions">
               <button
                   type="button"
                   class="btn-secondary"
@@ -2393,16 +2425,7 @@ onBeforeUnmount(() => {
                   @click="handleGenerateImages"
               >
                 <span v-if="imageBusy" class="btn-spinner" aria-hidden="true"/>
-                {{ imageBusy ? `生成中 (${activePromptIndex + 1}/${prompts.length})` : "批量生成商品图" }}
-              </button>
-              <button
-                  v-if="!imageBusy"
-                  type="button"
-                  class="btn-ghost"
-                  :disabled="controlsDisabled || !activePrompt?.promptId"
-                  @click="handleRegenerateActiveImage"
-              >
-                重新生成当前图
+                {{ imageBusy ? `生成中 ${activePromptIndex + 1}/${prompts.length}` : "批量生成商品图" }}
               </button>
               <button
                   v-if="imageBusy"
@@ -2414,25 +2437,138 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-        </aside>
 
-        <section class="studio-panel canvas-panel">
-          <div class="panel-heading">
-            <h2>商品图预览</h2>
-            <span class="panel-count">{{ generationLabel }}</span>
+          <div class="pack-column-grid">
+            <article
+                v-for="column in packColumns"
+                :key="column.mode"
+                :class="['pack-column', `is-${column.mode}`]"
+            >
+              <header class="pack-column-head">
+                <div>
+                  <h3>{{ column.label }}</h3>
+                  <small>{{ column.countLabel }} · {{ column.aspectRatio }}</small>
+                </div>
+                <span>{{ getColumnStatusText(column) }}</span>
+              </header>
+
+              <div v-if="promptBusy" class="pack-column-empty">
+                <span class="busy-orbit" aria-hidden="true"/>
+                <strong>正在生成方案</strong>
+                <p>AI 正在规划 {{ column.label }} 的 prompt。</p>
+              </div>
+              <div v-else-if="!column.items.length" class="pack-column-empty">
+                <Icon name="spark"/>
+                <strong>暂无{{ column.label }}方案</strong>
+                <p>填写商品资料后点击左侧“生成图包方案”。</p>
+              </div>
+              <div v-else-if="column.activeEntry" class="pack-card-list">
+                <article
+                    :key="column.activeEntry.item.id"
+                    :class="['pack-card', { 'is-active': column.activeEntry.index === activePromptIndex }]"
+                >
+                  <div class="pack-card-head">
+                    <button
+                        type="button"
+                        class="pack-step-btn"
+                        :disabled="column.items.length <= 1"
+                        :aria-label="`查看上一张${column.label}`"
+                        title="上一张"
+                        @click="handleStepColumnPrompt(column, -1)"
+                    >
+                      ‹
+                    </button>
+                    <input
+                        type="text"
+                        :aria-label="`${column.label}方案标题`"
+                        :value="column.activeEntry.item.title"
+                        :disabled="imageBusy"
+                        @input="event => handleTitleChange(column.activeEntry!.item.id, (event.target as HTMLInputElement).value)"
+                    >
+                    <span :class="['status-pill', `is-${column.activeEntry.item.status}`]">
+                      {{ STATUS_LABEL[column.activeEntry.item.status] }}
+                    </span>
+                    <span class="pack-step-count">{{ column.activePosition + 1 }}/{{ column.items.length }}</span>
+                    <button
+                        type="button"
+                        class="pack-step-btn"
+                        :disabled="column.items.length <= 1"
+                        :aria-label="`查看下一张${column.label}`"
+                        title="下一张"
+                        @click="handleStepColumnPrompt(column, 1)"
+                    >
+                      ›
+                    </button>
+                  </div>
+
+                  <label class="sr-only" :for="`prompt-text-${column.activeEntry.item.id}`">{{ column.label }} Prompt</label>
+                  <textarea
+                      :id="`prompt-text-${column.activeEntry.item.id}`"
+                      class="prompt-textarea"
+                      :value="column.activeEntry.item.prompt || ''"
+                      :disabled="imageBusy"
+                      placeholder="当前方案没有返回 Prompt，请重新生成图包方案。"
+                      @input="event => handlePromptChange(column.activeEntry!.item.id, (event.target as HTMLTextAreaElement).value)"
+                  />
+
+                  <button
+                      v-if="getPromptImageSrc(column.activeEntry.item)"
+                      type="button"
+                      class="pack-preview"
+                      :aria-label="`预览 ${column.activeEntry.item.title}`"
+                      @click="handlePreviewPrompt(column.activeEntry!.index)"
+                  >
+                    <img :src="getPromptImageSrc(column.activeEntry.item)!" :alt="column.activeEntry.item.title">
+                  </button>
+                  <div v-else class="pack-preview-placeholder">
+                    <template
+                        v-if="imageBusy && (column.activeEntry.item.status === 'queued' || column.activeEntry.item.status === 'running')"
+                    >
+                      <span class="btn-spinner" aria-hidden="true"/>
+                      <strong>生成中</strong>
+                    </template>
+                    <template v-else-if="column.activeEntry.item.status === 'failed'">
+                      <Icon name="warning"/>
+                      <strong>{{ column.activeEntry.item.error || "生成失败" }}</strong>
+                    </template>
+                    <template v-else>
+                      <Icon name="image"/>
+                      <strong>等待出图</strong>
+                    </template>
+                  </div>
+
+                  <div class="pack-card-actions">
+                    <button
+                        type="button"
+                        class="btn-ghost"
+                        :disabled="!column.activeEntry.item.imageId"
+                        @click="handleDownload(column.activeEntry!.index)"
+                    >
+                      <Icon name="download"/>
+                      <span>下载</span>
+                    </button>
+                    <button
+                        type="button"
+                        class="btn-ghost"
+                        :disabled="!column.activeEntry.item.imageId"
+                        @click="handlePreviewPrompt(column.activeEntry!.index)"
+                    >
+                      <Icon name="zoom"/>
+                      <span>预览</span>
+                    </button>
+                    <button
+                        type="button"
+                        class="btn-secondary"
+                        :disabled="controlsDisabled || !column.activeEntry.item.promptId"
+                        @click="handleRegeneratePromptAt(column.activeEntry!.index)"
+                    >
+                      重生成
+                    </button>
+                  </div>
+                </article>
+              </div>
+            </article>
           </div>
-          <Stage
-              :prompts="prompts"
-              :active-index="activePromptIndex"
-              :busy="imageBusy"
-              @download="handleDownload"
-              @load-demo="handleLoadDemoData"
-              @select="activePromptIdx = $event"
-              @zoom="index => {
-              const imageSrc = getPromptImageSrc(prompts[index])
-              if (imageSrc) lightboxSrc = imageSrc
-            }"
-          />
         </section>
       </div>
 
