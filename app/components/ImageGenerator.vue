@@ -176,6 +176,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const skuFileInputRef = ref<HTMLInputElement | null>(null)
 const styleFileInputRef = ref<HTMLInputElement | null>(null)
 const authPopoverRef = ref<HTMLDivElement | null>(null)
+const marketingCardRef = ref<HTMLElement | null>(null)
 const wakeLockRef = shallowRef<WakeLockSentinelLike | null>(null)
 const imageAbortRef = shallowRef<AbortController | null>(null)
 const imageCancelRequestedRef = shallowRef(false)
@@ -310,7 +311,7 @@ const secondaryProductInfoCount = computed(() =>
         .filter((value) => value.trim()).length,
 )
 const secondaryProductInfoLabel = computed(() =>
-    secondaryProductInfoCount.value ? `已填写 ${secondaryProductInfoCount.value} 项` : "可选",
+    secondaryProductInfoCount.value ? `已填写 ${secondaryProductInfoCount.value} 项` : "",
 )
 const generationLabel = computed(() =>
     `${getImageModesLabel(imageModes.value)} · 共 ${imageCountLabel.value} · ${quality.value}`,
@@ -1649,6 +1650,13 @@ watch(() => imageModes.value.join(","), () => {
   activeHistoryIdx.value = -1
 })
 
+// 展开营销设置时自动滚动到可见区域
+watch(secondaryProductDetailsOpen, (open) => {
+  if (open) {
+    setTimeout(() => marketingCardRef.value?.scrollIntoView({ behavior: "smooth", block: "start" }), 100)
+  }
+})
+
 // 自动保存草稿到 localStorage。这里 deep: true 是为了监听 prompts 数组内部变化。
 watch(
     [
@@ -2022,42 +2030,52 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="input-rail-body">
-            <div class="form-field">
-              <label for="product-name">商品名称</label>
-              <input
-                  id="product-name"
-                  v-model="productName"
-                  type="text"
-                  :disabled="controlsDisabled"
-                  placeholder="示例：玻尿酸修护精华液 | 真皮沙发双人座 | 儿童智能手表"
-              >
-            </div>
+            <!-- 基础信息 -->
+            <section class="input-card">
+              <div class="input-card-head">
+                <h3>基础信息</h3>
+              </div>
+              <div class="input-card-body">
+                <div class="form-field">
+                  <label for="product-name"><span class="card-badge must">必填</span> 商品名称</label>
+                  <input
+                      id="product-name"
+                      v-model="productName"
+                      type="text"
+                      :disabled="controlsDisabled"
+                      placeholder="示例：玻尿酸修护精华液 | 真皮沙发双人座 | 儿童智能手表"
+                  >
+                </div>
 
-            <div class="form-field">
-              <label for="selling-points">核心卖点/功效</label>
-              <textarea
-                  id="selling-points"
-                  v-model="sellingPoints"
-                  class="selling-points"
-                  :disabled="controlsDisabled"
-                  placeholder="请输入商品核心卖点、适用人群、规格信息和购买理由。&#10;&#10;示例：&#10;• 深层补水：玻尿酸微分子渗透技术&#10;• 修护屏障：神经酰胺+角鲨烷双重修护&#10;• 适合人群：敏感肌、干燥肌、熟龄肌&#10;• 规格：30ml 旅行装 / 50ml 标准装&#10;• 使用感：清爽不油腻，快速吸收"
-              />
-            </div>
+                <div class="form-field">
+                  <label for="selling-points"><span class="card-badge must">必填</span> 核心卖点/功效</label>
+                  <textarea
+                      id="selling-points"
+                      v-model="sellingPoints"
+                      class="selling-points"
+                      :disabled="controlsDisabled"
+                      placeholder="请输入商品核心卖点、适用人群、规格信息和购买理由。&#10;&#10;示例：&#10;• 深层补水：玻尿酸微分子渗透技术&#10;• 修护屏障：神经酰胺+角鲨烷双重修护&#10;• 适合人群：敏感肌、干燥肌、熟龄肌&#10;• 规格：30ml 旅行装 / 50ml 标准装&#10;• 使用感：清爽不油腻，快速吸收"
+                  />
+                </div>
 
-            <div class="form-field">
-              <label for="extra-requirements">补充要求</label>
-              <textarea
-                  id="extra-requirements"
-                  v-model="extraRequirements"
-                  class="compact-textarea"
-                  :disabled="controlsDisabled"
-                  placeholder="示例：整体更高级、少文字、突出礼盒感、避免真人出镜、主色更接近品牌蓝"
-              />
-            </div>
+                <div class="form-field">
+                  <label for="extra-requirements"><span class="card-badge optional">可选</span> 补充要求</label>
+                  <textarea
+                      id="extra-requirements"
+                      v-model="extraRequirements"
+                      class="compact-textarea"
+                      :disabled="controlsDisabled"
+                      placeholder="示例：整体更高级、少文字、突出礼盒感、避免真人出镜、主色更接近品牌蓝"
+                  />
+                </div>
+              </div>
+            </section>
 
-            <div class="form-field">
-              <div class="field-row-head">
-                <label for="product-images">商品素材 <span class="field-hint">(至少1张图片，资料文件可选)</span></label>
+            <!-- 商品素材 -->
+            <section class="input-card">
+              <div class="input-card-head">
+                <span class="card-badge must">必填</span>
+                <h3>商品素材</h3>
                 <button
                     v-if="hasProductUploads"
                     type="button"
@@ -2068,84 +2086,88 @@ onBeforeUnmount(() => {
                   清空
                 </button>
               </div>
-              <div class="product-media">
-                <div
-                    v-for="(src, index) in productImages"
-                    :key="`${src.slice(0, 32)}-${index}`"
-                    class="prompt-thumb"
-                >
-                  <button
-                      type="button"
-                      class="prompt-thumb-preview"
-                      :aria-label="`查看商品图 ${index + 1}`"
-                      @click="lightboxSrc = src"
-                  >
-                    <img :src="src" :alt="`商品图 ${index + 1}`">
-                  </button>
-                  <button
-                      type="button"
-                      class="prompt-thumb-del"
-                      :disabled="controlsDisabled"
-                      :aria-label="`移除商品图 ${index + 1}`"
-                      @click="handleRemoveProductImage(index)"
-                  >
-                    <Icon name="close"/>
-                  </button>
-                </div>
-                <button
-                    type="button"
-                    class="prompt-upload-tile"
-                    :disabled="controlsDisabled"
-                    @click="fileInputRef?.click()"
-                >
-                  <Icon name="upload"/>
-                  <span>{{ materialBusy ? "转换中" : "上传" }}</span>
-                </button>
-              </div>
-              <details class="material-file-fold">
-                <summary class="material-file-summary">
-                  <span>资料文件</span>
-                  <span>{{ productMaterials.length ? `${productMaterials.length} 份` : "可选" }}</span>
-                </summary>
-                <div v-if="productMaterials.length" class="material-file-list">
+              <div class="input-card-body">
+                <div class="product-media">
                   <div
-                      v-for="material in productMaterials"
-                      :key="material.id"
-                      :class="['product-material-chip', `is-${material.status}`]"
-                      :title="getProductMaterialTitle(material)"
+                      v-for="(src, index) in productImages"
+                      :key="`${src.slice(0, 32)}-${index}`"
+                      class="prompt-thumb"
                   >
-                    <span class="product-material-type">{{ getProductMaterialKindLabel(material.kind) }}</span>
-                    <strong>{{ material.name }}</strong>
                     <button
                         type="button"
-                        class="product-material-del"
+                        class="prompt-thumb-preview"
+                        :aria-label="`查看商品图 ${index + 1}`"
+                        @click="lightboxSrc = src"
+                    >
+                      <img :src="src" :alt="`商品图 ${index + 1}`">
+                    </button>
+                    <button
+                        type="button"
+                        class="prompt-thumb-del"
                         :disabled="controlsDisabled"
-                        :aria-label="`移除商品资料 ${material.name}`"
-                        @click="handleRemoveProductMaterial(material.id)"
+                        :aria-label="`移除商品图 ${index + 1}`"
+                        @click="handleRemoveProductImage(index)"
                     >
                       <Icon name="close"/>
                     </button>
                   </div>
+                  <button
+                      type="button"
+                      class="prompt-upload-tile"
+                      :disabled="controlsDisabled"
+                      @click="fileInputRef?.click()"
+                  >
+                    <Icon name="upload"/>
+                    <span>{{ materialBusy ? "转换中" : "上传" }}</span>
+                  </button>
                 </div>
-                <p v-else class="material-file-empty">上传 PDF、Word、Excel 等资料后会显示在这里。</p>
-              </details>
-              <p class="field-help">支持图片、PDF、PPTX、DOCX、Excel、HTML、CSV、JSON、XML；非图片资料会先转换为 Markdown 后参与方案生成。</p>
-              <input
-                  id="product-images"
-                  ref="fileInputRef"
-                  name="productImages"
-                  type="file"
-                  aria-label="上传商品素材"
-                  :accept="PRODUCT_MATERIAL_ACCEPT"
-                  multiple
-                  hidden
-                  @change="event => handleSelectFiles((event.target as HTMLInputElement).files)"
-              >
-            </div>
+                <details class="material-file-fold">
+                  <summary class="material-file-summary">
+                    <span>资料文件</span>
+                    <span>{{ productMaterials.length ? `${productMaterials.length} 份` : "可选" }}</span>
+                  </summary>
+                  <div v-if="productMaterials.length" class="material-file-list">
+                    <div
+                        v-for="material in productMaterials"
+                        :key="material.id"
+                        :class="['product-material-chip', `is-${material.status}`]"
+                        :title="getProductMaterialTitle(material)"
+                    >
+                      <span class="product-material-type">{{ getProductMaterialKindLabel(material.kind) }}</span>
+                      <strong>{{ material.name }}</strong>
+                      <button
+                          type="button"
+                          class="product-material-del"
+                          :disabled="controlsDisabled"
+                          :aria-label="`移除商品资料 ${material.name}`"
+                          @click="handleRemoveProductMaterial(material.id)"
+                      >
+                        <Icon name="close"/>
+                      </button>
+                    </div>
+                  </div>
+                  <p v-else class="material-file-empty">上传 PDF、Word、Excel 等资料后会显示在这里。</p>
+                </details>
+                <p class="field-help">支持图片、PDF、PPTX、DOCX、Excel、HTML、CSV、JSON、XML；非图片资料会先转换为 Markdown 后参与方案生成。</p>
+                <input
+                    id="product-images"
+                    ref="fileInputRef"
+                    name="productImages"
+                    type="file"
+                    aria-label="上传商品素材"
+                    :accept="PRODUCT_MATERIAL_ACCEPT"
+                    multiple
+                    hidden
+                    @change="event => handleSelectFiles((event.target as HTMLInputElement).files)"
+                >
+              </div>
+            </section>
 
-            <div class="form-field">
-              <div class="field-row-head">
-                <label for="style-reference-images">风格参考 <span class="field-hint">(可选，最多4张)</span></label>
+            <!-- 风格参考 -->
+            <section class="input-card">
+              <div class="input-card-head">
+                <span class="card-badge optional">可选</span>
+                <h3>风格参考</h3>
                 <button
                     v-if="styleReferenceImages.length > 0"
                     type="button"
@@ -2156,145 +2178,63 @@ onBeforeUnmount(() => {
                   清空
                 </button>
               </div>
-              <div class="product-media style-reference-media">
-                <div
-                    v-for="(src, index) in styleReferenceImages"
-                    :key="`${src.slice(0, 32)}-${index}`"
-                    class="prompt-thumb"
-                >
-                  <button
-                      type="button"
-                      class="prompt-thumb-preview"
-                      :aria-label="`查看风格参考 ${index + 1}`"
-                      @click="lightboxSrc = src"
+              <div class="input-card-body">
+                <div class="product-media style-reference-media">
+                  <div
+                      v-for="(src, index) in styleReferenceImages"
+                      :key="`${src.slice(0, 32)}-${index}`"
+                      class="prompt-thumb"
                   >
-                    <img :src="src" :alt="`风格参考 ${index + 1}`">
-                  </button>
-                  <button
-                      type="button"
-                      class="prompt-thumb-del"
-                      :disabled="controlsDisabled"
-                      :aria-label="`移除风格参考 ${index + 1}`"
-                      @click="handleRemoveStyleReferenceImage(index)"
-                  >
-                    <Icon name="close"/>
-                  </button>
-                </div>
-                <button
-                    type="button"
-                    class="prompt-upload-tile"
-                    :disabled="controlsDisabled || styleReferenceImages.length >= MAX_STYLE_REFERENCE_IMAGES"
-                    @click="styleFileInputRef?.click()"
-                >
-                  <Icon name="upload"/>
-                  <span>上传</span>
-                </button>
-              </div>
-              <p class="field-help">风格参考只用于学习构图、光影、配色和排版气质，不作为商品外观事实来源。</p>
-              <input
-                  id="style-reference-images"
-                  ref="styleFileInputRef"
-                  name="styleReferenceImages"
-                  type="file"
-                  aria-label="上传风格参考图"
-                  accept="image/*"
-                  multiple
-                  hidden
-                  @change="event => handleSelectStyleReferenceFiles((event.target as HTMLInputElement).files)"
-              >
-            </div>
-
-            <div class="form-field">
-              <div class="field-row-head">
-                <label>高级选项</label>
-                <button
-                    type="button"
-                    class="inline-action"
-                    :aria-expanded="secondaryProductDetailsOpen"
-                    @click="secondaryProductDetailsOpen = !secondaryProductDetailsOpen"
-                >
-                  {{ secondaryProductDetailsOpen ? "收起" : "展开" }}
-                  <span class="field-hint">{{ secondaryProductInfoLabel }}</span>
-                </button>
-              </div>
-            </div>
-
-            <Transition name="collapse">
-              <div v-show="secondaryProductDetailsOpen" class="secondary-product-details">
-                <div class="form-field">
-                  <div class="field-row-head">
-                    <label>目标平台</label>
-                    <span class="field-hint">单选</span>
-                  </div>
-                  <div class="platform-toggle-group" role="radiogroup" aria-label="目标平台">
                     <button
-                        v-for="option in PLATFORM_OPTIONS"
-                        :key="option.value"
                         type="button"
-                        role="radio"
-                        :class="['platform-toggle', { 'is-active': isTargetPlatformSelected(option.value) }]"
-                        :aria-checked="isTargetPlatformSelected(option.value)"
-                        :disabled="controlsDisabled"
-                        @click="handleTargetPlatformSelect(option.value)"
+                        class="prompt-thumb-preview"
+                        :aria-label="`查看风格参考 ${index + 1}`"
+                        @click="lightboxSrc = src"
                     >
-                      <span>{{ option.label }}</span>
-                      <small>{{ option.description }}</small>
+                      <img :src="src" :alt="`风格参考 ${index + 1}`">
+                    </button>
+                    <button
+                        type="button"
+                        class="prompt-thumb-del"
+                        :disabled="controlsDisabled"
+                        :aria-label="`移除风格参考 ${index + 1}`"
+                        @click="handleRemoveStyleReferenceImage(index)"
+                    >
+                      <Icon name="close"/>
                     </button>
                   </div>
-                </div>
-
-                <div class="form-field">
-                  <label for="price-band">价格带</label>
-                  <input
-                      id="price-band"
-                      v-model="priceBand"
-                      type="text"
-                      :disabled="controlsDisabled"
-                      placeholder="示例：平价走量 | 中高客单 | 高端礼品"
+                  <button
+                      type="button"
+                      class="prompt-upload-tile"
+                      :disabled="controlsDisabled || styleReferenceImages.length >= MAX_STYLE_REFERENCE_IMAGES"
+                      @click="styleFileInputRef?.click()"
                   >
+                    <Icon name="upload"/>
+                    <span>上传</span>
+                  </button>
                 </div>
-
-                <div class="form-field">
-                  <label for="audience">目标人群/购买场景</label>
-                  <textarea
-                      id="audience"
-                      v-model="audience"
-                      class="compact-textarea"
-                      :disabled="controlsDisabled"
-                      placeholder="示例：宝妈囤货、租房收纳、通勤办公、换季敏感肌、送礼场景"
-                  />
-                </div>
-
-                <div class="form-field">
-                  <label for="proof-materials">证明素材/资质/评价</label>
-                  <textarea
-                      id="proof-materials"
-                      v-model="proofMaterials"
-                      class="compact-textarea"
-                      :disabled="controlsDisabled"
-                      placeholder="示例：检测报告、材质认证、用户好评关键词、真实参数。没有可留空，系统不会编造硬证据。"
-                  />
-                </div>
-
-                <div class="form-field">
-                  <label for="offer">活动/售后/服务承诺</label>
-                  <textarea
-                      id="offer"
-                      v-model="offer"
-                      class="compact-textarea"
-                      :disabled="controlsDisabled"
-                      placeholder="示例：买一送一、7天无理由、赠品、包邮、质保、试用装"
-                  />
-                </div>
+                <p class="field-help">风格参考只用于学习构图、光影、配色和排版气质，不作为商品外观事实来源。</p>
+                <input
+                    id="style-reference-images"
+                    ref="styleFileInputRef"
+                    name="styleReferenceImages"
+                    type="file"
+                    aria-label="上传风格参考图"
+                    accept="image/*"
+                    multiple
+                    hidden
+                    @change="event => handleSelectStyleReferenceFiles((event.target as HTMLInputElement).files)"
+                >
               </div>
-            </Transition>
+            </section>
 
-            <div class="form-field">
-              <div class="settings-row">
+            <!-- 图包配置 -->
+            <section class="input-card">
+              <div class="input-card-body">
                 <div class="setting-block">
                   <div class="setting-head">
                     <label>图包类型</label>
-                    <span>{{ imageCountLabel }}</span>
+                    <span class="field-hint">{{ imageCountLabel }}</span>
                   </div>
                   <div class="image-mode-toggle-group" role="group" aria-label="图包类型">
                     <button
@@ -2399,7 +2339,92 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </div>
-            </div>
+            </section>
+
+            <!-- 营销设置 -->
+            <section ref="marketingCardRef" class="input-card">
+              <div class="input-card-head">
+                <span class="card-badge optional">可选</span>
+                <h3>营销设置</h3>
+                <button
+                    type="button"
+                    class="inline-action"
+                    :aria-expanded="secondaryProductDetailsOpen"
+                    @click="secondaryProductDetailsOpen = !secondaryProductDetailsOpen"
+                >
+                  <span class="field-hint">{{ secondaryProductInfoLabel }}</span>
+                  {{ secondaryProductDetailsOpen ? "收起" : "展开" }}
+                </button>
+              </div>
+              <Transition name="collapse">
+                <div v-show="secondaryProductDetailsOpen" class="input-card-body">
+                  <div class="form-field">
+                    <div class="field-row-head">
+                      <label>目标平台</label>
+                    </div>
+                    <div class="platform-toggle-group" role="radiogroup" aria-label="目标平台">
+                      <button
+                          v-for="option in PLATFORM_OPTIONS"
+                          :key="option.value"
+                          type="button"
+                          role="radio"
+                          :class="['platform-toggle', { 'is-active': isTargetPlatformSelected(option.value) }]"
+                          :aria-checked="isTargetPlatformSelected(option.value)"
+                          :disabled="controlsDisabled"
+                          @click="handleTargetPlatformSelect(option.value)"
+                      >
+                        <span>{{ option.label }}</span>
+                        <small>{{ option.description }}</small>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="form-field">
+                    <label for="price-band">价格带</label>
+                    <input
+                        id="price-band"
+                        v-model="priceBand"
+                        type="text"
+                        :disabled="controlsDisabled"
+                        placeholder="示例：平价走量 | 中高客单 | 高端礼品"
+                    >
+                  </div>
+
+                  <div class="form-field">
+                    <label for="audience">目标人群/购买场景</label>
+                    <textarea
+                        id="audience"
+                        v-model="audience"
+                        class="compact-textarea"
+                        :disabled="controlsDisabled"
+                        placeholder="示例：宝妈囤货、租房收纳、通勤办公、换季敏感肌、送礼场景"
+                    />
+                  </div>
+
+                  <div class="form-field">
+                    <label for="proof-materials">证明素材/资质/评价</label>
+                    <textarea
+                        id="proof-materials"
+                        v-model="proofMaterials"
+                        class="compact-textarea"
+                        :disabled="controlsDisabled"
+                        placeholder="示例：检测报告、材质认证、用户好评关键词、真实参数。没有可留空，系统不会编造硬证据。"
+                    />
+                  </div>
+
+                  <div class="form-field">
+                    <label for="offer">活动/售后/服务承诺</label>
+                    <textarea
+                        id="offer"
+                        v-model="offer"
+                        class="compact-textarea"
+                        :disabled="controlsDisabled"
+                        placeholder="示例：买一送一、7天无理由、赠品、包邮、质保、试用装"
+                    />
+                  </div>
+                </div>
+              </Transition>
+            </section>
           </div>
 
           <div class="input-action-bar">
