@@ -2786,6 +2786,7 @@ button:disabled {
 .gallery-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  align-items: start;
   gap: 16px;
   padding: 24px;
   overflow-y: auto;
@@ -2795,7 +2796,6 @@ button:disabled {
 .gallery-card {
   border: 1px solid var(--border);
   border-radius: 10px;
-  overflow: hidden;
   background: var(--bg-soft);
 }
 
@@ -2809,19 +2809,20 @@ button:disabled {
   padding: 0;
   background: var(--bg-muted);
   cursor: pointer;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .gallery-card-img img {
-  height: 100%;
-  width: auto;
-  max-width: 100%;
+  width: 100%;
+  height: auto;
+  max-height: min(70vh, 520px);
+  object-fit: contain;
   display: block;
   transition: transform 0.2s;
 }
 
 .gallery-card-img:hover img {
-  transform: scale(1.04);
+  transform: none;
 }
 
 .gallery-card-info {
