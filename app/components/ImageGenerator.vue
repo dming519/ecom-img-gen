@@ -180,6 +180,7 @@ const adminOpen = shallowRef(false)
 const materialFeatures = shallowRef<MaterialFeature[]>([])
 const featureAssignments = shallowRef<PromptFeatureAssignment[]>([])
 const showFeatureRouting = ref(false)
+const galleryOpen = shallowRef(false)
 const error = shallowRef<string | null>(null)
 const lightboxSrc = shallowRef<string | null>(null)
 const avatarFailed = shallowRef(false)
@@ -347,6 +348,18 @@ const authenticated = computed(() => !!session.value?.authenticated)
 const authLabel = computed(() =>
     authenticated.value ? `${session.value?.user?.name || "已登录用户"} 账户菜单` : "打开登录菜单",
 )
+// 所有已出图的图片（按主图→详情图→SKU图排序）
+const allGeneratedImages = computed(() =>
+  prompts.value
+    .filter((item) => item.imageId)
+    .map((item) => ({
+      ...item,
+      src: getPromptImageSrc(item)!,
+      modeLabel: item.imageMode === "main" ? "主图" : item.imageMode === "detail" ? "详情图" : "SKU图",
+    })),
+)
+const allGeneratedCount = computed(() => allGeneratedImages.value.length)
+
 const controlsDisabled = computed(
     () =>
         sessionLoading.value ||
@@ -1708,6 +1721,31 @@ function handleDownload(index: number) {
   anchor.click()
 }
 
+async function handleDownloadAll() {
+  const images = allGeneratedImages.value
+  if (!images.length) return
+  if (images.length === 1) {
+    handleDownload(prompts.value.indexOf(images[0]))
+    return
+  }
+  const JSZip = (await import("jszip")).default
+  const zip = new JSZip()
+  const promises = images.map(async (image, i) => {
+    const resp = await fetch(image.src)
+    const blob = await resp.blob()
+    const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg"
+    zip.file(`${image.modeLabel}-${i + 1}-${productName.value || "product"}.${ext}`, blob)
+  })
+  await Promise.all(promises)
+  const zipBlob = await zip.generateAsync({ type: "blob" })
+  const url = URL.createObjectURL(zipBlob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = `ecom-全部图片-${productName.value || "product"}.zip`
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 function handleLocationChange() {
   studioMode.value = readStudioModeFromUrl()
 }
@@ -2656,6 +2694,14 @@ onBeforeUnmount(() => {
                 {{ imageBusy ? `生成中 ${activePromptIndex + 1}/${prompts.length}` : "批量生成商品图" }}
               </button>
               <button
+                  type="button"
+                  class="btn-ghost"
+                  :disabled="!allGeneratedCount"
+                  @click="galleryOpen = true"
+              >
+                查看所有图片{{ allGeneratedCount ? ` (${allGeneratedCount})` : "" }}
+              </button>
+              <button
                   v-if="imageBusy"
                   type="button"
                   class="btn-danger cancel-generation-btn"
@@ -2862,5 +2908,56 @@ onBeforeUnmount(() => {
 
     <Lightbox :src="lightboxSrc" @close="lightboxSrc = null"/>
     <AdminPanel :open="adminOpen" @close="adminOpen = false"/>
+
+    <!-- 查看所有图片弹窗 -->
+    <Teleport to="body">
+      <div
+          v-if="galleryOpen"
+          class="gallery-overlay"
+          @click.self="galleryOpen = false"
+          @keydown.escape="galleryOpen = false"
+      >
+        <div class="gallery-modal">
+          <div class="gallery-head">
+            <h2>全部图片 ({{ allGeneratedCount }})</h2>
+            <div class="gallery-head-actions">
+              <button
+                  type="button"
+                  class="btn-secondary"
+                  :disabled="!allGeneratedCount"
+                  @click="handleDownloadAll"
+              >
+                一键下载全部
+              </button>
+              <button type="button" class="gallery-close" aria-label="关闭" @click="galleryOpen = false">
+                <Icon name="close"/>
+              </button>
+            </div>
+          </div>
+          <div v-if="!allGeneratedCount" class="gallery-empty">
+            <p>暂无已生成的图片</p>
+          </div>
+          <div v-else class="gallery-grid">
+            <div
+                v-for="image in allGeneratedImages"
+                :key="image.id"
+                class="gallery-card"
+            >
+              <button
+                  type="button"
+                  class="gallery-card-img"
+                  @click="lightboxSrc = image.src"
+              >
+                <img :src="image.src" :alt="image.title" loading="lazy">
+              </button>
+              <div class="gallery-card-info">
+                <span class="gallery-card-mode">{{ image.modeLabel }}</span>
+                <span class="gallery-card-title">{{ image.title }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </main>
 </template>
