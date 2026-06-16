@@ -103,6 +103,7 @@ export async function generateDetailPrompts(
     extraRequirements: options.extraRequirements,
     productImageIds: options.productImageIds,
     styleReferenceImageIds: options.styleReferenceImageIds,
+    modelReferenceImageIds: options.modelReferenceImageIds,
     productMaterialsMarkdown: options.productMaterialsMarkdown,
     skuMaterialsMarkdown: options.skuMaterialsMarkdown,
   });

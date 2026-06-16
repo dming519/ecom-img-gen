@@ -20,6 +20,7 @@ interface PromptRequestBody {
   extraRequirements?: string;
   productImageIds?: string[];
   styleReferenceImageIds?: string[];
+  modelReferenceImageIds?: string[];
   productMaterialsMarkdown?: string;
   skuMaterialsMarkdown?: string;
 }
@@ -229,10 +230,34 @@ export async function handlePost(context: RequestContext) {
     storedStyleReferenceImages.filter((image): image is string => !!image),
     4,
   );
-  const allPromptImages = [...productImages, ...styleReferenceImages];
+  const modelReferenceImageIds = normalizeImageIds(body.modelReferenceImageIds).slice(0, 2);
+  let storedModelReferenceImages: Array<string | null> = [];
+  if (modelReferenceImageIds.length) {
+    try {
+      storedModelReferenceImages = await readProductImageDataUrls(
+        context.env,
+        userKey,
+        modelReferenceImageIds,
+      );
+    } catch (error) {
+      return json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 500 },
+      );
+    }
+  }
+  if (storedModelReferenceImages.some((image) => !image)) {
+    return json({ error: "模特参考图不存在或无权访问" }, { status: 400 });
+  }
+  const modelReferenceImages = normalizeProductImages(
+    storedModelReferenceImages.filter((image): image is string => !!image),
+    2,
+  );
+
+  const allPromptImages = [...productImages, ...styleReferenceImages, ...modelReferenceImages];
   const allPromptImagesSize = allPromptImages.reduce((sum, image) => sum + image.length, 0);
   if (allPromptImagesSize > MAX_PROMPT_IMAGE_TOTAL_CHARS) {
-    return json({ error: "商品图片和风格参考图总大小过大，请减少图片数量或重新上传后再生成。" }, { status: 400 });
+    return json({ error: "商品图片、风格参考图和模特参考图总大小过大，请减少图片数量或重新上传后再生成。" }, { status: 400 });
   }
 
   // 这些校验直接返回 400，属于用户输入问题，不需要派发到 Worker。
@@ -319,10 +344,21 @@ export async function handlePost(context: RequestContext) {
     styleReferenceImages.length
       ? [
           `风格参考图：已上传 ${styleReferenceImages.length} 张。`,
-          `上传图片顺序说明：前 ${productImages.length} 张是商品参考图，是商品外观事实来源；后 ${styleReferenceImages.length} 张是风格参考图，只用于学习构图节奏、光影、配色、背景气质、排版密度和画面风格。`,
+          `上传图片顺序说明：前 ${productImages.length} 张是商品参考图，是商品外观事实来源；${
+            styleReferenceImages.length ? `接着 ${styleReferenceImages.length} 张是风格参考图，只用于学习构图节奏、光影、配色、背景气质、排版密度和画面风格；` : ""
+          }${
+            modelReferenceImages.length ? `最后 ${modelReferenceImages.length} 张是模特参考图，只用于学习人物姿态、穿搭效果、体型呈现和场景氛围。` : ""
+          }`,
           "风格参考图不得作为商品外观、包装、Logo、标签、结构、材质或颜色的事实来源；当风格参考图与商品参考图冲突时，必须以商品参考图为准。",
         ].join("\n")
       : "风格参考图：未上传。",
+    modelReferenceImages.length
+      ? [
+          `模特参考图：已上传 ${modelReferenceImages.length} 张。`,
+          "模特参考图只能用于学习人物姿态、穿搭效果、体型呈现和场景氛围；不得将模特参考图中的人物面部、具体身份或虚构场景作为生成内容。",
+          "当模特参考图与商品参考图的外观冲突时，必须以商品参考图为准；模特参考图不能用于改变商品本身的外观、包装、颜色或结构。",
+        ].join("\n")
+      : "模特参考图：未上传。",
     productMaterialsMarkdown
       ? [
           "上传商品资料 Markdown：",

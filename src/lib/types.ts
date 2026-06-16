@@ -119,6 +119,8 @@ export interface ProductInput {
   productImageIds?: string[];
   styleReferenceImages?: string[];
   styleReferenceImageIds?: string[];
+  modelReferenceImages?: string[];
+  modelReferenceImageIds?: string[];
   productMaterials?: ProductMaterialFile[];
   skuMaterials?: ProductMaterialFile[];
 }
@@ -229,6 +231,7 @@ export interface GeneratePromptOptions {
   extraRequirements?: string;
   productImageIds: string[];
   styleReferenceImageIds?: string[];
+  modelReferenceImageIds?: string[];
   productMaterialsMarkdown?: string;
   skuMaterialsMarkdown?: string;
 }

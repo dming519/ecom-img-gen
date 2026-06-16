@@ -83,6 +83,7 @@ const PRODUCT_IMAGE_QUALITY = 0.9
 const MAX_PROMPT_IMAGE_CHARS = 1_500_000
 const MAX_PROMPT_IMAGE_TOTAL_CHARS = 6_000_000
 const MAX_STYLE_REFERENCE_IMAGES = 4
+const MAX_MODEL_REFERENCE_IMAGES = 2
 const DRAFT_KEY = "ecomimggen_draft_v5"
 const IMAGE_QUALITY_VALUES: ImageQuality[] = ["1K", "2K", "4K"]
 const IMAGE_MODE_ORDER: DetailImageMode[] = ["main", "detail", "sku"]
@@ -122,6 +123,7 @@ interface DraftState {
   quality?: ImageQuality
   productImageIds?: string[]
   styleReferenceImageIds?: string[]
+  modelReferenceImageIds?: string[]
   productMaterials?: ProductMaterialFile[]
   skuMaterials?: ProductMaterialFile[]
   // 智能素材路由
@@ -153,6 +155,8 @@ const productImages = ref<string[]>([])
 const productImageIds = ref<string[]>([])
 const styleReferenceImages = ref<string[]>([])
 const styleReferenceImageIds = ref<string[]>([])
+const modelReferenceImages = ref<string[]>([])
+const modelReferenceImageIds = ref<string[]>([])
 const productMaterials = ref<ProductMaterialUpload[]>([])
 const skuMaterials = ref<ProductMaterialUpload[]>([])
 const quality = shallowRef<ImageQuality>("1K")
@@ -184,6 +188,7 @@ const avatarFailed = shallowRef(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const skuFileInputRef = ref<HTMLInputElement | null>(null)
 const styleFileInputRef = ref<HTMLInputElement | null>(null)
+const modelFileInputRef = ref<HTMLInputElement | null>(null)
 const authPopoverRef = ref<HTMLDivElement | null>(null)
 const marketingCardRef = ref<HTMLElement | null>(null)
 const wakeLockRef = shallowRef<WakeLockSentinelLike | null>(null)
@@ -303,6 +308,8 @@ const currentProduct = computed<ProductInput>(() => ({
   productImageIds: productImageIds.value,
   styleReferenceImages: styleReferenceImages.value,
   styleReferenceImageIds: styleReferenceImageIds.value,
+  modelReferenceImages: modelReferenceImages.value,
+  modelReferenceImageIds: modelReferenceImageIds.value,
   productMaterials: convertedProductMaterials.value,
   skuMaterials: convertedSkuMaterials.value,
 }))
@@ -523,6 +530,8 @@ function cloneProduct(input: ProductInput): ProductInput {
     productImageIds: input.productImageIds ? [...input.productImageIds] : [],
     styleReferenceImages: input.styleReferenceImages ? [...input.styleReferenceImages] : [],
     styleReferenceImageIds: input.styleReferenceImageIds ? [...input.styleReferenceImageIds] : [],
+    modelReferenceImages: input.modelReferenceImages ? [...input.modelReferenceImages] : [],
+    modelReferenceImageIds: input.modelReferenceImageIds ? [...input.modelReferenceImageIds] : [],
     productMaterials: input.productMaterials?.map((item) => ({...item})) ?? [],
     skuMaterials: input.skuMaterials?.map((item) => ({...item})) ?? [],
   }
@@ -829,6 +838,16 @@ function handleRemoveStyleReferenceImage(index: number) {
   styleReferenceImageIds.value = styleReferenceImageIds.value.filter((_, imageIndex) => imageIndex !== index)
 }
 
+function handleClearModelReferences() {
+  modelReferenceImages.value = []
+  modelReferenceImageIds.value = []
+}
+
+function handleRemoveModelReferenceImage(index: number) {
+  modelReferenceImages.value = modelReferenceImages.value.filter((_, imageIndex) => imageIndex !== index)
+  modelReferenceImageIds.value = modelReferenceImageIds.value.filter((_, imageIndex) => imageIndex !== index)
+}
+
 // 处理商品资料上传：图片进入参考图链路，文档类文件先暂存，点击生成方案时再转 Markdown。
 async function handleSelectFiles(files: FileList | null) {
   if (!files?.length) return
@@ -951,6 +970,68 @@ async function handleSelectStyleReferenceFiles(files: FileList | null) {
   if (styleFileInputRef.value) styleFileInputRef.value.value = ""
 }
 
+async function handleSelectModelReferenceFiles(files: FileList | null) {
+  if (!files?.length) return
+  error.value = null
+  const accepted: string[] = []
+  const messages: string[] = []
+  materialBusy.value = true
+  try {
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) {
+        messages.push(`已忽略非图片模特参考：${file.name}`)
+        continue
+      }
+      if (modelReferenceImages.value.length + accepted.length >= MAX_MODEL_REFERENCE_IMAGES) {
+        messages.push(`模特参考最多上传 ${MAX_MODEL_REFERENCE_IMAGES} 张，已忽略：${file.name}`)
+        continue
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        messages.push(`模特参考图过大（>8MB）已忽略：${file.name}`)
+        continue
+      }
+      try {
+        accepted.push(await fileToCompressedDataURL(file))
+      } catch (event) {
+        console.warn("读取模特参考图失败:", event)
+        messages.push(`模特参考图读取失败：${file.name}`)
+      }
+    }
+  } finally {
+    materialBusy.value = false
+  }
+  if (accepted.length) {
+    modelReferenceImages.value = [...modelReferenceImages.value, ...accepted].slice(0, MAX_MODEL_REFERENCE_IMAGES)
+  }
+  if (messages.length) error.value = messages[messages.length - 1] ?? null
+  if (modelFileInputRef.value) modelFileInputRef.value.value = ""
+}
+
+async function ensureModelReferenceImageIds() {
+  const images = modelReferenceImages.value.slice(0, MAX_MODEL_REFERENCE_IMAGES)
+  const nextIds = modelReferenceImageIds.value.slice(0, images.length)
+  const missing = images.map((image, index) => ({image, index})).filter((item) => !nextIds[item.index])
+  const dataUrls = await Promise.all(missing.map((item) => imageSrcToDataUrl(item.image)))
+  const validDataUrls = dataUrls
+      .filter((image) => image.startsWith("data:image/"))
+      .filter((image) => image.length <= MAX_PROMPT_IMAGE_CHARS)
+  const total = validDataUrls.reduce((sum, image) => sum + image.length, 0)
+  if (missing.length && validDataUrls.length !== missing.length) {
+    throw new Error("模特参考图过大或格式无效，请重新上传图片。")
+  }
+  if (total > MAX_PROMPT_IMAGE_TOTAL_CHARS) {
+    throw new Error("模特参考图总大小过大，请减少图片数量或重新上传后再生成。")
+  }
+  const uploadedIds = await Promise.all(validDataUrls.map((image) => dbPutProductImage(image)))
+  missing.forEach((item, index) => {
+    nextIds[item.index] = uploadedIds[index] ?? ""
+  })
+  const ids = nextIds.filter(Boolean).slice(0, images.length)
+  if (ids.length !== images.length) throw new Error("模特参考图保存失败，请重新上传后再试。")
+  modelReferenceImageIds.value = ids
+  return ids
+}
+
 async function ensureProductMaterialsConverted() {
   const pendingMaterials = productMaterials.value.filter((item) => item.status !== "converted")
   if (!pendingMaterials.length) return productMaterialsMarkdown.value
@@ -1055,6 +1136,8 @@ function handleResetProductInput() {
   productImageIds.value = []
   styleReferenceImages.value = []
   styleReferenceImageIds.value = []
+  modelReferenceImages.value = []
+  modelReferenceImageIds.value = []
   productMaterials.value = []
   skuMaterials.value = []
   quality.value = "1K"
@@ -1141,6 +1224,7 @@ async function handleGeneratePrompts() {
     const materialsMarkdown = await ensureProductMaterialsConverted()
     const skuMarkdown = await ensureSkuMaterialsConverted()
     const styleReferenceIds = await ensureStyleReferenceImageIds()
+    const modelReferenceIds = await ensureModelReferenceImageIds()
     const result = await generateDetailPrompts({
       name: productName.value.trim(),
       sellingPoints: sellingPoints.value.trim(),
@@ -1154,6 +1238,7 @@ async function handleGeneratePrompts() {
       extraRequirements: extraRequirements.value.trim(),
       productImageIds: await ensureProductImageIds(),
       styleReferenceImageIds: styleReferenceIds,
+      modelReferenceImageIds: modelReferenceIds,
       productMaterialsMarkdown: materialsMarkdown,
       skuMaterialsMarkdown: skuMarkdown,
     })
@@ -1561,6 +1646,15 @@ function handleSelectHistory(idx: number) {
         })
         .catch((event) => console.warn("风格参考图恢复失败:", event))
   }
+  modelReferenceImageIds.value = item.product.modelReferenceImageIds ?? []
+  modelReferenceImages.value = item.product.modelReferenceImages ?? []
+  if (item.product.modelReferenceImageIds?.length) {
+    dbGetProductImages(item.product.modelReferenceImageIds)
+        .then((images) => {
+          modelReferenceImages.value = images.slice(0, MAX_MODEL_REFERENCE_IMAGES)
+        })
+        .catch((event) => console.warn("模特参考图恢复失败:", event))
+  }
   prompts.value = item.prompts.map((prompt) => resetInterruptedPrompt(prompt))
   // 智能素材路由：恢复特征数据
   if (Array.isArray(item.materialFeatures) && item.materialFeatures.length) {
@@ -1740,6 +1834,7 @@ watch(
           quality: quality.value,
           productImageIds: productImageIds.value,
           styleReferenceImageIds: styleReferenceImageIds.value,
+          modelReferenceImageIds: modelReferenceImageIds.value,
           productMaterials: convertedProductMaterials.value,
           skuMaterials: convertedSkuMaterials.value,
           materialFeatures: materialFeatures.value.length ? materialFeatures.value : undefined,
@@ -1807,6 +1902,14 @@ onMounted(() => {
                 styleReferenceImages.value = images.slice(0, MAX_STYLE_REFERENCE_IMAGES)
               })
               .catch((event) => console.warn("风格参考图恢复失败:", event))
+        }
+        if (Array.isArray(draft.modelReferenceImageIds) && draft.modelReferenceImageIds.length) {
+          modelReferenceImageIds.value = draft.modelReferenceImageIds
+          dbGetProductImages(draft.modelReferenceImageIds)
+              .then((images) => {
+                modelReferenceImages.value = images.slice(0, MAX_MODEL_REFERENCE_IMAGES)
+              })
+              .catch((event) => console.warn("模特参考图恢复失败:", event))
         }
         // 智能素材路由：恢复特征数据
         if (Array.isArray(draft.materialFeatures) && draft.materialFeatures.length) {
@@ -2297,6 +2400,71 @@ onBeforeUnmount(() => {
                     multiple
                     hidden
                     @change="event => handleSelectStyleReferenceFiles((event.target as HTMLInputElement).files)"
+                >
+              </div>
+            </section>
+
+            <!-- 模特参考 -->
+            <section class="input-card">
+              <div class="input-card-head">
+                <span class="card-badge optional">可选</span>
+                <h3>模特参考</h3>
+                <button
+                    v-if="modelReferenceImages.length > 0"
+                    type="button"
+                    class="inline-action"
+                    :disabled="controlsDisabled"
+                    @click="handleClearModelReferences"
+                >
+                  清空
+                </button>
+              </div>
+              <div class="input-card-body">
+                <div class="product-media model-reference-media">
+                  <div
+                      v-for="(src, index) in modelReferenceImages"
+                      :key="`${src.slice(0, 32)}-${index}`"
+                      class="prompt-thumb"
+                  >
+                    <button
+                        type="button"
+                        class="prompt-thumb-preview"
+                        :aria-label="`查看模特参考 ${index + 1}`"
+                        @click="lightboxSrc = src"
+                    >
+                      <img :src="src" :alt="`模特参考 ${index + 1}`">
+                    </button>
+                    <button
+                        type="button"
+                        class="prompt-thumb-del"
+                        :disabled="controlsDisabled"
+                        :aria-label="`移除模特参考 ${index + 1}`"
+                        @click="handleRemoveModelReferenceImage(index)"
+                    >
+                      <Icon name="close"/>
+                    </button>
+                  </div>
+                  <button
+                      type="button"
+                      class="prompt-upload-tile"
+                      :disabled="controlsDisabled || modelReferenceImages.length >= MAX_MODEL_REFERENCE_IMAGES"
+                      @click="modelFileInputRef?.click()"
+                  >
+                    <Icon name="upload"/>
+                    <span>上传</span>
+                  </button>
+                </div>
+                <p class="field-help">模特参考只用于学习人物姿态、穿搭效果和场景氛围，不作为商品外观事实来源，最多 2 张。</p>
+                <input
+                    id="model-reference-images"
+                    ref="modelFileInputRef"
+                    name="modelReferenceImages"
+                    type="file"
+                    aria-label="上传模特参考图"
+                    accept="image/*"
+                    multiple
+                    hidden
+                    @change="event => handleSelectModelReferenceFiles((event.target as HTMLInputElement).files)"
                 >
               </div>
             </section>
