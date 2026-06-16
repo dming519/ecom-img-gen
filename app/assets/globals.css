@@ -1359,7 +1359,7 @@ select:focus {
 input::placeholder,
 textarea::placeholder {
   color: var(--muted);
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   line-height: 1.5;
   transition: color 0.3s var(--ease);
 }
