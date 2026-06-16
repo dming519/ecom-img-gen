@@ -2923,11 +2923,11 @@ onBeforeUnmount(() => {
             <div class="gallery-head-actions">
               <button
                   type="button"
-                  class="btn-secondary"
+                  class="btn-primary"
                   :disabled="!allGeneratedCount"
                   @click="handleDownloadAll"
               >
-                一键下载全部
+                一键下载全部 ({{ allGeneratedCount }})
               </button>
               <button type="button" class="gallery-close" aria-label="关闭" @click="galleryOpen = false">
                 <Icon name="close"/>
