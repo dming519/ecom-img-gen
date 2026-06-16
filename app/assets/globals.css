@@ -2673,7 +2673,7 @@ button:disabled {
   transform: rotate(90deg);
 }
 
-/* ---------- 查看所有图片弹窗 ---------- */
+/* ---------- 查看所有图片弹窗 v2 ---------- */
 .gallery-overlay {
   position: fixed;
   inset: 0;
@@ -2836,10 +2836,10 @@ button:disabled {
   align-self: flex-start;
   padding: 3px 12px;
   border-radius: 5px;
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   font-weight: 700;
+  line-height: 1.4;
   color: #fff;
-  background: var(--accent);
   letter-spacing: 0.02em;
 }
 
