@@ -2826,22 +2826,22 @@ button:disabled {
 }
 
 .gallery-card-info {
-  padding: 12px 12px 14px;
+  padding: 10px 12px 12px;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
 .gallery-card-mode {
   display: inline-block;
-  align-self: flex-start;
-  padding: 3px 12px;
-  border-radius: 5px;
-  font-size: 0.82rem;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 0.78rem;
   font-weight: 700;
-  line-height: 1.4;
   color: #fff;
   letter-spacing: 0.02em;
+  flex-shrink: 0;
 }
 
 .gallery-card-mode.is-main {
