@@ -401,7 +401,6 @@ const activePromptIndex = computed(() =>
         ? Math.min(Math.max(activePromptIdx.value, 0), prompts.value.length - 1)
         : 0,
 )
-const activePrompt = computed(() => prompts.value[activePromptIndex.value] ?? null)
 const packColumns = computed<PackColumn[]>(() =>
   IMAGE_MODE_ORDER
     .filter((mode) => imageModes.value.includes(mode))
@@ -1176,43 +1175,6 @@ function validateProduct() {
     return false
   }
   return true
-}
-
-async function handleLoadDemoData() {
-  productName.value = "玻尿酸多效修护精华液"
-  sellingPoints.value = "• 深层补水：玻尿酸微分子渗透技术\n• 修护屏障：神经酰胺+角鲨烷双重修护\n• 适合人群：敏感肌、干燥肌、熟龄肌\n• 规格：30ml 旅行装 / 50ml 标准装\n• 使用感：清爽不油腻，快速吸收"
-  skuInfo.value = "30ml 旅行装：适合试用和出差；50ml 标准装：适合日常护肤；套装：50ml 正装 + 30ml 旅行装。"
-  imageModes.value = ["main", "detail"]
-  targetPlatform.value = "淘宝/天猫"
-  audience.value = "敏感肌、干燥肌、换季修护人群，日常护肤和妆前补水场景"
-  priceBand.value = "中高客单护肤品"
-  proofMaterials.value = "玻尿酸、神经酰胺、角鲨烷成分信息；无真实检测报告编号"
-  offer.value = "旅行装可选，强调安心试用和售后咨询"
-  extraRequirements.value = ""
-  quality.value = "1K"
-  productMaterials.value = []
-  skuMaterials.value = []
-  styleReferenceImages.value = []
-  styleReferenceImageIds.value = []
-  const canvas = document.createElement("canvas")
-  canvas.width = 900
-  canvas.height = 1200
-  const context = canvas.getContext("2d", {alpha: false})
-  if (!context) return
-  context.fillStyle = "#f8fafc"
-  context.fillRect(0, 0, canvas.width, canvas.height)
-  context.fillStyle = "#2563eb"
-  context.beginPath()
-  context.roundRect(300, 360, 300, 600, 45)
-  context.fill()
-  context.fillStyle = "#1e293b"
-  context.fillRect(390, 240, 120, 120)
-  context.fillStyle = "#ffffff"
-  context.font = "700 64px sans-serif"
-  context.textAlign = "center"
-  context.textBaseline = "middle"
-  context.fillText("SKU", 450, 660)
-  productImages.value = [canvas.toDataURL("image/png")]
 }
 
 // 第一步：根据商品资料生成图包方案，不直接生成图片。

@@ -136,7 +136,7 @@ export interface ProductMaterialFile {
 }
 
 // 素材特征类别，用于智能素材路由。
-export type MaterialFeatureCategory =
+type MaterialFeatureCategory =
   | "appearance"       // 外观：瓶型、颜色、包装、Logo、标签版式
   | "texture"          // 材质/质感
   | "ingredient"       // 成分/配方
@@ -159,12 +159,6 @@ export interface MaterialFeature {
   description: string;            // 完整描述，1-3句话
   sourceFile: string;             // 来源于哪个资料文件
   relevance: "main" | "detail" | "sku" | "all"; // 适合哪些图包类型
-}
-
-// 素材特征提取的完整结果。
-export interface MaterialFeatureExtraction {
-  features: MaterialFeature[];
-  summary: string;                // 一句话概括所有资料核心内容
 }
 
 // 每张图与特征的路由分配关系。
@@ -265,7 +259,7 @@ export interface PromptTaskStatus {
   featureAssignments?: PromptFeatureAssignment[];
 }
 
-export interface CreateDetailImageTaskOptions {
+interface CreateDetailImageTaskOptions {
   promptId: string;
   prompt?: string;
   size: ImageSize;
@@ -274,7 +268,7 @@ export interface CreateDetailImageTaskOptions {
   inputImageIds: string[];
 }
 
-export interface CreateMultiViewTaskOptions {
+interface CreateMultiViewTaskOptions {
   mode: "multi-view";
   angleId: MultiViewAngleId;
   size: ImageSize;
@@ -423,7 +417,7 @@ export interface EditHistoryItem {
   updatedAt: number;
 }
 
-export interface MultiViewHistoryResultItem {
+interface MultiViewHistoryResultItem {
   id: MultiViewAngleId;
   title: string;
   status: MultiViewHistoryStatus;

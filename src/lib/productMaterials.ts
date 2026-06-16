@@ -30,7 +30,7 @@ export const PRODUCT_MATERIAL_ACCEPT = [
 
 export const MAX_PRODUCT_MATERIAL_FILES = 10;
 export const MAX_PRODUCT_MATERIAL_BYTES = 25 * 1024 * 1024;
-export const MAX_PRODUCT_MATERIAL_MARKDOWN_CHARS = 60_000;
+const MAX_PRODUCT_MATERIAL_MARKDOWN_CHARS = 60_000;
 export const MAX_PRODUCT_MATERIAL_TOTAL_CHARS = 160_000;
 
 const MAX_TABLE_ROWS = 80;
@@ -94,10 +94,6 @@ export function getProductMaterialKind(file: File): ProductMaterialKind | null {
   if (extension === "json" || mimeType === "application/json") return "json";
   if (extension === "xml" || mimeType === "application/xml" || mimeType === "text/xml") return "xml";
   return null;
-}
-
-export function isProductMaterialDocument(file: File) {
-  return !!getProductMaterialKind(file);
 }
 
 function normalizeWhitespace(text: string) {

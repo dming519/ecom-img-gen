@@ -262,7 +262,7 @@ function requireHistoryDb(env: HistoryStorageEnv) {
   return env.HISTORY_DB;
 }
 
-export async function readStoredImageDataUrl(
+async function readStoredImageDataUrl(
   env: Required<HistoryStorageEnv>,
   userKey: string,
   id: string,
@@ -338,13 +338,7 @@ export async function readDetailPrompt(
   return row ?? null;
 }
 
-async function serializeDetailItem(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  item: HistoryItem,
-) {
-  void env;
-  void userKey;
+async function serializeDetailItem(item: HistoryItem) {
   const clean: HistoryItem = {
     ...item,
     product: {
@@ -361,56 +355,26 @@ async function serializeDetailItem(
   };
 }
 
-async function serializeCutoutItem(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  item: CutoutHistoryItem,
-) {
-  void env;
-  void userKey;
+async function serializeCutoutItem(item: CutoutHistoryItem) {
   return item;
 }
 
-async function serializeEditItem(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  item: EditHistoryItem,
-) {
-  void env;
-  void userKey;
+async function serializeEditItem(item: EditHistoryItem) {
   return item;
 }
 
-async function serializeMultiViewItem(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  item: MultiViewHistoryItem,
-) {
-  void env;
-  void userKey;
+async function serializeMultiViewItem(item: MultiViewHistoryItem) {
   return {
     ...item,
     sourceImageIds: item.sourceImageIds ?? [],
   };
 }
 
-async function serializeLayerItem(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  item: LayerHistoryItem,
-) {
-  void env;
-  void userKey;
+async function serializeLayerItem(item: LayerHistoryItem) {
   return item;
 }
 
-async function serializeCutoutDraft(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  draft: Omit<CutoutDraft, "id"> & { id?: "active" },
-) {
-  void env;
-  void userKey;
+async function serializeCutoutDraft(draft: Omit<CutoutDraft, "id"> & { id?: "active" }) {
   return {
     ...draft,
     id: "active" as const,
@@ -500,7 +464,7 @@ export async function saveDetailHistory(
 ) {
   await ensureHistorySchema(env.HISTORY_DB);
   const now = Date.now();
-  const payload = await serializeDetailItem(env, userKey, item);
+  const payload = await serializeDetailItem(item);
   let id = item.id;
   if (id == null) {
     id = await insertHistoryRecord(env.HISTORY_DB, userKey, "detail", payload, now);
@@ -551,7 +515,7 @@ export async function saveCutoutHistory(
 ) {
   await ensureHistorySchema(env.HISTORY_DB);
   const now = Date.now();
-  const payload = await serializeCutoutItem(env, userKey, item);
+  const payload = await serializeCutoutItem(item);
   let id = item.id;
   if (id == null) {
     id = await insertHistoryRecord(env.HISTORY_DB, userKey, "cutout", payload, now);
@@ -602,7 +566,7 @@ export async function saveEditHistory(
 ) {
   await ensureHistorySchema(env.HISTORY_DB);
   const now = Date.now();
-  const payload = await serializeEditItem(env, userKey, item);
+  const payload = await serializeEditItem(item);
   let id = item.id;
   if (id == null) {
     id = await insertHistoryRecord(env.HISTORY_DB, userKey, "edit", payload, now);
@@ -653,7 +617,7 @@ export async function saveMultiViewHistory(
 ) {
   await ensureHistorySchema(env.HISTORY_DB);
   const now = Date.now();
-  const payload = await serializeMultiViewItem(env, userKey, item);
+  const payload = await serializeMultiViewItem(item);
   let id = item.id;
   if (id == null) {
     id = await insertHistoryRecord(env.HISTORY_DB, userKey, "multi-view", payload, now);
@@ -704,7 +668,7 @@ export async function saveLayerHistory(
 ) {
   await ensureHistorySchema(env.HISTORY_DB);
   const now = Date.now();
-  const payload = await serializeLayerItem(env, userKey, item);
+  const payload = await serializeLayerItem(item);
   let id = item.id;
   if (id == null) {
     id = await insertHistoryRecord(env.HISTORY_DB, userKey, "layer", payload, now);
@@ -768,7 +732,7 @@ export async function saveCutoutDraft(
 ) {
   await ensureHistorySchema(env.HISTORY_DB);
   const now = Date.now();
-  const payload = await serializeCutoutDraft(env, userKey, draft);
+  const payload = await serializeCutoutDraft(draft);
   await env.HISTORY_DB.prepare(
     `INSERT INTO cutout_drafts (user_key, payload, updated_at)
      VALUES (?, ?, ?)
@@ -788,18 +752,6 @@ export async function deleteCutoutDraft(
   await env.HISTORY_DB.prepare(`DELETE FROM cutout_drafts WHERE user_key = ?`)
     .bind(userKey)
     .run();
-}
-
-export async function storeProductImage(
-  env: Required<HistoryStorageEnv>,
-  userKey: string,
-  dataUrl: string,
-) {
-  await ensureHistorySchema(env.HISTORY_DB);
-  if (!dataUrl.startsWith("data:image/")) {
-    throw new Error("图片数据必须是 data:image 格式");
-  }
-  return writeImage(env, userKey, dataUrl);
 }
 
 export async function storeProductImageFile(

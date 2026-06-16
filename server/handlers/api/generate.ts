@@ -4,6 +4,7 @@ import type {
   ImageSize,
   MultiViewAngleId,
 } from "../../../src/lib/types";
+import { resolveImageSize } from "../../../src/lib/imageOptions";
 import { requireSession } from "../_lib/auth";
 import {
   readDetailPrompt,
@@ -107,14 +108,6 @@ function normalizeSize(value: unknown): ImageSize | null {
   return typeof value === "string" && IMAGE_SIZES.includes(value as ImageSize)
     ? (value as ImageSize)
     : null;
-}
-
-// 用户没有显式传 size 时，根据比例推导模型需要的尺寸。
-function resolveImageSize(aspectRatio: AspectRatio): ImageSize {
-  if (aspectRatio === "auto") return "auto";
-  if (aspectRatio === "1:1") return "1024x1024";
-  if (aspectRatio === "4:3" || aspectRatio === "16:9") return "1536x1024";
-  return "1024x1536";
 }
 
 function normalizeImageIds(value: unknown) {

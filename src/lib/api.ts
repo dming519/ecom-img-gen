@@ -17,7 +17,6 @@ import type {
   LayerTaskStatus,
   PromptTaskStatus,
   RedeemCodeRow,
-  AuthUser,
   CreateEditTaskOptions,
   CreateLayerTaskOptions,
   UserRole,
@@ -733,17 +732,3 @@ export async function updateRedeemCode(
   return JSON.parse(text) as { redeemCode: RedeemCodeRow };
 }
 
-export async function redeemCredits(
-  code: string,
-): Promise<{ grantedCredits: number; user: AuthUser }> {
-  const response = await fetchWithRetry("/api/redeem-code", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${extractError(text)}`);
-  }
-  return JSON.parse(text) as { grantedCredits: number; user: AuthUser };
-}
