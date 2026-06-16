@@ -2677,7 +2677,7 @@ button:disabled {
 .gallery-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 990;
   background: rgba(15, 23, 42, 0.55);
   backdrop-filter: blur(4px);
   display: flex;
