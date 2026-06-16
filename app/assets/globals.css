@@ -2801,7 +2801,6 @@ button:disabled {
 
 .gallery-card-img {
   width: 100%;
-  min-height: 280px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2814,7 +2813,6 @@ button:disabled {
 
 .gallery-card-img img {
   width: 100%;
-  height: auto;
   display: block;
   transition: transform 0.2s;
 }
