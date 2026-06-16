@@ -1681,6 +1681,79 @@ button:disabled {
   line-height: 1.45;
 }
 
+/* ---------- 智能素材路由：特征面板 ---------- */
+.feature-routing-fold {
+  margin-top: 8px;
+}
+
+.feature-routing-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.feature-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  font-size: 0.73rem;
+  line-height: 1.35;
+  cursor: default;
+}
+
+.feature-category {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.feature-relevance {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 0.62rem;
+  font-weight: 500;
+}
+
+/* ---------- 智能素材路由：卡片特征引用 ---------- */
+.prompt-feature-refs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+}
+
+.prompt-feature-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.prompt-feature-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
 .collapse-enter-active,
 .collapse-leave-active {
   transition: opacity 0.14s var(--ease);

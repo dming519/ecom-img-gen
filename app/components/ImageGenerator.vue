@@ -34,9 +34,11 @@ import type {
   DetailPromptItem,
   HistoryItem,
   ImageQuality,
+  MaterialFeature,
   ProductMaterialFile,
   ProductMaterialKind,
   ProductInput,
+  PromptFeatureAssignment,
 } from "@/lib/types"
 import AdminPanel from "./AdminPanel.vue"
 import CutoutStudio from "./CutoutStudio.vue"
@@ -122,6 +124,9 @@ interface DraftState {
   styleReferenceImageIds?: string[]
   productMaterials?: ProductMaterialFile[]
   skuMaterials?: ProductMaterialFile[]
+  // 智能素材路由
+  materialFeatures?: MaterialFeature[]
+  featureAssignments?: PromptFeatureAssignment[]
 }
 
 // 自定义错误类型：用来区分“用户主动取消”和“真正生成失败”。
@@ -167,6 +172,10 @@ const materialBusy = shallowRef(false)
 const secondaryProductDetailsOpen = shallowRef(false)
 const draftLoaded = shallowRef(false)
 const adminOpen = shallowRef(false)
+// 智能素材路由状态
+const materialFeatures = shallowRef<MaterialFeature[]>([])
+const featureAssignments = shallowRef<PromptFeatureAssignment[]>([])
+const showFeatureRouting = ref(false)
 const error = shallowRef<string | null>(null)
 const lightboxSrc = shallowRef<string | null>(null)
 const avatarFailed = shallowRef(false)
@@ -299,6 +308,17 @@ const currentProduct = computed<ProductInput>(() => ({
 }))
 const productMaterialsMarkdown = computed(() => createProductMaterialsMarkdown(convertedProductMaterials.value))
 const skuMaterialsMarkdown = computed(() => createProductMaterialsMarkdown(convertedSkuMaterials.value))
+// 智能素材路由：根据 promptId 查找该图分配的特征列表
+function getPromptFeatureIds(promptId: string | undefined): MaterialFeature[] {
+  if (!promptId) return []
+  const assignment = featureAssignments.value.find(
+    (a) => a.promptId === promptId,
+  )
+  if (!assignment?.assignedFeatureIds.length) return []
+  return assignment.assignedFeatureIds
+    .map((fid) => materialFeatures.value.find((f) => f.id === fid))
+    .filter(Boolean) as MaterialFeature[]
+}
 const hasProductUploads = computed(() => productImages.value.length > 0 || productMaterials.value.length > 0)
 const productUploadStatusLabel = computed(() => {
   const imageText = productImages.value.length ? `${productImages.value.length} 张图片` : "未上传图片"
@@ -1137,10 +1157,18 @@ async function handleGeneratePrompts() {
     prompts.value = result.prompts.map((item, index) =>
         createPromptItem(index, item.title, item.promptId, item.prompt, item.imageMode),
     )
+    // 智能素材路由：存储特征数据
+    materialFeatures.value = result.materialFeatures ?? []
+    featureAssignments.value = result.featureAssignments ?? []
+    if (materialFeatures.value.length) {
+      showFeatureRouting.value = true
+    }
     setActivePromptIndex(0)
     resetColumnPromptCursors()
   } catch (event) {
     error.value = event instanceof Error ? event.message : String(event)
+    materialFeatures.value = []
+    featureAssignments.value = []
   } finally {
     promptBusy.value = false
   }
@@ -1531,6 +1559,19 @@ function handleSelectHistory(idx: number) {
         .catch((event) => console.warn("风格参考图恢复失败:", event))
   }
   prompts.value = item.prompts.map((prompt) => resetInterruptedPrompt(prompt))
+  // 智能素材路由：恢复特征数据
+  if (Array.isArray(item.materialFeatures) && item.materialFeatures.length) {
+    materialFeatures.value = item.materialFeatures
+    showFeatureRouting.value = true
+  } else {
+    materialFeatures.value = []
+    showFeatureRouting.value = false
+  }
+  if (Array.isArray(item.featureAssignments) && item.featureAssignments.length) {
+    featureAssignments.value = item.featureAssignments
+  } else {
+    featureAssignments.value = []
+  }
   if (item.generation?.quality && IMAGE_QUALITY_VALUES.includes(item.generation.quality)) {
     quality.value = item.generation.quality
   }
@@ -1698,6 +1739,8 @@ watch(
           styleReferenceImageIds: styleReferenceImageIds.value,
           productMaterials: convertedProductMaterials.value,
           skuMaterials: convertedSkuMaterials.value,
+          materialFeatures: materialFeatures.value.length ? materialFeatures.value : undefined,
+          featureAssignments: featureAssignments.value.length ? featureAssignments.value : undefined,
         }
         localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
       } catch {
@@ -1761,6 +1804,14 @@ onMounted(() => {
                 styleReferenceImages.value = images.slice(0, MAX_STYLE_REFERENCE_IMAGES)
               })
               .catch((event) => console.warn("风格参考图恢复失败:", event))
+        }
+        // 智能素材路由：恢复特征数据
+        if (Array.isArray(draft.materialFeatures) && draft.materialFeatures.length) {
+          materialFeatures.value = draft.materialFeatures
+          showFeatureRouting.value = true
+        }
+        if (Array.isArray(draft.featureAssignments) && draft.featureAssignments.length) {
+          featureAssignments.value = draft.featureAssignments
         }
       }
     } catch {
@@ -2147,6 +2198,25 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
                   <p v-else class="material-file-empty">上传 PDF、Word、Excel 等资料后会显示在这里。</p>
+                </details>
+                <!-- 智能素材路由：特征面板 -->
+                <details v-if="materialFeatures.length" class="material-file-fold feature-routing-fold" :open="showFeatureRouting">
+                  <summary class="material-file-summary">
+                    <span>素材特征路由</span>
+                    <span>{{ materialFeatures.length }} 个特征</span>
+                  </summary>
+                  <div class="feature-routing-list">
+                    <div
+                        v-for="feature in materialFeatures"
+                        :key="feature.id"
+                        class="feature-chip"
+                        :title="`${feature.description}\n来源：${feature.sourceFile}`"
+                    >
+                      <span class="feature-category">{{ feature.category }}</span>
+                      <strong>{{ feature.label }}</strong>
+                      <span class="feature-relevance">{{ feature.relevance }}</span>
+                    </div>
+                  </div>
                 </details>
                 <p class="field-help">支持图片、PDF、PPTX、DOCX、Excel、HTML、CSV、JSON、XML；非图片资料会先转换为 Markdown 后参与方案生成。</p>
                 <input
@@ -2535,6 +2605,17 @@ onBeforeUnmount(() => {
                       placeholder="当前方案没有返回 Prompt，请重新生成图包方案。"
                       @input="event => handlePromptChange(column.activeEntry!.item.id, (event.target as HTMLTextAreaElement).value)"
                   />
+
+                  <!-- 智能素材路由：当前图引用的特征 -->
+                  <div v-if="getPromptFeatureIds(column.activeEntry.item.promptId).length" class="prompt-feature-refs">
+                    <span class="prompt-feature-label">引用特征：</span>
+                    <span
+                        v-for="f in getPromptFeatureIds(column.activeEntry.item.promptId)"
+                        :key="f.id"
+                        class="prompt-feature-tag"
+                        :title="f.description"
+                    >{{ f.label }}</span>
+                  </div>
 
                   <button
                       v-if="getPromptImageSrc(column.activeEntry.item)"

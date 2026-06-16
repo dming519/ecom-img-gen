@@ -133,6 +133,47 @@ export interface ProductMaterialFile {
   markdown: string;
 }
 
+// 素材特征类别，用于智能素材路由。
+export type MaterialFeatureCategory =
+  | "appearance"       // 外观：瓶型、颜色、包装、Logo、标签版式
+  | "texture"          // 材质/质感
+  | "ingredient"       // 成分/配方
+  | "certification"    // 认证/资质/检测
+  | "dimension"        // 尺寸/规格/容量/重量
+  | "usage"            // 使用方法/步骤
+  | "scenario"         // 使用场景/人群
+  | "sku_spec"         // SKU区分维度（颜色/尺码/口味/版本）
+  | "evidence"         // 证明素材（评价/实验/对比）
+  | "offer"            // 活动/售后/服务承诺
+  | "production"       // 工艺/产地/供应链
+  | "comparison"       // 与竞品/旧款对比优势
+  | "other";           // 其他
+
+// 从上传资料中提取的结构化特征。
+export interface MaterialFeature {
+  id: string;                     // e.g., "f1"
+  category: MaterialFeatureCategory;
+  label: string;                  // 短标签，不超过12个汉字
+  description: string;            // 完整描述，1-3句话
+  sourceFile: string;             // 来源于哪个资料文件
+  relevance: "main" | "detail" | "sku" | "all"; // 适合哪些图包类型
+}
+
+// 素材特征提取的完整结果。
+export interface MaterialFeatureExtraction {
+  features: MaterialFeature[];
+  summary: string;                // 一句话概括所有资料核心内容
+}
+
+// 每张图与特征的路由分配关系。
+export interface PromptFeatureAssignment {
+  promptIndex: number;            // 第几张图（0-based）
+  promptId: string;               // prompt 的 ID
+  imageMode: DetailImageMode;
+  title: string;
+  assignedFeatureIds: string[];   // 分配给该图使用的特征 ID 列表
+}
+
 // 单张商品图在前端生命周期里的状态。
 type DetailImageStatus =
   | "draft"
@@ -168,6 +209,9 @@ export interface HistoryItem {
     quality?: ImageQuality;
     size?: ImageSize;
   };
+  // 智能素材路由结果（可选，随历史记录保存）
+  materialFeatures?: MaterialFeature[];
+  featureAssignments?: PromptFeatureAssignment[];
 }
 
 // 生成图包方案时，前端提交给 `/api/prompt` 的参数。
@@ -199,6 +243,9 @@ export interface GeneratePromptResult {
     index: number;
   }>;
   model: string;
+  // 智能素材路由结果
+  materialFeatures?: MaterialFeature[];
+  featureAssignments?: PromptFeatureAssignment[];
 }
 
 // 文案任务状态。任务是异步的，所以会经历 pending/running/succeeded/failed。
@@ -209,6 +256,10 @@ export interface PromptTaskStatus {
   error?: string;
   createdAt?: number;
   updatedAt?: number;
+  // 智能素材路由：特征提取阶段
+  phase?: "extracting_features";
+  materialFeatures?: MaterialFeature[];
+  featureAssignments?: PromptFeatureAssignment[];
 }
 
 export interface CreateDetailImageTaskOptions {

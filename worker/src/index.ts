@@ -102,6 +102,13 @@ interface PromptRequestBody {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  // 智能素材路由：独立传递的结构化字段（避免从 userText 正则解析）
+  productName?: string;
+  sellingPoints?: string;
+  skuInfo?: string;
+  productMaterialsMarkdown?: string;
+  skuMaterialsMarkdown?: string;
+  extractionTemplate?: string;
 }
 
 function resolveDetailImageCount(mode: DetailImageMode) {
@@ -612,6 +619,69 @@ function createPromptBatchUserText(
   ].join("\n");
 }
 
+// 素材特征提取的 userText。
+function createFeatureExtractionUserText(
+  productName: string,
+  sellingPoints: string,
+  productMaterialsMarkdown: string,
+  skuMaterialsMarkdown: string,
+  skuInfo: string,
+) {
+  const parts = [
+    "请从以下商品资料中提取结构化特征，用于后续按图分配。",
+    "如果上传资料不足（总计不足 500 字或缺失关键信息），请主动进行联网研究，从产品官网、电商平台商品页、公开测评等可信来源补充商品信息。",
+    "",
+    `商品名称：${productName || "未填写"}`,
+    `核心卖点：${sellingPoints || "未填写"}`,
+    skuInfo ? `SKU信息：${skuInfo}` : "",
+    "",
+    "=== 上传商品资料 Markdown ===",
+    productMaterialsMarkdown || "（未上传商品资料 — 请联网研究补充）",
+    "",
+    "=== 上传SKU资料 Markdown ===",
+    skuMaterialsMarkdown || "（未上传SKU资料）",
+    "",
+    "只返回 JSON 格式的特征列表。如果使用了联网研究，webResearchUsed 设为 true。",
+  ];
+  return parts.filter(Boolean).join("\n");
+}
+
+// 注入特征路由段到批次 userText。
+function createRoutedPromptBatchUserText(
+  userText: string,
+  mode: DetailImageMode,
+  features: Array<{ id: string; label: string; description: string; category: string }>,
+  imageCount?: number,
+  offset = 0,
+  total?: number,
+) {
+  const baseText = createPromptBatchUserText(userText, mode, imageCount, offset, total);
+
+  if (!features.length) return baseText;
+
+  const modeFeatures = features.map(
+    (f) => `- [${f.id}] (${f.category}) ${f.label}: ${f.description}`,
+  );
+
+  return [
+    baseText,
+    "",
+    "【素材特征路由 -- 本批次可用特征】",
+    "以下特征是从上传资料和联网研究中提取的，已按图包类型筛选。",
+    "每张图必须选择 2-4 个最相关的特征在 prompt 中自然表达，不要在一张图里塞入所有特征。",
+    "选择特征时优先匹配每张图的 Frame Objective（成交任务）。",
+    "",
+    ...modeFeatures,
+    "",
+    "特征路由规则：",
+    "- 每张图使用 2-4 个特征，不要更多。",
+    "- 同一特征不要在所有图中重复出现（relevance 标记为 all 的除外）。",
+    "- 在每张图的 prompt 中自然融入特征内容，不要生硬地写“使用特征 f3”。",
+    "- 未被任何图使用的特征不算错误（可能不适合本图包类型）。",
+    "- 不要编造特征列表中不存在的特征。",
+  ].join("\n");
+}
+
 function extractContentFromSse(text: string) {
   let content = "";
   for (const line of text.split(/\r?\n/)) {
@@ -706,6 +776,31 @@ function createPromptRequest(
   });
 }
 
+// 素材特征提取的 LLM 请求（纯文本，无图片，低温度提高结构化输出质量）。
+function createFeatureExtractionRequest(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  systemTemplate: string,
+  userText: string,
+) {
+  return fetch(resolveOpenAiEndpoint(baseUrl, "/chat/completions"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.3,
+      messages: [
+        { role: "system", content: systemTemplate },
+        { role: "user", content: userText },
+      ],
+    }),
+  });
+}
+
 async function createPromptRequestWithRetry(
   baseUrl: string,
   apiKey: string,
@@ -766,6 +861,105 @@ async function createPromptRequestWithRetry(
   throw new Error("文本识别请求重试失败");
 }
 
+// 从上传资料中提取结构化特征。失败时返回 null，不阻断主流程。
+async function extractMaterialFeatures(options: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  extractionTemplate: string;
+  productName: string;
+  sellingPoints: string;
+  productMaterialsMarkdown: string;
+  skuMaterialsMarkdown: string;
+  skuInfo: string;
+  shouldStop: () => Promise<boolean>;
+}): Promise<{
+  features: Array<{ id: string; category: string; label: string; description: string; sourceFile: string; relevance: string }>;
+  summary: string;
+  webResearchUsed?: boolean;
+} | null> {
+  const { productMaterialsMarkdown, skuMaterialsMarkdown, extractionTemplate } = options;
+
+  // 没有资料且没有联网研究模板时跳过
+  const hasMaterials = productMaterialsMarkdown.trim() || skuMaterialsMarkdown.trim();
+  if (!hasMaterials && !extractionTemplate) return null;
+
+  const userText = createFeatureExtractionUserText(
+    options.productName,
+    options.sellingPoints,
+    productMaterialsMarkdown,
+    skuMaterialsMarkdown,
+    options.skuInfo,
+  );
+
+  try {
+    const response = await createFeatureExtractionRequest(
+      options.baseUrl,
+      options.apiKey,
+      options.model,
+      extractionTemplate,
+      userText,
+    );
+
+    if (await options.shouldStop()) return null;
+
+    const text = await response.text();
+
+    if (!response.ok) {
+      console.error(`Feature extraction failed: HTTP ${response.status}: ${summarizeRawText(text)}`);
+      return null;
+    }
+
+    const content = extractChatContent(text);
+    if (!content) {
+      console.error("Feature extraction returned empty content");
+      return null;
+    }
+
+    const parsed = parsePromptJson(content) as {
+      features?: Array<{ id: string; category: string; label: string; description: string; sourceFile: string; relevance: string }>;
+      summary?: string;
+      webResearchUsed?: boolean;
+    };
+    const features = (parsed.features ?? []).filter(
+      (f) => f.id && f.label && f.description && f.category && f.relevance,
+    );
+    if (!features.length) {
+      console.error("Feature extraction returned no valid features");
+      return null;
+    }
+    return {
+      features,
+      summary: parsed.summary ?? "",
+      webResearchUsed: parsed.webResearchUsed ?? false,
+    };
+  } catch (error) {
+    console.error(
+      `Feature extraction error: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
+}
+
+// 从生成的 prompts 中反推每张图引用了哪些特征。
+function buildFeatureAssignments(
+  prompts: Array<{ promptId: string; imageMode: string; title: string; prompt: string }>,
+  features: Array<{ id: string; label: string }>,
+): Array<{ promptIndex: number; promptId: string; imageMode: string; title: string; assignedFeatureIds: string[] }> {
+  return prompts.map((prompt, index) => {
+    const mentionedIds = features
+      .filter((f) => prompt.prompt.includes(f.id) || prompt.prompt.includes(f.label))
+      .map((f) => f.id);
+    return {
+      promptIndex: index,
+      promptId: prompt.promptId,
+      imageMode: prompt.imageMode,
+      title: prompt.title,
+      assignedFeatureIds: mentionedIds.length ? mentionedIds : [],
+    };
+  });
+}
+
 async function requestPromptBatch(options: {
   baseUrl: string;
   apiKey: string;
@@ -778,17 +972,25 @@ async function requestPromptBatch(options: {
   offset?: number;
   total?: number;
   shouldStop: () => Promise<boolean>;
+  // 智能素材路由：从资料中提取的结构化特征
+  features?: Array<{ id: string; label: string; description: string; category: string; relevance: string }> | null;
 }) {
   const dynamicSku = options.mode === "sku" && !Number.isFinite(options.count);
   const imageCount = dynamicSku ? undefined : options.count ?? resolveDetailImageCount(options.mode);
   const offset = options.offset ?? 0;
   const total = dynamicSku ? undefined : options.total ?? resolveDetailImageCount(options.mode);
+
+  // 按 mode 过滤相关特征
+  const modeFeatures = (options.features ?? [])
+    .filter((f) => f.relevance === "all" || f.relevance === options.mode)
+    .map(({ id, label, description, category }) => ({ id, label, description, category }));
+
   const upstream = await createPromptRequestWithRetry(
     options.baseUrl,
     options.apiKey,
     options.model,
     options.systemTemplate,
-    createPromptBatchUserText(options.userText, options.mode, imageCount, offset, total),
+    createRoutedPromptBatchUserText(options.userText, options.mode, modeFeatures, imageCount, offset, total),
     options.productImages,
     options.shouldStop,
   );
@@ -1930,10 +2132,54 @@ export class PromptTasksDO {
     const model = body.model?.trim() || llmConfig.model;
     const userText = body.userText?.trim() ?? "";
     const systemTemplate = body.systemTemplate?.trim() ?? "";
+    const extractionTemplate = body.extractionTemplate?.trim() ?? "";
     const imageModes = normalizeDetailImageModes(body.imageModes);
     const imageCount = resolveDetailImageModesCount(imageModes);
     const productImages = (body.productImages ?? []).filter(Boolean).slice(0, 8);
 
+    if (await isImageTaskCanceled(this.env, taskKey)) return;
+
+    // ===== Phase 1: 素材特征提取 =====
+    let extraction: {
+      features: Array<{ id: string; category: string; label: string; description: string; sourceFile: string; relevance: string }>;
+      summary: string;
+      webResearchUsed?: boolean;
+    } | null = null;
+
+    const hasMaterials = (body.productMaterialsMarkdown?.trim() || body.skuMaterialsMarkdown?.trim());
+    if (hasMaterials || extractionTemplate) {
+      // 通知前端进入特征提取阶段
+      await this.env.TASKS_KV.put(
+        taskKey,
+        JSON.stringify({
+          status: "running",
+          userKey,
+          imageModes,
+          imageCount,
+          createdAt,
+          updatedAt: Date.now(),
+          phase: "extracting_features",
+        }),
+        { expirationTtl: 3600 },
+      );
+
+      if (await isImageTaskCanceled(this.env, taskKey)) return;
+
+      extraction = await extractMaterialFeatures({
+        baseUrl: baseUrl || "",
+        apiKey: apiKey || "",
+        model: model || "",
+        extractionTemplate,
+        productName: body.productName ?? "",
+        sellingPoints: body.sellingPoints ?? "",
+        productMaterialsMarkdown: body.productMaterialsMarkdown ?? "",
+        skuMaterialsMarkdown: body.skuMaterialsMarkdown ?? "",
+        skuInfo: body.skuInfo ?? "",
+        shouldStop: () => isImageTaskCanceled(this.env, taskKey),
+      });
+    }
+
+    // ===== 更新 KV 为 running 状态 =====
     if (await isImageTaskCanceled(this.env, taskKey)) return;
     await this.env.TASKS_KV.put(
       taskKey,
@@ -1943,11 +2189,13 @@ export class PromptTasksDO {
         imageModes,
         imageCount,
         createdAt,
-        updatedAt: createdAt,
+        updatedAt: Date.now(),
+        materialFeatures: extraction?.features ?? undefined,
       }),
       { expirationTtl: 3600 },
     );
 
+    // ===== Phase 2: 基于特征的 Prompt 生成 =====
     try {
       if (!apiKey || !baseUrl || !model) {
         throw new Error("服务端未配置图包方案生成接口");
@@ -1994,6 +2242,7 @@ export class PromptTasksDO {
               offset: batch.offset,
               total: batch.total,
               shouldStop: () => isImageTaskCanceled(this.env, taskKey),
+              features: extraction?.features ?? null,
             }),
           ),
         )
@@ -2021,6 +2270,11 @@ export class PromptTasksDO {
         }
       }
 
+      // 构建特征分配映射
+      const featureAssignments = extraction?.features
+        ? buildFeatureAssignments(prompts, extraction.features)
+        : undefined;
+
       if (await isImageTaskCanceled(this.env, taskKey)) return;
       await this.env.TASKS_KV.put(
         taskKey,
@@ -2032,6 +2286,8 @@ export class PromptTasksDO {
           imageCount: prompts.length,
           createdAt,
           updatedAt: Date.now(),
+          materialFeatures: extraction?.features ?? undefined,
+          featureAssignments,
         }),
         { expirationTtl: 3600 },
       );

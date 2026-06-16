@@ -139,6 +139,8 @@ export async function generateDetailPrompts(
   return {
     prompts: task.prompts,
     model: task.model ?? "",
+    materialFeatures: task.materialFeatures,
+    featureAssignments: task.featureAssignments,
   };
 }
 

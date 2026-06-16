@@ -1,4 +1,4 @@
-import { DETAIL_PROMPT_TEMPLATE } from "../../../src/lib/promptTemplate";
+import { DETAIL_PROMPT_TEMPLATE, MATERIAL_FEATURE_EXTRACTION_TEMPLATE } from "../../../src/lib/promptTemplate";
 import { requireSession } from "../_lib/auth";
 import {
   readProductImageDataUrls,
@@ -371,9 +371,16 @@ export async function handlePost(context: RequestContext) {
         productImages: allPromptImages,
         userText,
         systemTemplate: DETAIL_PROMPT_TEMPLATE,
+        extractionTemplate: MATERIAL_FEATURE_EXTRACTION_TEMPLATE,
         apiKey,
         baseUrl,
         model,
+        // 智能素材路由：独立传递结构化字段，避免 Worker 正则解析
+        productName: name,
+        sellingPoints,
+        skuInfo: skuInfo || "",
+        productMaterialsMarkdown: productMaterialsMarkdown || "",
+        skuMaterialsMarkdown: skuMaterialsMarkdown || "",
       }),
     });
     if (!response.ok) {
