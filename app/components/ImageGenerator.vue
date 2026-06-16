@@ -1059,6 +1059,9 @@ function handleResetProductInput() {
   skuMaterials.value = []
   quality.value = "1K"
   prompts.value = []
+  materialFeatures.value = []
+  featureAssignments.value = []
+  showFeatureRouting.value = false
   setActivePromptIndex(0)
   resetColumnPromptCursors([])
   activeHistoryIdx.value = -1
