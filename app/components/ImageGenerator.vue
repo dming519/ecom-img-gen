@@ -1725,7 +1725,7 @@ async function handleDownloadAll() {
   const images = allGeneratedImages.value
   if (!images.length) return
   if (images.length === 1) {
-    handleDownload(prompts.value.indexOf(images[0]))
+    handleDownload(prompts.value.indexOf(images[0]!))
     return
   }
   const JSZip = (await import("jszip")).default
