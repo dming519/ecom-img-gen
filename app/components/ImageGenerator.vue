@@ -2454,7 +2454,7 @@ onBeforeUnmount(() => {
                     <span>上传</span>
                   </button>
                 </div>
-                <p class="field-help">模特参考图用于固定出图中人物模特的容貌、发型和形象气质。生成时会将模特面部特征融入画面，最多 2 张。</p>
+                <p class="field-help">模特参考图用于固定出图中人物模特的容貌和形象气质，最多 2 张。</p>
                 <input
                     id="model-reference-images"
                     ref="modelFileInputRef"
