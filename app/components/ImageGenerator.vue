@@ -2950,11 +2950,8 @@ onBeforeUnmount(() => {
                   @click="lightboxSrc = image.src"
               >
                 <img :src="image.src" :alt="image.title" loading="lazy">
-              </button>
-              <div class="gallery-card-info">
                 <span :class="['gallery-card-mode', `is-${image.imageMode}`]">{{ image.modeLabel }}</span>
-                <span class="gallery-card-title">{{ image.title }}</span>
-              </div>
+              </button>
             </div>
           </div>
         </div>
